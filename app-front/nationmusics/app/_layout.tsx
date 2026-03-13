@@ -1,24 +1,28 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { useEffect } from 'react';
+import TrackPlayer from 'react-native-track-player';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { setupPlayer } from '../services/playerSetup';
+import { PlaybackService } from '../services/playbackService';
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+TrackPlayer.registerPlaybackService(() => PlaybackService);
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
+  
+  useEffect(() => {
+    async function ligarMotor() {
+      const pronto = await setupPlayer();
+      if (pronto) {
+        console.log("Motor de áudio nativo ligado com sucesso!");
+      }
+    }
+    ligarMotor();
+  }, []);
 
   return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
+    <Stack>
+      {}
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+    </Stack>
   );
 }

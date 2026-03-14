@@ -123,7 +123,11 @@ Thumbs.db
 # Generated downloads
 
 # =========================
+/android
+/ios
 
 downloads/
 *.mp3
 *.m4a
+
+

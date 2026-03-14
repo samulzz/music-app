@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { StyleSheet, Text, View, FlatList, TouchableOpacity } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Audio } from 'expo-av';
+import { useFocusEffect } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function ExploreScreen() {
   const [musicas, setMusicas] = useState<any[]>([]);
@@ -18,6 +20,12 @@ export default function ExploreScreen() {
   useEffect(() => { musicasRef.current = musicas; }, [musicas]);
   useEffect(() => { indiceAtualRef.current = indiceAtual; }, [indiceAtual]);
   useEffect(() => { aleatorioRef.current = aleatorio; }, [aleatorio]);
+  
+  useFocusEffect(
+    useCallback(() => {
+      carregarMusicas();
+    }, [])
+  );
 
   const configurarAudio = async () => {
     try {
@@ -69,8 +77,6 @@ export default function ExploreScreen() {
     setIndiceAtual(index);
     setTocando(true);
 
-    console.log(`Tocando agora [${index + 1}/${lista.length}]: ${musica.nome}`);
-
     const { sound: novoSound } = await Audio.Sound.createAsync(
       { uri: musica.uri },
       { shouldPlay: true },
@@ -82,7 +88,6 @@ export default function ExploreScreen() {
 
   const onPlaybackStatusUpdate = (status: any) => {
     if (status.didJustFinish) {
-      console.log("Música acabou! Puxando a próxima...");
       avancarMusica();
     }
   };
@@ -139,35 +144,43 @@ export default function ExploreScreen() {
       <TouchableOpacity 
         style={[styles.card, isTocandoAgora && styles.cardAtivo]} 
         onPress={() => tocarIndice(index)}
+        activeOpacity={0.7}
       >
-        <View style={styles.iconeMusica}>
-          <Text style={styles.iconeTexto}>{isTocandoAgora ? '🔊' : '🎵'}</Text>
+        <View style={[styles.iconeMusica, isTocandoAgora && styles.iconeMusicaAtivo]}>
+          <Ionicons 
+            name={isTocandoAgora ? "musical-notes" : "musical-note"} 
+            size={20} 
+            color={isTocandoAgora ? "#1db954" : "#b3b3b3"} 
+          />
         </View>
-        <Text style={[styles.nomeMusica, isTocandoAgora && styles.textoAtivo]} numberOfLines={1}>
-          {item.nome}
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.nomeMusica, isTocandoAgora && styles.textoAtivo]} numberOfLines={1}>
+            {item.nome}
+          </Text>
+        </View>
+        {isTocandoAgora && <Ionicons name="volume-medium" size={20} color="#1db954" style={{ marginLeft: 10 }} />}
       </TouchableOpacity>
     );
   };
 
   return (
     <View style={styles.container}>
-      <Text style={styles.titulo}>Músicas Baixadas 💾</Text>
-      
-      <TouchableOpacity style={styles.botaoAtualizar} onPress={carregarMusicas}>
-        <Text style={styles.textoBotaoAtualizar}>🔄 Atualizar Lista</Text>
-      </TouchableOpacity>
+      <Text style={styles.titulo}>Sua Biblioteca</Text>
 
       <FlatList
         data={musicas}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         ListEmptyComponent={
-          <Text style={styles.textoVazio}>Sua biblioteca está vazia.</Text>
+          <View style={styles.vazioContainer}>
+            <Ionicons name="folder-open-outline" size={48} color="#444" />
+            <Text style={styles.textoVazio}>Nenhuma música baixada.</Text>
+          </View>
         }
         contentContainerStyle={{ paddingBottom: 130 }} 
       />
 
+      {}
       {indiceAtual !== null && musicas[indiceAtual] && (
         <View style={styles.playerContainer}>
           <Text style={styles.playerTexto} numberOfLines={1}>
@@ -176,19 +189,24 @@ export default function ExploreScreen() {
           
           <View style={styles.controles}>
             <TouchableOpacity onPress={() => setAleatorio(!aleatorio)} style={styles.botaoControle}>
-              <Text style={{ fontSize: 20, opacity: aleatorio ? 1 : 0.3 }}>🔀</Text>
+              <Ionicons name="shuffle" size={24} color={aleatorio ? "#1db954" : "#666"} />
             </TouchableOpacity>
 
             <TouchableOpacity onPress={voltarMusica} style={styles.botaoControle}>
-              <Text style={styles.iconeControle}>⏮️</Text>
+              <Ionicons name="play-skip-back" size={28} color="#fff" />
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.botaoPlayPause} onPress={pausarOuRetomar}>
-              <Text style={styles.textoPlayPause}>{tocando ? '⏸' : '▶️'}</Text>
+              <Ionicons 
+                name={tocando ? "pause" : "play"} 
+                size={28} 
+                color="#121212" 
+                style={{ marginLeft: tocando ? 0 : 4 }}
+              />
             </TouchableOpacity>
 
             <TouchableOpacity onPress={avancarMusica} style={styles.botaoControle}>
-              <Text style={styles.iconeControle}>⏭️</Text>
+              <Ionicons name="play-skip-forward" size={28} color="#fff" />
             </TouchableOpacity>
           </View>
         </View>
@@ -198,47 +216,35 @@ export default function ExploreScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingTop: 60, paddingHorizontal: 20, backgroundColor: '#121212' },
-  titulo: { fontSize: 28, fontWeight: 'bold', color: '#1db954', marginBottom: 15, textAlign: 'center' },
-  botaoAtualizar: { backgroundColor: '#282828', padding: 10, borderRadius: 8, alignItems: 'center', marginBottom: 20 },
-  textoBotaoAtualizar: { color: '#fff', fontSize: 14 },
-  textoVazio: { color: '#888', textAlign: 'center', marginTop: 50, fontSize: 16 },
+  container: { flex: 1, paddingTop: 60, paddingHorizontal: 16, backgroundColor: '#121212' },
+  titulo: { fontSize: 32, fontWeight: 'bold', color: '#fff', marginBottom: 20 },
+  vazioContainer: { alignItems: 'center', marginTop: 60 },
+  textoVazio: { color: '#b3b3b3', marginTop: 15, fontSize: 16 },
   
-  card: { flexDirection: 'row', backgroundColor: '#1e1e1e', borderRadius: 8, padding: 15, marginBottom: 10, alignItems: 'center' },
-  cardAtivo: { borderColor: '#1db954', borderWidth: 1, backgroundColor: '#183321' },
-  
-  iconeMusica: { backgroundColor: '#333', width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginRight: 15 },
-  iconeTexto: { fontSize: 18 },
-  nomeMusica: { color: '#fff', fontSize: 16, flex: 1 },
+  card: { flexDirection: 'row', backgroundColor: '#121212', borderRadius: 8, paddingVertical: 12, marginBottom: 5, alignItems: 'center' },
+  cardAtivo: { backgroundColor: '#2a2a2a', paddingHorizontal: 10, borderRadius: 10 },
+  iconeMusica: { backgroundColor: '#282828', width: 45, height: 45, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginRight: 15 },
+  iconeMusicaAtivo: { backgroundColor: '#1db95420' },
+  nomeMusica: { color: '#fff', fontSize: 16, fontWeight: '500' },
   textoAtivo: { color: '#1db954', fontWeight: 'bold' },
   
   playerContainer: {
     position: 'absolute',
-    bottom: 0, 
-    left: 0,
-    right: 0,
-    backgroundColor: '#1a1a1a',
-    borderTopWidth: 1,
-    borderTopColor: '#333',
+    bottom: 20, 
+    left: 10,
+    right: 10,
+    backgroundColor: '#282828',
+    borderRadius: 12,
     padding: 15,
-    paddingBottom: 25,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
     alignItems: 'center',
-    elevation: 10, // Sombra no Android
+    elevation: 8,
+    shadowColor: '#000', 
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
-  playerTexto: { color: '#1db954', fontSize: 16, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', width: '100%' },
-  
-  controles: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-    paddingHorizontal: 20,
-  },
+  playerTexto: { color: '#fff', fontSize: 15, fontWeight: 'bold', marginBottom: 15, textAlign: 'center', width: '100%' },
+  controles: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-evenly', width: '100%' },
   botaoControle: { padding: 10 },
-  iconeControle: { fontSize: 24, color: '#fff' },
-  
-  botaoPlayPause: { backgroundColor: '#1db954', width: 60, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center' },
-  textoPlayPause: { color: '#fff', fontSize: 24, lineHeight: 26, marginLeft: 4 } // margin left alinha visualmente o icone de play
+  botaoPlayPause: { backgroundColor: '#fff', width: 50, height: 50, borderRadius: 25, alignItems: 'center', justifyContent: 'center' },
 });

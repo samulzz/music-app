@@ -1,4 +1,4 @@
-package me.samulsz.musicapi;
+package me.samulsz.musicapi.controllers;
 
 import me.samulsz.musicapi.services.MusicService;
 import org.springframework.core.io.FileSystemResource;

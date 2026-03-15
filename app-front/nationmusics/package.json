@@ -1,14 +1,15 @@
 {
   "name": "nationmusics",
-  "main": "expo-router/entry",
+  "main": "AppEntry.js",
   "version": "1.0.0",
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "postinstall": "node ./scripts/fix-track-player.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",
@@ -17,7 +18,6 @@
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
     "expo": "~54.0.33",
-    "expo-av": "~16.0.8",
     "expo-constants": "~18.0.13",
     "expo-file-system": "~19.0.21",
     "expo-font": "~14.0.11",
@@ -37,6 +37,7 @@
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
+    "react-native-track-player": "4.1.1",
     "react-native-web": "~0.21.0",
     "react-native-worklets": "0.5.1"
   },
@@ -46,5 +47,14 @@
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "doctor": {
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "react-native-track-player"
+        ]
+      }
+    }
+  }
 }

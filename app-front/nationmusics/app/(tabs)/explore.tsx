@@ -4,64 +4,147 @@ import {
   Alert, ActivityIndicator, SafeAreaView, Platform, StatusBar,
 } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Audio } from 'expo-av';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import TrackPlayer, {
+  Event,
+  useActiveTrack,
+  useIsPlaying,
+  useProgress,
+  useTrackPlayerEvents,
+} from 'react-native-track-player';
+
+import {
+  playSongAtIndex,
+  setupPlayer,
+  skipToRelative,
+  stopPlayer,
+  type PlayerSong,
+} from '../../services/playerSetup';
 
 const BASE_URL = 'https://pseudoprincely-plumular-nikolas.ngrok-free.dev/api';
 const API_KEY = 'NationMusics_SecretAppKey_2026';
 const NGROK_BYPASS = 'true';
 
-type Song = {
-  id: string;
-  nome: string;
-  artista: string;
-  capa: string;
-  isLocal: boolean;
-  uriLocal: string;
-  sourceId?: string;
-};
+type Song = PlayerSong;
+
+function formatTime(value: number) {
+  if (!Number.isFinite(value) || value < 0) return '0:00';
+  const totalSeconds = Math.floor(value);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
 
 export default function LibraryScreen() {
   const [songs, setSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState(false);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [username, setUsername] = useState('');
-
-  // Player state
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
-  const [currentIndex, setCurrentIndex] = useState<number | null>(null);
-  const [playing, setPlaying] = useState(false);
   const [shuffle, setShuffle] = useState(false);
+  const [activeQueueIndex, setActiveQueueIndex] = useState<number | null>(null);
+  const [optimisticSongId, setOptimisticSongId] = useState<string | null>(null);
+  const [playWhenReady, setPlayWhenReady] = useState<boolean | null>(null);
 
   const songsRef = useRef(songs);
-  const currentIndexRef = useRef(currentIndex);
   const shuffleRef = useRef(shuffle);
 
   const router = useRouter();
+  const playbackStatus = useIsPlaying();
+  const activeTrack = useActiveTrack();
+  const progress = useProgress(800);
+
+  const localQueue = songs.filter((song) => song.isLocal && song.uriLocal);
+  const trackSongId = activeTrack?.id != null ? String(activeTrack.id) : null;
+  const indexedSongId = activeQueueIndex != null && activeQueueIndex >= 0
+    ? localQueue[activeQueueIndex]?.id ?? null
+    : null;
+  const activeSongId = trackSongId ?? indexedSongId ?? optimisticSongId;
+  const currentIndex = activeSongId ? songs.findIndex((song) => song.id === activeSongId) : -1;
+  const currentSong = currentIndex >= 0
+    ? songs[currentIndex]
+    : activeTrack
+      ? {
+          id: activeSongId ?? 'active-track',
+          nome: activeTrack.title ?? 'Reproduzindo',
+          artista: activeTrack.artist ?? '',
+          capa: typeof activeTrack.artwork === 'string' ? activeTrack.artwork : '',
+          isLocal: true,
+          uriLocal: typeof activeTrack.url === 'string' ? activeTrack.url : '',
+          sourceId: typeof activeTrack.sourceId === 'string' ? activeTrack.sourceId : undefined,
+        }
+      : null;
+  const isPlaying = playbackStatus.playing ?? false;
+  const progressRatio = progress.duration > 0
+    ? Math.min(progress.position / progress.duration, 1)
+    : 0;
+  const shouldShowPause = playWhenReady ?? isPlaying;
+
+  const syncActiveFromPlayer = useCallback(async () => {
+    try {
+      const [index, track] = await Promise.all([
+        TrackPlayer.getActiveTrackIndex(),
+        TrackPlayer.getActiveTrack(),
+      ]);
+
+      setActiveQueueIndex(index ?? null);
+
+      if (track?.id != null) {
+        setOptimisticSongId(String(track.id));
+        return;
+      }
+
+      if (index == null) {
+        setOptimisticSongId(null);
+      }
+    } catch {}
+  }, []);
 
   useEffect(() => { songsRef.current = songs; }, [songs]);
-  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
   useEffect(() => { shuffleRef.current = shuffle; }, [shuffle]);
+  useEffect(() => {
+    TrackPlayer.getPlayWhenReady()
+      .then((value) => setPlayWhenReady(value))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
-    Audio.setAudioModeAsync({
-      staysActiveInBackground: true,
-      playsInSilentModeIOS: true,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false,
-    }).catch(() => {});
+    syncActiveFromPlayer().catch(() => {});
+  }, [syncActiveFromPlayer]);
+
+  useTrackPlayerEvents([
+    Event.PlaybackActiveTrackChanged,
+    Event.PlaybackPlayWhenReadyChanged,
+    Event.PlaybackState,
+  ], (event) => {
+    if (event.type === Event.PlaybackPlayWhenReadyChanged) {
+      setPlayWhenReady(event.playWhenReady);
+    }
+
+    const nextIndex = typeof event.index === 'number' ? event.index : null;
+    if (nextIndex != null) {
+      setActiveQueueIndex(nextIndex);
+    }
+
+    if (event.track?.id != null) {
+      setOptimisticSongId(String(event.track.id));
+    }
+
+    syncActiveFromPlayer().catch(() => {});
+  });
+
+  useEffect(() => {
+    if (trackSongId || indexedSongId || !isPlaying) {
+      setOptimisticSongId(null);
+    }
+  }, [trackSongId, indexedSongId, isPlaying]);
+
+  useEffect(() => {
     AsyncStorage.getItem('username').then((u) => { if (u) setUsername(u); });
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      syncLibrary();
-    }, [])
-  );
-
-  const getAuthHeaders = async () => {
+  const getAuthHeaders = useCallback(async () => {
     const rawToken = (await AsyncStorage.getItem('userToken'))?.trim() ?? '';
     if (!rawToken) throw new Error('Sessao expirada. Faca login novamente.');
     const normalizedToken = rawToken.startsWith('Bearer ')
@@ -74,9 +157,9 @@ export default function LibraryScreen() {
       'ngrok-skip-browser-warning': NGROK_BYPASS,
       'Accept': 'application/json',
     };
-  };
+  }, []);
 
-  const syncLibrary = async () => {
+  const syncLibrary = useCallback(async () => {
     setLoading(true);
     try {
       const headers = await getAuthHeaders();
@@ -117,7 +200,13 @@ export default function LibraryScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [getAuthHeaders]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void syncLibrary();
+    }, [syncLibrary])
+  );
 
   const removeFromLibrary = async (song: Song) => {
     Alert.alert(
@@ -148,20 +237,6 @@ export default function LibraryScreen() {
         },
       ]
     );
-  };
-
-  const startPlayback = async (index: number, uri: string) => {
-    if (sound) await sound.unloadAsync();
-
-    setCurrentIndex(index);
-    setPlaying(true);
-
-    const { sound: newSound } = await Audio.Sound.createAsync(
-      { uri },
-      { shouldPlay: true },
-      (status) => { if (status.isLoaded && status.didJustFinish) nextSong(); }
-    );
-    setSound(newSound);
   };
 
   const resolveSourceId = async (song: Song): Promise<string> => {
@@ -226,13 +301,14 @@ export default function LibraryScreen() {
         sourceId,
       };
 
+      let nextSongs: Song[] = [];
       setSongs((prev) => {
-        const next = prev.map((s, i) => (i === index ? updatedSong : s));
-        songsRef.current = next;
-        return next;
+        nextSongs = prev.map((s, i) => (i === index ? updatedSong : s));
+        songsRef.current = nextSongs;
+        return nextSongs;
       });
 
-      await startPlayback(index, uri);
+      await playAtIndex(index, nextSongs);
     } catch (e: any) {
       Alert.alert('Erro no download', e.message || 'Não foi possível baixar esta música.');
     } finally {
@@ -240,51 +316,83 @@ export default function LibraryScreen() {
     }
   };
 
-  const playAtIndex = async (index: number) => {
-    const list = songsRef.current;
+  const playAtIndex = async (index: number, sourceSongs?: Song[]) => {
+    const list = sourceSongs ?? songsRef.current;
     if (index < 0 || index >= list.length) return;
     const song = list[index];
+
+    const queueIndex = list
+      .filter((candidate) => candidate.isLocal && candidate.uriLocal)
+      .findIndex((candidate) => candidate.id === song.id);
+
+    if (queueIndex >= 0) {
+      setActiveQueueIndex(queueIndex);
+      setOptimisticSongId(song.id);
+    }
 
     if (!song.isLocal) {
       await downloadCloudSong(song, index);
       return;
     }
 
-    await startPlayback(index, song.uriLocal);
+    try {
+      const resolvedQueueIndex = await playSongAtIndex(list, index);
+      if (resolvedQueueIndex != null) {
+        setActiveQueueIndex(resolvedQueueIndex);
+      }
+      setPlayWhenReady(true);
+    } catch (e: any) {
+      setOptimisticSongId(null);
+      Alert.alert('Erro no player', e.message || 'Nao foi possivel reproduzir esta musica.');
+    }
   };
 
-  const nextSong = () => {
+  const nextSong = async () => {
     const list = songsRef.current;
-    const cur = currentIndexRef.current;
     if (!list.length) return;
-    let next = 0;
-    let tries = 0;
-    do {
-      next = shuffleRef.current
-        ? Math.floor(Math.random() * list.length)
-        : cur !== null ? (cur + 1) % list.length : 0;
-      tries++;
-    } while (!list[next]?.isLocal && tries < list.length);
-    if (list[next]?.isLocal) playAtIndex(next);
+    if (shuffleRef.current) {
+      const localIndices = list
+        .map((song, index) => ({ song, index }))
+        .filter(({ song }) => song.isLocal)
+        .map(({ index }) => index);
+
+      if (!localIndices.length) return;
+
+      const currentSongId = activeSongId;
+      const candidates = localIndices.filter((index) => list[index]?.id !== currentSongId);
+      const pool = candidates.length ? candidates : localIndices;
+      const nextIndex = pool[Math.floor(Math.random() * pool.length)];
+      await playAtIndex(nextIndex);
+      return;
+    }
+
+    await skipToRelative(1);
+    await syncActiveFromPlayer();
   };
 
-  const prevSong = () => {
-    const list = songsRef.current;
-    const cur = currentIndexRef.current;
-    if (!list.length || cur === null) return;
-    const prev = (cur - 1 + list.length) % list.length;
-    if (list[prev]?.isLocal) playAtIndex(prev);
+  const prevSong = async () => {
+    await skipToRelative(-1);
+    await syncActiveFromPlayer();
   };
 
   const togglePlayPause = async () => {
-    if (!sound) return;
-    if (playing) { await sound.pauseAsync(); setPlaying(false); }
-    else { await sound.playAsync(); setPlaying(true); }
-  };
+    try {
+      const playWhenReady = await TrackPlayer.getPlayWhenReady();
 
-  useEffect(() => {
-    return sound ? () => { sound.unloadAsync(); } : undefined;
-  }, [sound]);
+      if (playWhenReady) {
+        setPlayWhenReady(false);
+        await TrackPlayer.setPlayWhenReady(false);
+        await TrackPlayer.pause();
+      } else {
+        setPlayWhenReady(true);
+        await setupPlayer();
+        await TrackPlayer.setPlayWhenReady(true);
+        await TrackPlayer.play();
+      }
+    } catch (e: any) {
+      Alert.alert('Erro no player', e.message || 'Nao foi possivel alterar a reproducao.');
+    }
+  };
 
   const logout = async () => {
     Alert.alert('Sair', 'Deseja encerrar a sessão?', [
@@ -293,7 +401,7 @@ export default function LibraryScreen() {
         text: 'Sair',
         style: 'destructive',
         onPress: async () => {
-          if (sound) await sound.unloadAsync();
+          await stopPlayer();
           await AsyncStorage.multiRemove(['userToken', 'username']);
           router.replace('/login' as any);
         },
@@ -302,7 +410,7 @@ export default function LibraryScreen() {
   };
 
   const renderItem = ({ item, index }: { item: Song; index: number }) => {
-    const isCurrent = index === currentIndex;
+    const isCurrent = item.id === activeSongId;
     const isDownloading = downloadingId === item.id;
     return (
       <TouchableOpacity
@@ -340,8 +448,6 @@ export default function LibraryScreen() {
       </TouchableOpacity>
     );
   };
-
-  const currentSong = currentIndex !== null ? songs[currentIndex] : null;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -421,15 +527,25 @@ export default function LibraryScreen() {
             <TouchableOpacity onPress={() => setShuffle(!shuffle)} style={styles.ctrlBtn}>
               <Ionicons name="shuffle" size={20} color={shuffle ? '#1db954' : '#555'} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={prevSong} style={styles.ctrlBtn}>
+            <TouchableOpacity onPress={() => { prevSong().catch(() => {}); }} style={styles.ctrlBtn}>
               <Ionicons name="play-skip-back" size={22} color="#ccc" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.playBtn} onPress={togglePlayPause}>
-              <Ionicons name={playing ? 'pause' : 'play'} size={22} color="#121212" style={!playing ? { marginLeft: 2 } : {}} />
+              <Ionicons name={shouldShowPause ? 'pause' : 'play'} size={22} color="#121212" style={!shouldShowPause ? { marginLeft: 2 } : {}} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={nextSong} style={styles.ctrlBtn}>
+            <TouchableOpacity onPress={() => { nextSong().catch(() => {}); }} style={styles.ctrlBtn}>
               <Ionicons name="play-skip-forward" size={22} color="#ccc" />
             </TouchableOpacity>
+          </View>
+
+          <View style={styles.progressWrap}>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${progressRatio * 100}%` }]} />
+            </View>
+            <View style={styles.progressLabels}>
+              <Text style={styles.progressText}>{formatTime(progress.position)}</Text>
+              <Text style={styles.progressText}>{formatTime(progress.duration)}</Text>
+            </View>
           </View>
         </View>
       )}
@@ -503,7 +619,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#1e1e1e',
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 30,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -530,5 +647,31 @@ const styles = StyleSheet.create({
     backgroundColor: '#1db954',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  progressWrap: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 8,
+  },
+  progressTrack: {
+    height: 3,
+    borderRadius: 999,
+    backgroundColor: '#2d2d2d',
+    overflow: 'hidden',
+    marginBottom: 4,
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#1db954',
+  },
+  progressLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  progressText: {
+    color: '#666',
+    fontSize: 10,
   },
 });

@@ -1,4 +1,4 @@
-const DEFAULT_API_URL = 'https://pseudoprincely-plumular-nikolas.ngrok-free.dev/api';
+const DEFAULT_API_URL = 'https://marlonbarbershop.com/nationmusics/api';
 const DEFAULT_API_KEY = 'REDACTED_API_KEY';
 
 export const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL || DEFAULT_API_URL).replace(/\/$/, '');

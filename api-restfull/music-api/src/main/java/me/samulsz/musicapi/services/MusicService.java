@@ -1,6 +1,8 @@
 package me.samulsz.musicapi.services;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
@@ -11,12 +13,18 @@ import java.util.Map;
 @Service
 public class MusicService {
 
+    @Value("${tools.yt-dlp-path}")
+    private String ytDlpPath;
+
+    @Value("${tools.ffmpeg-path}")
+    private String ffmpegPath;
+
     public List<Map<String, String>> buscarNoYouTube(String query) {
         List<Map<String, String>> resultados = new ArrayList<>();
         
         try {
             ProcessBuilder builder = new ProcessBuilder(
-                    "F:\\dev\\utils\\yt-dlp.exe",
+                    ytDlpPath,
                     "ytsearch5:" + query,
                     "--print", "%(id)s|%(title)s|%(uploader)s|%(thumbnail)s"
             );
@@ -66,10 +74,10 @@ public class MusicService {
         try {
             System.out.println("Iniciando download e conversão para MP3...");
             ProcessBuilder builder = new ProcessBuilder(
-                    "F:\\dev\\utils\\yt-dlp.exe",
+                    ytDlpPath,
                     "-x",
                     "--audio-format", "mp3",
-                    "--ffmpeg-location", "F:\\dev\\utils",
+                    "--ffmpeg-location", ffmpegPath,
                     "-o", diretorioSaida + "%(id)s.%(ext)s",
                     url
             );

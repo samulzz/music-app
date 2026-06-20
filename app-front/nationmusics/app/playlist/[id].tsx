@@ -1,445 +1,340 @@
-import { useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Image,
-  Platform,
   SafeAreaView,
-  StatusBar,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system/legacy';
+import { useNetInfo } from '@react-native-community/netinfo';
+import { useActiveMediaItem } from '@rntp/player';
 
-import { playPlaylistAtIndex, type PlayerSong } from '../../services/playerSetup';
 import GlobalMiniPlayer from '../../components/global-mini-player';
-import { useActiveTrackFallback } from '../../hooks/use-active-track-fallback';
+import type { ApiLibrarySong, MusicSong } from '../../types/music';
+import { fromApiLibrarySong } from '../../types/music';
+import { apiRequest } from '../../services/api';
+import { downloadSong, mergeWithOfflineLibrary } from '../../services/offline-library';
+import { ensureSourceId } from '../../services/music-resolver';
+import { playSongQueue } from '../../services/player';
 
-const BASE_URL = 'https://pseudoprincely-plumular-nikolas.ngrok-free.dev/api';
-const API_KEY = 'REDACTED_API_KEY';
-const NGROK_BYPASS = 'true';
+function identity(song: MusicSong) {
+  return song.sourceId || song.id;
+}
 
-type ApiSong = {
-  id: number;
-  title: string;
-  artist: string;
-  coverUrl?: string;
-  sourceId?: string;
-};
-
-type PlaylistSong = PlayerSong & {
-  dbId: number;
-};
+const PlaylistSongCard = memo(function PlaylistSongCard({
+  song,
+  active,
+  busy,
+  onPlay,
+  onDownload,
+}: {
+  song: MusicSong;
+  active: boolean;
+  busy: boolean;
+  onPlay: (song: MusicSong) => void;
+  onDownload: (song: MusicSong) => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.songCard, active && styles.songCardActive]}
+      onPress={() => onPlay(song)}
+      activeOpacity={0.82}
+    >
+      {song.artworkUrl ? (
+        <Image source={{ uri: song.artworkUrl }} style={styles.cover} />
+      ) : (
+        <View style={styles.coverPlaceholder}>
+          <Ionicons name="musical-note" size={20} color="#666" />
+        </View>
+      )}
+      <View style={styles.meta}>
+        <Text style={[styles.songTitle, active && styles.activeTitle]} numberOfLines={1}>
+          {song.title}
+        </Text>
+        <Text style={styles.songArtist} numberOfLines={1}>{song.artist}</Text>
+        <Text style={styles.availability}>{song.localUri ? 'Offline' : 'Online'}</Text>
+      </View>
+      {active && <Ionicons name="volume-medium" size={19} color="#1db954" />}
+      <TouchableOpacity
+        accessibilityLabel={song.localUri ? 'Música baixada' : 'Baixar música'}
+        style={[styles.downloadButton, song.localUri && styles.downloadedButton]}
+        onPress={(event) => {
+          event.stopPropagation();
+          if (!song.localUri && !busy) onDownload(song);
+        }}
+        disabled={Boolean(song.localUri) || busy}
+      >
+        {busy ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <Ionicons
+            name={song.localUri ? 'checkmark' : 'arrow-down'}
+            size={18}
+            color={song.localUri ? '#1db954' : '#fff'}
+          />
+        )}
+      </TouchableOpacity>
+    </TouchableOpacity>
+  );
+});
 
 export default function PlaylistDetailsScreen() {
-  const params = useLocalSearchParams<{ id?: string; title?: string; kind?: string }>();
+  const params = useLocalSearchParams<{ id?: string; title?: string }>();
   const router = useRouter();
-
-  const [songs, setSongs] = useState<PlaylistSong[]>([]);
-  const [loading, setLoading] = useState(false);
+  const netInfo = useNetInfo();
+  const activeItem = useActiveMediaItem();
+  const [songs, setSongs] = useState<MusicSong[]>([]);
+  const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const activeTrack = useActiveTrackFallback();
+  const [offlineMode, setOfflineMode] = useState(false);
 
-  const screenTitle = useMemo(() => {
-    return typeof params.title === 'string' && params.title.trim()
-      ? params.title
-      : 'Playlist';
-  }, [params.title]);
+  const playlistId = typeof params.id === 'string' ? params.id : '';
+  const title = useMemo(
+    () => typeof params.title === 'string' && params.title.trim() ? params.title : 'Playlist',
+    [params.title]
+  );
+  const cacheKey = `nationmusics.playlist.${playlistId}.v1`;
 
-  const getAuthHeaders = useCallback(async (withJson = false) => {
-    const rawToken = (await AsyncStorage.getItem('userToken'))?.trim() ?? '';
-    if (!rawToken) throw new Error('Sessao expirada. Faça login novamente.');
-
-    const normalizedToken = rawToken.startsWith('Bearer ')
-      ? rawToken.slice(7).trim()
-      : rawToken;
-
-    return {
-      'X-API-KEY': API_KEY,
-      'Authorization': `Bearer ${normalizedToken}`,
-      'ngrok-skip-browser-warning': NGROK_BYPASS,
-      'Accept': 'application/json',
-      ...(withJson ? { 'Content-Type': 'application/json' } : {}),
-    };
-  }, []);
-
-  const toPlayableSong = (song: ApiSong): PlaylistSong => ({
-    dbId: song.id,
-    id: String(song.id),
-    nome: song.title,
-    artista: song.artist,
-    capa: song.coverUrl || '',
-    isLocal: false,
-    uriLocal: '',
-    sourceId: song.sourceId,
-  });
-
-  const resolveSourceId = useCallback(async (song: PlaylistSong) => {
-    if (song.sourceId?.trim()) return song.sourceId.trim();
-
-    const headers = await getAuthHeaders();
-    const query = `${song.nome} ${song.artista}`.trim();
-    const res = await fetch(`${BASE_URL}/musicas/buscar?q=${encodeURIComponent(query)}`, { headers });
-
-    if (!res.ok) {
-      const msg = (await res.text()).trim();
-      throw new Error(msg || `Não foi possível descobrir o ID da música (${res.status}).`);
-    }
-
-    const list = await res.json();
-    if (!Array.isArray(list) || list.length === 0 || !list[0]?.id) {
-      throw new Error('Não foi possível identificar esta música para download.');
-    }
-
-    return String(list[0].id);
-  }, [getAuthHeaders]);
-
-  const buildSongPath = useCallback((song: PlaylistSong) => {
-    const dir = FileSystem.documentDirectory;
-    if (!dir) {
-      throw new Error('Diretório local indisponível.');
-    }
-
-    const cleanTitle = song.nome.replace(/[^a-zA-Z0-9 ]/g, '').trim();
-    const fileName = `${cleanTitle || song.sourceId || song.id}.mp3`;
-    return { destination: `${dir}${fileName}` };
-  }, []);
-
-  const downloadPlaylistSong = useCallback(async (song: PlaylistSong) => {
-    const sourceId = await resolveSourceId(song);
-    const { destination } = buildSongPath(song);
-    const info = await FileSystem.getInfoAsync(destination);
-
-    if (!info.exists) {
-      const headers = await getAuthHeaders();
-      const downloadUrl = `${BASE_URL}/musicas/baixar/${sourceId}?titulo=${encodeURIComponent(song.nome)}`;
-      await FileSystem.downloadAsync(downloadUrl, destination, { headers });
-    }
-
-    return {
-      ...song,
-      isLocal: true,
-      uriLocal: destination,
-      sourceId,
-    };
-  }, [buildSongPath, getAuthHeaders, resolveSourceId]);
-
-  const preparePlaylistQueue = useCallback(async (list: PlaylistSong[]) => {
-    const prepared: PlaylistSong[] = [];
-
-    for (const song of list) {
-      if (song.isLocal && song.uriLocal) {
-        prepared.push(song);
-        continue;
-      }
-
-      prepared.push(await downloadPlaylistSong(song));
-    }
-
-    setSongs(prepared);
-    return prepared;
-  }, [downloadPlaylistSong]);
-
-  const loadPlaylistSongs = useCallback(async () => {
-    const id = typeof params.id === 'string' ? params.id : '';
-    if (!id) return;
-
-    setLoading(true);
+  const readCache = useCallback(async () => {
+    const raw = await AsyncStorage.getItem(cacheKey);
+    if (!raw) return [];
     try {
-      const headers = await getAuthHeaders();
+      return JSON.parse(raw) as MusicSong[];
+    } catch {
+      return [];
+    }
+  }, [cacheKey]);
 
-      const endpoint = id === 'most-downloaded'
-        ? `${BASE_URL}/playlists/most-downloaded/songs`
-        : `${BASE_URL}/playlists/${id}/songs`;
+  const loadSongs = useCallback(async () => {
+    if (!playlistId) return;
+    setLoading(true);
 
-      const res = await fetch(endpoint, { headers });
-      if (!res.ok) {
-        const msg = (await res.text()).trim();
-        throw new Error(msg || `Erro ao carregar playlist (${res.status}).`);
-      }
+    const cached = await readCache();
+    if (cached.length) {
+      setSongs(await mergeWithOfflineLibrary(cached));
+    }
 
-      const data: ApiSong[] = await res.json();
-      setSongs(data.map(toPlayableSong));
-    } catch (e: any) {
-      Alert.alert('Erro', e.message || 'Não foi possível carregar as músicas da playlist.');
+    try {
+      const endpoint = playlistId === 'most-downloaded'
+        ? '/playlists/most-downloaded/songs'
+        : `/playlists/${encodeURIComponent(playlistId)}/songs`;
+      const data = await apiRequest<ApiLibrarySong[]>(endpoint);
+      const next = await mergeWithOfflineLibrary(data.map(fromApiLibrarySong));
+      setSongs(next);
+      setOfflineMode(false);
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(next.map(({ localUri, ...song }) => song)));
+    } catch {
+      setOfflineMode(true);
+      if (!cached.length) setSongs([]);
     } finally {
       setLoading(false);
     }
-  }, [getAuthHeaders, params.id]);
+  }, [cacheKey, playlistId, readCache]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadPlaylistSongs();
-    }, [loadPlaylistSongs])
+      void loadSongs();
+    }, [loadSongs])
   );
 
-  const playAtIndex = async (index: number) => {
-    if (index < 0 || index >= songs.length) return;
-
-    const targetSong = songs[index];
-    setBusyId(targetSong.id);
+  const play = useCallback(async (song: MusicSong) => {
+    const index = songs.findIndex((candidate) => identity(candidate) === identity(song));
     try {
-      const preparedSongs = await preparePlaylistQueue(songs);
-      await playPlaylistAtIndex(preparedSongs, index);
-    } catch (e: any) {
-      Alert.alert('Erro ao reproduzir', e.message || 'Não foi possível iniciar esta playlist.');
-    } finally {
-      setBusyId(null);
+      await playSongQueue(songs, index);
+    } catch (error) {
+      Alert.alert('Não foi possível reproduzir', error instanceof Error ? error.message : 'Tente novamente.');
     }
-  };
+  }, [songs]);
 
   const playRandom = async () => {
-    if (!songs.length) return;
-    const randomIndex = Math.floor(Math.random() * songs.length);
-    await playAtIndex(randomIndex);
+    const playable = netInfo.isConnected === false
+      ? songs.map((song, index) => ({ song, index })).filter(({ song }) => song.localUri)
+      : songs.map((song, index) => ({ song, index }));
+    if (!playable.length) {
+      Alert.alert('Nenhuma música offline', 'Baixe ao menos uma música desta playlist.');
+      return;
+    }
+    const selected = playable[Math.floor(Math.random() * playable.length)];
+    await play(selected.song);
   };
 
-  const saveToLibrary = async (song: PlaylistSong) => {
-    setBusyId(`save-${song.id}`);
+  const saveOffline = useCallback(async (song: MusicSong) => {
+    let key = identity(song);
+    setBusyId(key);
     try {
-      const headers = await getAuthHeaders(true);
+      const resolved = await ensureSourceId(song);
+      key = identity(resolved);
+      const offlineSong = await downloadSong(resolved);
+      setSongs((current) => current.map((candidate) =>
+        identity(candidate) === identity(song) ? offlineSong : candidate
+      ));
 
-      const downloaded = await downloadPlaylistSong(song);
+      try {
+        await apiRequest<void>('/songs/save', {
+          method: 'POST',
+          json: true,
+          body: JSON.stringify({
+            title: offlineSong.title,
+            artist: offlineSong.artist,
+            uri: offlineSong.localUri,
+            coverUrl: offlineSong.artworkUrl,
+            sourceId: offlineSong.sourceId,
+          }),
+        });
+      } catch {}
 
-      const saveRes = await fetch(`${BASE_URL}/songs/save`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          title: downloaded.nome,
-          artist: downloaded.artista,
-          uri: downloaded.uriLocal,
-          coverUrl: downloaded.capa,
-          sourceId: downloaded.sourceId,
-        }),
-      });
-
-      if (!saveRes.ok) {
-        const msg = (await saveRes.text()).trim();
-        throw new Error(msg || `Erro ao salvar (${saveRes.status}).`);
-      }
-
-      Alert.alert('Adicionada', 'A música foi salva na sua biblioteca pessoal.');
-    } catch (e: any) {
-      Alert.alert('Erro', e.message || 'Não foi possível salvar esta música na biblioteca.');
+      Alert.alert('Salva offline', 'A música foi baixada para este celular.');
+    } catch (error) {
+      Alert.alert('Erro no download', error instanceof Error ? error.message : 'Tente novamente.');
     } finally {
       setBusyId(null);
     }
-  };
-
-  const renderItem = ({ item, index }: { item: PlaylistSong; index: number }) => {
-    const playingBusy = busyId === item.id;
-    const savingBusy = busyId === `save-${item.id}`;
-    const isCurrent = activeTrack?.id != null && String(activeTrack.id) === item.id;
-
-    return (
-      <TouchableOpacity
-        style={[styles.songCard, isCurrent && styles.songCardActive]}
-        onPress={() => playAtIndex(index)}
-        activeOpacity={0.82}
-      >
-        {item.capa
-          ? <Image source={{ uri: item.capa }} style={styles.cover} />
-          : (
-            <View style={styles.coverPlaceholder}>
-              <Ionicons name="musical-note" size={20} color="#6f6f6f" />
-            </View>
-          )}
-
-        <View style={styles.meta}>
-          <Text style={[styles.songTitle, isCurrent && styles.songTitleActive]} numberOfLines={1}>{item.nome}</Text>
-          <Text style={styles.songArtist} numberOfLines={1}>{item.artista}</Text>
-        </View>
-
-        {isCurrent && (
-          <Ionicons name="volume-medium" size={18} color="#1db954" style={{ marginRight: 8 }} />
-        )}
-
-        <TouchableOpacity
-          style={styles.secondaryBtn}
-          onPress={() => saveToLibrary(item)}
-          disabled={savingBusy || !!busyId}
-          activeOpacity={0.82}
-        >
-          {savingBusy
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Ionicons name="arrow-down-circle-outline" size={18} color="#fff" />}
-        </TouchableOpacity>
-      </TouchableOpacity>
-    );
-  };
+  }, []);
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-            <Ionicons name="arrow-back" size={20} color="#fff" />
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.subtitle}>Reproduza sem baixar para a biblioteca</Text>
-            <Text style={styles.title} numberOfLines={1}>{screenTitle}</Text>
+          <View style={styles.headerMeta}>
+            <Text style={styles.eyebrow}>PLAYLIST</Text>
+            <Text style={styles.headerTitle} numberOfLines={1}>{title}</Text>
+            <Text style={styles.summary}>{songs.length} músicas</Text>
           </View>
+          <TouchableOpacity style={styles.shuffleButton} onPress={() => { void playRandom(); }}>
+            <Ionicons name="shuffle" size={21} color="#121212" />
+          </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={styles.playAllBtn}
-          onPress={() => playAtIndex(0)}
-          disabled={!songs.length || !!busyId}
-          activeOpacity={0.84}
-        >
-          <Ionicons name="play-circle" size={18} color="#121212" />
-          <Text style={styles.playAllText}>Ouvir playlist</Text>
-        </TouchableOpacity>
+        {(offlineMode || netInfo.isConnected === false) && (
+          <View style={styles.offlineBanner}>
+            <Ionicons name="cloud-offline-outline" size={17} color="#f2b84b" />
+            <Text style={styles.offlineText}>Offline: somente músicas já baixadas podem tocar.</Text>
+          </View>
+        )}
 
-        <TouchableOpacity
-          style={styles.shuffleBtn}
-          onPress={() => { playRandom().catch(() => {}); }}
-          disabled={!songs.length || !!busyId}
-          activeOpacity={0.84}
-        >
-          <Ionicons name="shuffle" size={18} color="#fff" />
-          <Text style={styles.shuffleText}>Aleatório</Text>
-        </TouchableOpacity>
-
-        {loading ? (
-          <View style={styles.centered}>
+        {loading && !songs.length ? (
+          <View style={styles.center}>
             <ActivityIndicator size="large" color="#1db954" />
           </View>
         ) : (
           <FlatList
             data={songs}
-            keyExtractor={(item) => item.id}
-            renderItem={renderItem}
-            contentContainerStyle={{ paddingBottom: 180 }}
+            keyExtractor={(item) => identity(item)}
+            renderItem={({ item }) => (
+              <PlaylistSongCard
+                song={item}
+                active={activeItem?.mediaId === item.id}
+                busy={busyId === identity(item)}
+                onPlay={play}
+                onDownload={saveOffline}
+              />
+            )}
+            contentContainerStyle={styles.list}
             showsVerticalScrollIndicator={false}
+            initialNumToRender={10}
+            windowSize={7}
+            removeClippedSubviews
             ListEmptyComponent={
-              <View style={styles.emptyState}>
-                <Ionicons name="musical-notes-outline" size={58} color="#3c3c3c" />
-                <Text style={styles.emptyTitle}>Playlist vazia</Text>
-                <Text style={styles.emptyText}>Esta playlist ainda não possui músicas.</Text>
+              <View style={styles.empty}>
+                <Ionicons name="cloud-offline-outline" size={48} color="#555" />
+                <Text style={styles.emptyTitle}>Playlist indisponível offline</Text>
+                <Text style={styles.emptyText}>Abra esta playlist uma vez com internet para armazenar a lista.</Text>
               </View>
             }
           />
         )}
       </View>
-
       <GlobalMiniPlayer bottomOffset={12} />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: '#121212',
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
-  },
-  container: { flex: 1, paddingHorizontal: 18 },
-
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingTop: 16,
-    paddingBottom: 18,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#1f1f1f',
-    borderWidth: 1,
-    borderColor: '#2a2a2a',
+  safe: { flex: 1, backgroundColor: '#121212' },
+  container: { flex: 1, paddingHorizontal: 16, paddingTop: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: '#222',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  subtitle: { color: '#7f7f7f', fontSize: 12, marginBottom: 2 },
-  title: { color: '#fff', fontSize: 22, fontWeight: '700' },
-
-  playAllBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
+  headerMeta: { flex: 1, marginHorizontal: 12 },
+  eyebrow: { color: '#1db954', fontSize: 10, fontWeight: '800', letterSpacing: 1.2 },
+  headerTitle: { color: '#fff', fontSize: 21, fontWeight: '800', marginTop: 2 },
+  summary: { color: '#777', fontSize: 11, marginTop: 3 },
+  shuffleButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: '#1db954',
-    borderRadius: 12,
-    paddingVertical: 12,
-    marginBottom: 16,
-  },
-  playAllText: { color: '#121212', fontSize: 14, fontWeight: '700' },
-  shuffleBtn: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#242424',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#323232',
-    paddingVertical: 11,
-    marginBottom: 16,
   },
-  shuffleText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-
-  songCard: {
+  offlineBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#191919',
-    borderRadius: 12,
+    gap: 8,
+    backgroundColor: '#2b2518',
+    borderColor: '#5a4825',
     borderWidth: 1,
-    borderColor: '#252525',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  offlineText: { color: '#d5bd83', fontSize: 12 },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  list: { paddingBottom: 150 },
+  songCard: {
+    minHeight: 78,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: '#292929',
+    backgroundColor: '#1b1b1b',
     padding: 10,
     marginBottom: 10,
   },
-  songCardActive: {
-    borderColor: '#1db95488',
-    backgroundColor: '#1a231c',
-  },
-  cover: { width: 52, height: 52, borderRadius: 8, marginRight: 10 },
+  songCardActive: { borderColor: '#1db95460', backgroundColor: '#18231b' },
+  cover: { width: 54, height: 54, borderRadius: 9, marginRight: 11 },
   coverPlaceholder: {
-    width: 52,
-    height: 52,
-    borderRadius: 8,
-    marginRight: 10,
-    backgroundColor: '#222',
-    borderWidth: 1,
-    borderColor: '#2b2b2b',
+    width: 54,
+    height: 54,
+    borderRadius: 9,
+    marginRight: 11,
+    backgroundColor: '#252525',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  meta: { flex: 1, marginRight: 8 },
-  songTitle: { color: '#fff', fontSize: 14, fontWeight: '600', marginBottom: 3 },
-  songTitleActive: { color: '#b9f3cd' },
-  songArtist: { color: '#8c8c8c', fontSize: 12 },
-
-  actionBtn: {
-    width: 38,
-    height: 38,
+  meta: { flex: 1, marginRight: 7 },
+  songTitle: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  activeTitle: { color: '#1db954' },
+  songArtist: { color: '#888', fontSize: 12, marginTop: 3 },
+  availability: { color: '#696969', fontSize: 10, marginTop: 3 },
+  downloadButton: {
+    width: 37,
+    height: 37,
     borderRadius: 19,
-    backgroundColor: '#1db954',
+    marginLeft: 7,
+    backgroundColor: '#343434',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  secondaryBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: '#2c2c2c',
-    borderWidth: 1,
-    borderColor: '#3a3a3a',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  emptyState: { paddingTop: 90, alignItems: 'center' },
-  emptyTitle: { color: '#6f6f6f', fontSize: 17, fontWeight: '600', marginTop: 16 },
-  emptyText: { color: '#4f4f4f', fontSize: 13, marginTop: 8 },
+  downloadedButton: { backgroundColor: '#1db95418', borderWidth: 1, borderColor: '#1db95440' },
+  empty: { alignItems: 'center', paddingTop: 70, paddingHorizontal: 25 },
+  emptyTitle: { color: '#ddd', fontWeight: '700', fontSize: 17, marginTop: 14 },
+  emptyText: { color: '#777', fontSize: 13, textAlign: 'center', lineHeight: 18, marginTop: 7 },
 });

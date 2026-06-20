@@ -1,0 +1,72 @@
+import { getSession } from './auth';
+import { API_BASE_URL, APP_HEADERS } from './config';
+
+export class OfflineError extends Error {
+  constructor(message = 'Sem conexão com a internet.') {
+    super(message);
+    this.name = 'OfflineError';
+  }
+}
+
+export async function getAuthenticatedHeaders(includeJson = false) {
+  const session = await getSession();
+  if (!session?.token) {
+    throw new Error('Sessão indisponível. Entre novamente quando houver internet.');
+  }
+
+  return {
+    ...APP_HEADERS,
+    Authorization: `Bearer ${session.token}`,
+    ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
+  };
+}
+
+type ApiRequestOptions = RequestInit & {
+  authenticated?: boolean;
+  json?: boolean;
+};
+
+export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  const {
+    authenticated = true,
+    json = false,
+    headers: requestHeaders,
+    ...request
+  } = options;
+
+  const headers = authenticated
+    ? await getAuthenticatedHeaders(json)
+    : {
+        ...APP_HEADERS,
+        ...(json ? { 'Content-Type': 'application/json' } : {}),
+      };
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...request,
+      headers: {
+        ...headers,
+        ...requestHeaders,
+      },
+    });
+  } catch {
+    throw new OfflineError();
+  }
+
+  if (!response.ok) {
+    const body = (await response.text()).trim();
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(body || 'Sessão inválida. Conecte-se e faça login novamente.');
+    }
+    throw new Error(body || `Erro do servidor (${response.status}).`);
+  }
+
+  if (response.status === 204) return undefined as T;
+
+  const contentType = response.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    return (await response.text()) as T;
+  }
+  return response.json() as Promise<T>;
+}

@@ -1,15 +1,27 @@
 import { useState } from 'react';
 import {
-  StyleSheet, Text, View, TextInput, TouchableOpacity,
-  Alert, ActivityIndicator, KeyboardAvoidingView, Platform, SafeAreaView, ScrollView,
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 
-const BASE_URL = 'https://pseudoprincely-plumular-nikolas.ngrok-free.dev/api/auth';
-const API_KEY = 'REDACTED_API_KEY';
-const NGROK_BYPASS = 'true';
+import { apiRequest } from '../services/api';
+import { saveSession } from '../services/auth';
+
+type LoginResponse = {
+  token: string;
+  username: string;
+};
 
 export default function LoginScreen() {
   const [username, setUsername] = useState('');
@@ -19,45 +31,43 @@ export default function LoginScreen() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const router = useRouter();
 
-  const autenticar = async () => {
-    if (!username.trim() || !password.trim()) {
-      Alert.alert('Atenção', 'Preencha o usuário e a senha!');
+  const authenticate = async () => {
+    const normalizedUsername = username.trim();
+    if (!normalizedUsername || !password) {
+      Alert.alert('Atenção', 'Preencha o usuário e a senha.');
       return;
     }
+
     setLoading(true);
     try {
-      const res = await fetch(`${BASE_URL}/${mode}`, {
+      const response = await apiRequest<LoginResponse | void>(`/auth/${mode}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-KEY': API_KEY,
-          'ngrok-skip-browser-warning': NGROK_BYPASS,
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ username: username.trim(), password }),
+        authenticated: false,
+        json: true,
+        body: JSON.stringify({ username: normalizedUsername, password }),
       });
 
-      if (!res.ok) {
-        const msg = await res.text();
-        throw new Error(msg || 'Falha na autenticação.');
+      if (mode === 'register') {
+        Alert.alert('Conta criada', 'Agora entre com seus dados.');
+        setMode('login');
+        return;
       }
 
-      if (mode === 'login') {
-        const data = await res.json();
-        const rawToken = (data?.token ?? '').toString().trim();
-        const normalizedToken = rawToken.startsWith('Bearer ')
-          ? rawToken.slice(7).trim()
-          : rawToken;
-        await AsyncStorage.setItem('userToken', normalizedToken);
-        await AsyncStorage.setItem('username', data.username);
-        router.replace('/(tabs)');
-      } else {
-        Alert.alert('Conta criada! 🎉', 'Agora entre com seus dados.', [
-          { text: 'OK', onPress: () => setMode('login') },
-        ]);
-      }
-    } catch (e: any) {
-      Alert.alert('Erro', e.message || 'Não foi possível conectar ao servidor.');
+      const data = response as LoginResponse;
+      const token = data?.token?.replace(/^Bearer\s+/i, '').trim();
+      if (!token) throw new Error('O servidor não retornou uma sessão válida.');
+
+      await saveSession({
+        token,
+        username: data.username || normalizedUsername,
+        lastSuccessfulLoginAt: Date.now(),
+      });
+      router.replace('/(tabs)');
+    } catch (error) {
+      Alert.alert(
+        'Não foi possível entrar',
+        error instanceof Error ? error.message : 'Verifique a conexão e tente novamente.'
+      );
     } finally {
       setLoading(false);
     }
@@ -67,31 +77,31 @@ export default function LoginScreen() {
     <SafeAreaView style={styles.safe}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={{ flex: 1 }}
+        style={styles.flex}
       >
-        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          {/* Logo */}
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+        >
           <View style={styles.logoArea}>
             <View style={styles.logoCircle}>
-              <Ionicons name="musical-notes" size={48} color="#1db954" />
+              <Ionicons name="musical-notes" size={46} color="#1db954" />
             </View>
             <Text style={styles.appName}>NationMusics</Text>
-            <Text style={styles.tagline}>Sua música, em qualquer lugar.</Text>
+            <Text style={styles.tagline}>Sua música continua, até sem internet.</Text>
           </View>
 
-          {/* Form Card */}
           <View style={styles.card}>
             <Text style={styles.cardTitle}>
               {mode === 'login' ? 'Bem-vindo de volta' : 'Criar nova conta'}
             </Text>
 
-            {/* Username */}
             <View style={styles.inputRow}>
-              <Ionicons name="person-outline" size={18} color="#666" style={styles.inputIcon} />
+              <Ionicons name="person-outline" size={18} color="#777" />
               <TextInput
                 style={styles.input}
                 placeholder="Nome de usuário"
-                placeholderTextColor="#555"
+                placeholderTextColor="#666"
                 value={username}
                 onChangeText={setUsername}
                 autoCapitalize="none"
@@ -100,48 +110,45 @@ export default function LoginScreen() {
               />
             </View>
 
-            {/* Password */}
             <View style={styles.inputRow}>
-              <Ionicons name="lock-closed-outline" size={18} color="#666" style={styles.inputIcon} />
+              <Ionicons name="lock-closed-outline" size={18} color="#777" />
               <TextInput
-                style={[styles.input, { flex: 1 }]}
+                style={styles.input}
                 placeholder="Senha"
-                placeholderTextColor="#555"
+                placeholderTextColor="#666"
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
                 returnKeyType="done"
-                onSubmitEditing={autenticar}
+                onSubmitEditing={authenticate}
               />
-              <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.eyeBtn}>
-                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color="#666" />
+              <TouchableOpacity onPress={() => setShowPassword((value) => !value)} style={styles.eye}>
+                <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={19} color="#777" />
               </TouchableOpacity>
             </View>
 
-            {/* Primary button */}
             <TouchableOpacity
-              style={[styles.btnPrimary, loading && { opacity: 0.7 }]}
-              onPress={autenticar}
+              style={[styles.primaryButton, loading && styles.disabled]}
+              onPress={authenticate}
               disabled={loading}
-              activeOpacity={0.85}
             >
-              {loading
-                ? <ActivityIndicator color="#121212" />
-                : <Text style={styles.btnPrimaryText}>{mode === 'login' ? 'Entrar' : 'Criar Conta'}</Text>
-              }
+              {loading ? (
+                <ActivityIndicator color="#121212" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  {mode === 'login' ? 'Entrar' : 'Criar conta'}
+                </Text>
+              )}
             </TouchableOpacity>
 
-            {/* Toggle mode */}
             <TouchableOpacity
-              style={styles.btnToggle}
-              onPress={() => setMode(mode === 'login' ? 'register' : 'login')}
+              style={styles.toggleButton}
+              onPress={() => setMode((value) => value === 'login' ? 'register' : 'login')}
               disabled={loading}
             >
-              <Text style={styles.btnToggleText}>
-                {mode === 'login'
-                  ? 'Não tem conta? '
-                  : 'Já tem conta? '}
-                <Text style={styles.btnToggleHighlight}>
+              <Text style={styles.toggleText}>
+                {mode === 'login' ? 'Não tem conta? ' : 'Já tem conta? '}
+                <Text style={styles.toggleHighlight}>
                   {mode === 'login' ? 'Cadastre-se' : 'Entre agora'}
                 </Text>
               </Text>
@@ -154,59 +161,56 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
+  flex: { flex: 1 },
   safe: { flex: 1, backgroundColor: '#121212' },
-  scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 40 },
-
-  logoArea: { alignItems: 'center', marginBottom: 40 },
+  scroll: { flexGrow: 1, justifyContent: 'center', padding: 24, paddingVertical: 40 },
+  logoArea: { alignItems: 'center', marginBottom: 36 },
   logoCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: '#1db95415',
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    backgroundColor: '#1db95418',
     borderWidth: 2,
-    borderColor: '#1db95440',
+    borderColor: '#1db95450',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 15,
   },
-  appName: { fontSize: 32, fontWeight: 'bold', color: '#fff', letterSpacing: 0.5 },
-  tagline: { fontSize: 14, color: '#666', marginTop: 6 },
-
+  appName: { fontSize: 31, fontWeight: '800', color: '#fff' },
+  tagline: { color: '#777', fontSize: 13, marginTop: 7 },
   card: {
     backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    padding: 24,
+    borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: '#2b2b2b',
+    padding: 22,
   },
-  cardTitle: { fontSize: 20, fontWeight: '700', color: '#fff', marginBottom: 24 },
-
+  cardTitle: { color: '#fff', fontSize: 20, fontWeight: '700', marginBottom: 22 },
   inputRow: {
+    height: 52,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
     backgroundColor: '#242424',
-    borderRadius: 10,
+    borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: '#353535',
     paddingHorizontal: 14,
     marginBottom: 14,
-    height: 52,
   },
-  inputIcon: { marginRight: 10 },
   input: { flex: 1, color: '#fff', fontSize: 15 },
-  eyeBtn: { padding: 4 },
-
-  btnPrimary: {
-    backgroundColor: '#1db954',
-    borderRadius: 10,
+  eye: { padding: 4 },
+  primaryButton: {
     height: 52,
+    borderRadius: 11,
+    backgroundColor: '#1db954',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 6,
+    marginTop: 5,
   },
-  btnPrimaryText: { color: '#121212', fontSize: 16, fontWeight: 'bold', letterSpacing: 0.3 },
-
-  btnToggle: { marginTop: 20, alignItems: 'center' },
-  btnToggleText: { color: '#777', fontSize: 14 },
-  btnToggleHighlight: { color: '#1db954', fontWeight: '600' },
+  primaryButtonText: { color: '#121212', fontWeight: '800', fontSize: 16 },
+  disabled: { opacity: 0.65 },
+  toggleButton: { marginTop: 19, alignItems: 'center' },
+  toggleText: { color: '#888', fontSize: 14 },
+  toggleHighlight: { color: '#1db954', fontWeight: '700' },
 });

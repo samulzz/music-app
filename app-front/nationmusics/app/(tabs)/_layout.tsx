@@ -1,24 +1,25 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { View } from 'react-native';
+
 import GlobalMiniPlayer from '../../components/global-mini-player';
 
 export default function TabLayout() {
   return (
-    <View style={{ flex: 1 }}>
+    <View style={{ flex: 1, backgroundColor: '#121212' }}>
       <Tabs
         screenOptions={{
           headerShown: false,
           tabBarStyle: {
             backgroundColor: '#121212',
-            borderTopColor: '#222',
+            borderTopColor: '#262626',
             borderTopWidth: 1,
-            height: 60,
+            height: 62,
             paddingBottom: 8,
-            paddingTop: 4,
+            paddingTop: 5,
           },
           tabBarActiveTintColor: '#1db954',
-          tabBarInactiveTintColor: '#555',
+          tabBarInactiveTintColor: '#737373',
           tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
         }}
       >
@@ -44,7 +45,7 @@ export default function TabLayout() {
           }}
         />
       </Tabs>
-      <GlobalMiniPlayer bottomOffset={66} />
+      <GlobalMiniPlayer bottomOffset={68} />
     </View>
   );
 }

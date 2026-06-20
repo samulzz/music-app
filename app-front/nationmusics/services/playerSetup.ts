@@ -12,6 +12,7 @@ export type PlayerSong = {
   isLocal: boolean;
   uriLocal: string;
   sourceId?: string;
+  streamUrl?: string;
 };
 
 let setupPromise: Promise<boolean> | null = null;
@@ -74,9 +75,14 @@ function getLocalSongs(songs: PlayerSong[]) {
 }
 
 function mapSongToTrack(song: PlayerSong) {
+  const url = song.uriLocal || song.streamUrl;
+  if (!url) {
+    throw new Error(`Música sem URL de reprodução: ${song.nome}`);
+  }
+
   return {
     id: song.id,
-    url: song.uriLocal,
+    url,
     title: song.nome,
     artist: song.artista,
     artwork: song.capa || undefined,
@@ -99,6 +105,10 @@ export async function playSongAtIndex(songs: PlayerSong[], songIndex: number) {
   await TrackPlayer.play();
 
   return queueIndex;
+}
+
+export async function playPlaylistAtIndex(songs: PlayerSong[], songIndex: number) {
+  return playSongAtIndex(songs, songIndex);
 }
 
 export async function skipToRelative(offset: number) {

@@ -1,203 +1,180 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  StyleSheet, Text, View, TextInput, FlatList, Image,
-  TouchableOpacity, ActivityIndicator, Alert, SafeAreaView, Platform, StatusBar,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Platform,
+  Alert,
 } from 'react-native';
-import * as FileSystem from 'expo-file-system/legacy';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect, useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BASE_URL = 'https://pseudoprincely-plumular-nikolas.ngrok-free.dev/api';
 const API_KEY = 'REDACTED_API_KEY';
 const NGROK_BYPASS = 'true';
 
-type SearchResult = {
-  id: string;
-  titulo: string;
-  artista: string;
-  capa: string;
+type Playlist = {
+  id: number;
+  name: string;
+  description?: string;
+  iconUrl?: string;
 };
 
-export default function SearchScreen() {
-  const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-  const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
+type HomePlaylist = {
+  id: string;
+  title: string;
+  description: string;
+  iconUrl?: string;
+  kind: 'most-downloaded' | 'global';
+};
+
+export default function HomePlaylistsScreen() {
   const [username, setUsername] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [playlists, setPlaylists] = useState<HomePlaylist[]>([]);
+
+  const router = useRouter();
 
   useEffect(() => {
-    AsyncStorage.getItem('username').then((u) => { if (u) setUsername(u); });
+    AsyncStorage.getItem('username').then((u) => {
+      if (u) setUsername(u);
+    });
   }, []);
 
-  const getHeaders = async (includeJson = false) => {
+  const getAuthHeaders = useCallback(async () => {
     const rawToken = (await AsyncStorage.getItem('userToken'))?.trim() ?? '';
     if (!rawToken) throw new Error('Sessao expirada. Faca login novamente.');
-    const token = rawToken.startsWith('Bearer ') ? rawToken.slice(7).trim() : rawToken;
+
+    const normalizedToken = rawToken.startsWith('Bearer ')
+      ? rawToken.slice(7).trim()
+      : rawToken;
+
     return {
       'X-API-KEY': API_KEY,
-      'Authorization': `Bearer ${token}`,
+      'Authorization': `Bearer ${normalizedToken}`,
       'ngrok-skip-browser-warning': NGROK_BYPASS,
       'Accept': 'application/json',
-      ...(includeJson ? { 'Content-Type': 'application/json' } : {}),
     };
-  };
+  }, []);
 
-  const buscar = async () => {
-    const q = query.trim();
-    if (!q) return;
-    setSearching(true);
-    setResults([]);
+  const loadHome = useCallback(async () => {
+    setLoading(true);
     try {
-      const headers = await getHeaders();
-      const res = await fetch(`${BASE_URL}/musicas/buscar?q=${encodeURIComponent(q)}`, { headers });
-      if (res.status === 401 || res.status === 403) {
-        throw new Error('Sessao invalida no servidor. Faça login novamente e tente buscar de novo.');
+      const headers = await getAuthHeaders();
+
+      const globalRes = await fetch(`${BASE_URL}/playlists/global`, { headers });
+      if (!globalRes.ok) {
+        const msg = (await globalRes.text()).trim();
+        throw new Error(msg || `Erro ao carregar playlists (${globalRes.status}).`);
       }
-      if (!res.ok) throw new Error('Erro na busca. Verifique sua conexão.');
-      const data = await res.json();
-      setResults(data);
-      if (data.length === 0) Alert.alert('Sem resultados', `Nenhuma música encontrada para "${q}".`);
+
+      const globalData: Playlist[] = await globalRes.json();
+
+      const homeItems: HomePlaylist[] = [
+        {
+          id: 'most-downloaded',
+          title: 'Mais Ouvidas',
+          description: 'As músicas mais baixadas por todos os usuários.',
+          kind: 'most-downloaded',
+        },
+        ...globalData.map((playlist) => ({
+          id: String(playlist.id),
+          title: playlist.name,
+          description: playlist.description?.trim() || 'Playlist criada pelo admin.',
+          iconUrl: playlist.iconUrl,
+          kind: 'global' as const,
+        })),
+      ];
+
+      setPlaylists(homeItems);
     } catch (e: any) {
-      Alert.alert('Erro', e.message);
+      Alert.alert('Erro', e.message || 'Não foi possível carregar a página inicial.');
     } finally {
-      setSearching(false);
+      setLoading(false);
     }
+  }, [getAuthHeaders]);
+
+  useFocusEffect(
+    useCallback(() => {
+      void loadHome();
+    }, [loadHome])
+  );
+
+  const openPlaylist = (item: HomePlaylist) => {
+    router.push({
+      pathname: '/playlist/[id]' as any,
+      params: {
+        id: item.id,
+        title: item.title,
+        kind: item.kind,
+      },
+    });
   };
 
-  const baixar = async (item: SearchResult) => {
-    setDownloadingId(item.id);
-    try {
-      const nomeLimpo = item.titulo.replace(/[^a-zA-Z0-9 ]/g, '').trim();
-      const destino = FileSystem.documentDirectory + `${nomeLimpo}.mp3`;
-      const urlDownload = `${BASE_URL}/musicas/baixar/${item.id}?titulo=${encodeURIComponent(nomeLimpo)}`;
-
-      const headers = await getHeaders();
-      const { uri } = await FileSystem.downloadAsync(urlDownload, destino, { headers });
-
-      const saveHeaders = await getHeaders(true);
-      const saveRes = await fetch(`${BASE_URL}/songs/save`, {
-        method: 'POST',
-        headers: saveHeaders,
-        body: JSON.stringify({
-          title: item.titulo,
-          artist: item.artista,
-          uri,
-          coverUrl: item.capa,
-          sourceId: item.id,
-        }),
-      });
-
-      if (saveRes.status === 401 || saveRes.status === 403) {
-        throw new Error('Sessao invalida. Faca login novamente.');
-      }
-      if (!saveRes.ok) throw new Error('Download OK, mas não foi possível salvar na nuvem.');
-
-      setDownloadedIds((prev) => new Set(prev).add(item.id));
-      Alert.alert('Salvo! 🎵', `"${item.titulo}" está na sua biblioteca.`);
-    } catch (e: any) {
-      Alert.alert('Erro', e.message || 'Não foi possível baixar a música.');
-    } finally {
-      setDownloadingId(null);
-    }
-  };
-
-  const renderResult = ({ item }: { item: SearchResult }) => {
-    const downloaded = downloadedIds.has(item.id);
-    const isLoading = downloadingId === item.id;
-
+  const renderItem = ({ item }: { item: HomePlaylist }) => {
     return (
-      <View style={styles.card}>
-        {item.capa
-          ? <Image source={{ uri: item.capa }} style={styles.cover} />
-          : (
-            <View style={styles.coverPlaceholder}>
-              <Ionicons name="musical-note" size={24} color="#444" />
-            </View>
-          )
-        }
-        <View style={styles.cardInfo}>
-          <Text style={styles.cardTitle} numberOfLines={2}>{item.titulo}</Text>
-          <Text style={styles.cardArtist} numberOfLines={1}>{item.artista}</Text>
+      <TouchableOpacity
+        style={styles.card}
+        onPress={() => openPlaylist(item)}
+        activeOpacity={0.82}
+      >
+        {item.iconUrl ? (
+          <Image source={{ uri: item.iconUrl }} style={styles.cover} />
+        ) : (
+          <View style={styles.coverPlaceholder}>
+            <Ionicons
+              name={item.kind === 'most-downloaded' ? 'flame' : 'musical-notes'}
+              size={28}
+              color="#1db954"
+            />
+          </View>
+        )}
+
+        <View style={styles.meta}>
+          <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.description} numberOfLines={2}>{item.description}</Text>
         </View>
-        <TouchableOpacity
-          style={[styles.btnDownload, downloaded && styles.btnDownloaded]}
-          onPress={() => !downloaded && baixar(item)}
-          disabled={isLoading || downloaded}
-          activeOpacity={0.8}
-        >
-          {isLoading
-            ? <ActivityIndicator size="small" color="#fff" />
-            : downloaded
-              ? <Ionicons name="checkmark" size={18} color="#1db954" />
-              : <Ionicons name="arrow-down-circle-outline" size={20} color="#fff" />
-          }
-        </TouchableOpacity>
-      </View>
+
+        <Ionicons name="chevron-forward" size={20} color="#7a7a7a" />
+      </TouchableOpacity>
     );
   };
 
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
-        {/* Header */}
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Olá, {username || 'músico'} 👋</Text>
-            <Text style={styles.headerTitle}>O que vai ouvir hoje?</Text>
-          </View>
-          <View style={styles.avatarCircle}>
-            <Ionicons name="person" size={20} color="#1db954" />
+            <Text style={styles.headerTitle}>Playlists para você</Text>
           </View>
         </View>
 
-        {/* Search bar */}
-        <View style={styles.searchRow}>
-          <View style={styles.searchBox}>
-            <Ionicons name="search-outline" size={18} color="#666" style={{ marginRight: 8 }} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Buscar músicas, artistas..."
-              placeholderTextColor="#555"
-              value={query}
-              onChangeText={setQuery}
-              returnKeyType="search"
-              onSubmitEditing={buscar}
-            />
-            {query.length > 0 && (
-              <TouchableOpacity onPress={() => { setQuery(''); setResults([]); }}>
-                <Ionicons name="close-circle" size={18} color="#555" />
-              </TouchableOpacity>
-            )}
-          </View>
-          <TouchableOpacity
-            style={[styles.searchBtn, searching && { opacity: 0.7 }]}
-            onPress={buscar}
-            disabled={searching}
-            activeOpacity={0.85}
-          >
-            {searching
-              ? <ActivityIndicator size="small" color="#121212" />
-              : <Text style={styles.searchBtnText}>Buscar</Text>
-            }
-          </TouchableOpacity>
-        </View>
-
-        {/* Results */}
-        {results.length === 0 && !searching ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="musical-notes-outline" size={64} color="#2a2a2a" />
-            <Text style={styles.emptyTitle}>Descubra músicas</Text>
-            <Text style={styles.emptySubtitle}>Pesquise pelo título ou artista e baixe para ouvir offline.</Text>
+        {loading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator size="large" color="#1db954" />
           </View>
         ) : (
           <FlatList
-            data={results}
+            data={playlists}
             keyExtractor={(item) => item.id}
-            renderItem={renderResult}
-            contentContainerStyle={{ paddingBottom: 20 }}
+            renderItem={renderItem}
             showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{ paddingBottom: 170 }}
+            ListEmptyComponent={
+              <View style={styles.emptyState}>
+                <Ionicons name="albums-outline" size={60} color="#3b3b3b" />
+                <Text style={styles.emptyTitle}>Sem playlists disponíveis</Text>
+                <Text style={styles.emptySubtitle}>Assim que o admin criar playlists, elas aparecem aqui.</Text>
+              </View>
+            }
           />
         )}
       </View>
@@ -206,86 +183,45 @@ export default function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#121212', paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0 },
-  container: { flex: 1, paddingHorizontal: 18 },
-
-  header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 20,
-    paddingBottom: 24,
-  },
-  greeting: { fontSize: 13, color: '#888', marginBottom: 2 },
-  headerTitle: { fontSize: 22, fontWeight: 'bold', color: '#fff' },
-  avatarCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#1db95420',
-    borderWidth: 1,
-    borderColor: '#1db95440',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 20 },
-  searchBox: {
+  safe: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1e1e1e',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#2c2c2c',
-    paddingHorizontal: 14,
-    height: 48,
+    backgroundColor: '#121212',
+    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
   },
-  searchInput: { flex: 1, color: '#fff', fontSize: 15 },
-  searchBtn: {
-    backgroundColor: '#1db954',
-    borderRadius: 10,
-    height: 48,
-    paddingHorizontal: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  searchBtnText: { color: '#121212', fontWeight: 'bold', fontSize: 14 },
+  container: { flex: 1, paddingHorizontal: 18 },
+  header: { paddingTop: 20, paddingBottom: 18 },
+  greeting: { fontSize: 13, color: '#888', marginBottom: 2 },
+  headerTitle: { fontSize: 24, fontWeight: '700', color: '#fff' },
+
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 
   card: {
     flexDirection: 'row',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
     alignItems: 'center',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#242424',
+    padding: 12,
+    marginBottom: 10,
   },
-  cover: { width: 58, height: 58, borderRadius: 8, marginRight: 12 },
+  cover: { width: 62, height: 62, borderRadius: 10, marginRight: 12 },
   coverPlaceholder: {
-    width: 58,
-    height: 58,
-    borderRadius: 8,
-    backgroundColor: '#242424',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 62,
+    height: 62,
+    borderRadius: 10,
     marginRight: 12,
-  },
-  cardInfo: { flex: 1 },
-  cardTitle: { color: '#fff', fontSize: 14, fontWeight: '600', marginBottom: 4 },
-  cardArtist: { color: '#888', fontSize: 12 },
-  btnDownload: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#1db954',
+    backgroundColor: '#202020',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#2d2d2d',
   },
-  btnDownloaded: { backgroundColor: '#1db95420', borderWidth: 1, borderColor: '#1db95440' },
+  meta: { flex: 1, marginRight: 8 },
+  title: { color: '#fff', fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  description: { color: '#939393', fontSize: 13, lineHeight: 18 },
 
-  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingBottom: 80 },
-  emptyTitle: { color: '#444', fontSize: 18, fontWeight: '600', marginTop: 20, marginBottom: 8 },
-  emptySubtitle: { color: '#333', fontSize: 13, textAlign: 'center', paddingHorizontal: 30 },
+  emptyState: { paddingTop: 100, alignItems: 'center' },
+  emptyTitle: { color: '#6e6e6e', fontSize: 17, fontWeight: '600', marginTop: 16, marginBottom: 8 },
+  emptySubtitle: { color: '#4f4f4f', fontSize: 13, textAlign: 'center', paddingHorizontal: 30 },
 });

@@ -22,6 +22,7 @@ import {
   stopPlayer,
   type PlayerSong,
 } from '../../services/playerSetup';
+import { useActiveTrackFallback } from '../../hooks/use-active-track-fallback';
 
 const BASE_URL = 'https://pseudoprincely-plumular-nikolas.ngrok-free.dev/api';
 const API_KEY = 'REDACTED_API_KEY';
@@ -52,7 +53,7 @@ export default function LibraryScreen() {
 
   const router = useRouter();
   const playbackStatus = useIsPlaying();
-  const activeTrack = useActiveTrack();
+  const activeTrack = useActiveTrackFallback();
   const progress = useProgress(800);
 
   const localQueue = songs.filter((song) => song.isLocal && song.uriLocal);
@@ -118,17 +119,19 @@ export default function LibraryScreen() {
     Event.PlaybackPlayWhenReadyChanged,
     Event.PlaybackState,
   ], (event) => {
+    const safeEvent = event as any;
+
     if (event.type === Event.PlaybackPlayWhenReadyChanged) {
       setPlayWhenReady(event.playWhenReady);
     }
 
-    const nextIndex = typeof event.index === 'number' ? event.index : null;
+    const nextIndex = typeof safeEvent.index === 'number' ? safeEvent.index : null;
     if (nextIndex != null) {
       setActiveQueueIndex(nextIndex);
     }
 
-    if (event.track?.id != null) {
-      setOptimisticSongId(String(event.track.id));
+    if (safeEvent.track?.id != null) {
+      setOptimisticSongId(String(safeEvent.track.id));
     }
 
     syncActiveFromPlayer().catch(() => {});
@@ -505,50 +508,6 @@ export default function LibraryScreen() {
         )}
       </View>
 
-      {/* Mini Player */}
-      {currentSong && (
-        <View style={styles.player}>
-          <View style={styles.playerInfo}>
-            {currentSong.capa
-              ? <Image source={{ uri: currentSong.capa }} style={styles.playerCover} />
-              : (
-                <View style={[styles.playerCover, styles.playerCoverPlaceholder]}>
-                  <Ionicons name="musical-notes" size={18} color="#1db954" />
-                </View>
-              )
-            }
-            <View style={styles.playerMeta}>
-              <Text style={styles.playerTitle} numberOfLines={1}>{currentSong.nome}</Text>
-              <Text style={styles.playerArtist} numberOfLines={1}>{currentSong.artista}</Text>
-            </View>
-          </View>
-
-          <View style={styles.playerControls}>
-            <TouchableOpacity onPress={() => setShuffle(!shuffle)} style={styles.ctrlBtn}>
-              <Ionicons name="shuffle" size={20} color={shuffle ? '#1db954' : '#555'} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => { prevSong().catch(() => {}); }} style={styles.ctrlBtn}>
-              <Ionicons name="play-skip-back" size={22} color="#ccc" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.playBtn} onPress={togglePlayPause}>
-              <Ionicons name={shouldShowPause ? 'pause' : 'play'} size={22} color="#121212" style={!shouldShowPause ? { marginLeft: 2 } : {}} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => { nextSong().catch(() => {}); }} style={styles.ctrlBtn}>
-              <Ionicons name="play-skip-forward" size={22} color="#ccc" />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.progressWrap}>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${progressRatio * 100}%` }]} />
-            </View>
-            <View style={styles.progressLabels}>
-              <Text style={styles.progressText}>{formatTime(progress.position)}</Text>
-              <Text style={styles.progressText}>{formatTime(progress.duration)}</Text>
-            </View>
-          </View>
-        </View>
-      )}
     </SafeAreaView>
   );
 }

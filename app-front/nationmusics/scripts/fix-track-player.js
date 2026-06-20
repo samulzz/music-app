@@ -56,6 +56,16 @@ function patchMusicModule(content) {
   let next = content;
 
   next = next.replace(
+    'fun updateMetadataForTrack(index: Int, map: ReadableMap?, callback: Promise) =\n        scope.launch {',
+    'fun updateMetadataForTrack(index: Int, map: ReadableMap?, callback: Promise) {\n        scope.launch {'
+  );
+
+  next = next.replace(
+    '                callback.resolve(null)\n            }\n        }',
+    '                callback.resolve(null)\n            }\n        }\n    }'
+  );
+
+  next = next.replace(
     'callback.resolve(Arguments.fromBundle(musicService.tracks[index].originalItem))',
     'val originalItem: Bundle = musicService.tracks[index].originalItem ?: Bundle()\n            callback.resolve(Arguments.fromBundle(originalItem))'
   );
@@ -64,6 +74,50 @@ function patchMusicModule(content) {
     'Arguments.fromBundle(musicService.tracks[musicService.getCurrentTrackIndex()].originalItem)',
     'val originalItem: Bundle = musicService.tracks[musicService.getCurrentTrackIndex()].originalItem ?: Bundle()\n                Arguments.fromBundle(originalItem)'
   );
+
+  // RN new architecture TurboModule parser expects @ReactMethod methods to have void/Unit return.
+  // Track-player declares many as expression bodies (`= scope.launch { ... }`) which return Job.
+  // Convert those methods to block body wrappers that launch the coroutine and return Unit.
+  const lines = next.split('\n');
+  const converted = [];
+  const launchStack = [];
+
+  for (const line of lines) {
+    const match = line.match(/^(\s*)fun\s+([A-Za-z0-9_]+\([^)]*\))\s*=\s*scope\.launch\s*\{\s*$/);
+
+    if (match) {
+      const indent = match[1] || '';
+      const signature = match[2];
+
+      converted.push(`${indent}fun ${signature} {`);
+      converted.push(`${indent}    scope.launch {`);
+
+      launchStack.push({
+        functionIndent: indent,
+        launchDepth: 1,
+      });
+
+      continue;
+    }
+
+    converted.push(line);
+
+    if (!launchStack.length) {
+      continue;
+    }
+
+    const top = launchStack[launchStack.length - 1];
+    const opens = (line.match(/\{/g) || []).length;
+    const closes = (line.match(/\}/g) || []).length;
+    top.launchDepth += opens - closes;
+
+    if (top.launchDepth === 0) {
+      converted.push(`${top.functionIndent}}`);
+      launchStack.pop();
+    }
+  }
+
+  next = converted.join('\n');
 
   return next;
 }

@@ -35,6 +35,7 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
+                .requestMatchers("/api/admin/**").permitAll()
                 .anyRequest().authenticated()
             )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, authException) -> {

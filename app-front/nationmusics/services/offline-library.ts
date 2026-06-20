@@ -7,6 +7,16 @@ import { musicDownloadUrl } from './config';
 
 const INDEX_KEY = 'nationmusics.offline-library.v2';
 const MUSIC_DIRECTORY_NAME = 'nationmusics-audio';
+const DOWNLOAD_ATTEMPTS = 3;
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isTimeoutError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /timeout|timed out|SocketTimeoutException/i.test(message);
+}
 
 function getMusicDirectory() {
   const directory = new Directory(Paths.document, MUSIC_DIRECTORY_NAME);
@@ -70,7 +80,18 @@ export async function findOfflineSong(song: MusicSong) {
   const library = await getOfflineLibrary();
   const identity = songIdentity(song);
   const indexed = library.find((candidate) => songIdentity(candidate) === identity);
-  if (indexed) return indexed;
+  if (indexed) {
+    const refreshed: MusicSong = {
+      ...indexed,
+      title: song.title || indexed.title,
+      artist: song.artist || indexed.artist,
+      artworkUrl: song.artworkUrl || indexed.artworkUrl,
+    };
+    if (refreshed.artworkUrl !== indexed.artworkUrl) {
+      await upsertOfflineSong(refreshed);
+    }
+    return refreshed;
+  }
 
   const currentFile = fileForSong(song);
   const legacyFile = legacyFileForSong(song);
@@ -117,15 +138,38 @@ export async function downloadSong(
   if (partial.exists) partial.delete();
 
   try {
-    const downloaded = await File.downloadFileAsync(
-      musicDownloadUrl(sourceId, song.title),
-      partial,
-      {
-        headers,
-        idempotent: true,
-        onProgress,
+    let downloaded: File | null = null;
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt += 1) {
+      try {
+        if (partial.exists) partial.delete();
+        downloaded = await File.downloadFileAsync(
+          musicDownloadUrl(sourceId, song.title),
+          partial,
+          {
+            headers,
+            idempotent: true,
+            onProgress,
+          }
+        );
+        break;
+      } catch (error) {
+        lastError = error;
+        if (partial.exists) partial.delete();
+        if (!isTimeoutError(error) || attempt === DOWNLOAD_ATTEMPTS) {
+          throw error;
+        }
+
+        // A primeira requisição pode expirar enquanto o servidor termina a
+        // conversão. As próximas usam o arquivo já armazenado no cache.
+        await wait(attempt * 4000);
       }
-    );
+    }
+
+    if (!downloaded) {
+      throw lastError || new Error('O download não foi concluído.');
+    }
 
     if (destination.exists) destination.delete();
     await downloaded.move(destination);
@@ -141,6 +185,9 @@ export async function downloadSong(
     return offlineSong;
   } catch (error) {
     if (partial.exists) partial.delete();
+    if (isTimeoutError(error)) {
+      throw new Error('A música demorou para ser preparada. Tente novamente em alguns segundos.');
+    }
     throw error;
   }
 }

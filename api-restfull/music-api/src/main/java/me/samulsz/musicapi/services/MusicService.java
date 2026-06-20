@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class MusicService {
@@ -30,6 +31,7 @@ public class MusicService {
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final Map<String, Object> downloadLocks = new ConcurrentHashMap<>();
 
     public MusicService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -100,11 +102,24 @@ public class MusicService {
                 String[] partes = linha.split("\\|", 4);
 
                 if (partes.length >= 4) {
+                    String videoId = partes[0].trim();
+                    if (!videoId.matches("[A-Za-z0-9_-]{11}")) {
+                        continue;
+                    }
+
+                    String thumbnail = partes[3].trim();
+                    if (thumbnail.isBlank()
+                            || thumbnail.equalsIgnoreCase("NA")
+                            || thumbnail.equalsIgnoreCase("none")
+                            || !thumbnail.startsWith("http")) {
+                        thumbnail = "https://i.ytimg.com/vi/" + videoId + "/hqdefault.jpg";
+                    }
+
                     resultados.add(Map.of(
-                            "id", partes[0],
+                            "id", videoId,
                             "titulo", partes[1],
                             "artista", partes[2],
-                            "capa", partes[3]
+                            "capa", thumbnail
                     ));
                 }
             }
@@ -216,6 +231,17 @@ public class MusicService {
     }
 
     public File baixarAudio(String videoId) {
+        Object lock = downloadLocks.computeIfAbsent(videoId, ignored -> new Object());
+        try {
+            synchronized (lock) {
+                return baixarAudioInterno(videoId);
+            }
+        } finally {
+            downloadLocks.remove(videoId, lock);
+        }
+    }
+
+    private File baixarAudioInterno(String videoId) {
         if (videoId != null && videoId.startsWith(DEEZER_PREFIX)) {
             return baixarPreviaDaDeezer(videoId.substring(DEEZER_PREFIX.length()));
         }
@@ -246,6 +272,13 @@ public class MusicService {
             command.add(ytDlpPath);
             temporaryCookies = addCookiesIfConfigured(command);
             command.add("-x");
+            command.add("--no-playlist");
+            command.add("--concurrent-fragments");
+            command.add("4");
+            command.add("--socket-timeout");
+            command.add("20");
+            command.add("--retries");
+            command.add("3");
             command.add("--audio-format");
             command.add("mp3");
             command.add("--ffmpeg-location");

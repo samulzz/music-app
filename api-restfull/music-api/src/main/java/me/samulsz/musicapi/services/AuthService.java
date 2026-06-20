@@ -21,16 +21,26 @@ public class AuthService {
     @Autowired
     private JwtUtil jwtUtil;
 
-    public void register(AuthRequest request) {
-        if (userRepository.findByUsername(request.getUsername()).isPresent()) {
+    public AuthResponse register(AuthRequest request) {
+        if (request.getUsername() == null || request.getUsername().trim().length() < 3) {
+            throw new RuntimeException("O nome de usuário deve ter pelo menos 3 caracteres.");
+        }
+        if (request.getPassword() == null || request.getPassword().length() < 6) {
+            throw new RuntimeException("A senha deve ter pelo menos 6 caracteres.");
+        }
+
+        String username = request.getUsername().trim();
+        if (userRepository.findByUsername(username).isPresent()) {
             throw new RuntimeException("Este usuário já existe!");
         }
 
         User newUser = new User();
-        newUser.setUsername(request.getUsername());
+        newUser.setUsername(username);
         newUser.setPassword(passwordEncoder.encode(request.getPassword()));
-        
-        userRepository.save(newUser);
+
+        User savedUser = userRepository.save(newUser);
+        String token = jwtUtil.generateToken(savedUser.getUsername());
+        return new AuthResponse(token, savedUser.getUsername(), savedUser.getDownloadedSongs());
     }
 
     public AuthResponse login(AuthRequest request) {

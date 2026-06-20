@@ -40,20 +40,13 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      const response = await apiRequest<LoginResponse | void>(`/auth/${mode}`, {
+      const data = await apiRequest<LoginResponse>(`/auth/${mode}`, {
         method: 'POST',
         authenticated: false,
         json: true,
         body: JSON.stringify({ username: normalizedUsername, password }),
       });
 
-      if (mode === 'register') {
-        Alert.alert('Conta criada', 'Agora entre com seus dados.');
-        setMode('login');
-        return;
-      }
-
-      const data = response as LoginResponse;
       const token = data?.token?.replace(/^Bearer\s+/i, '').trim();
       if (!token) throw new Error('O servidor não retornou uma sessão válida.');
 

@@ -54,19 +54,26 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     throw new OfflineError();
   }
 
-  if (!response.ok) {
-    const body = (await response.text()).trim();
-    if (response.status === 401 || response.status === 403) {
-      throw new Error(body || 'Sessão inválida. Conecte-se e faça login novamente.');
+  const rawBody = response.status === 204 ? '' : await response.text();
+  let parsedBody: unknown = rawBody;
+  if (rawBody.trim()) {
+    try {
+      parsedBody = JSON.parse(rawBody);
+    } catch {
+      parsedBody = rawBody;
     }
-    throw new Error(body || `Erro do servidor (${response.status}).`);
+  }
+
+  if (!response.ok) {
+    const message = typeof parsedBody === 'object' && parsedBody !== null && 'message' in parsedBody
+      ? String(parsedBody.message)
+      : String(parsedBody || '').trim();
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(message || 'Sessão inválida. Conecte-se e faça login novamente.');
+    }
+    throw new Error(message || `Erro do servidor (${response.status}).`);
   }
 
   if (response.status === 204) return undefined as T;
-
-  const contentType = response.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    return (await response.text()) as T;
-  }
-  return response.json() as Promise<T>;
+  return parsedBody as T;
 }

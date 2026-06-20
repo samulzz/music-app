@@ -26,6 +26,7 @@ public class MusicService {
 
     private static final String AUDIUS_PREFIX = "audius-";
     private static final String AUDIUS_APP_NAME = "NationMusics";
+    private static final String DEEZER_PREFIX = "deezer-";
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -76,6 +77,16 @@ public class MusicService {
     }
 
     public List<Map<String, String>> buscarNoYouTube(String query) {
+        List<Map<String, String>> resultadosPublicos = buscarNaDeezer(query);
+        if (!resultadosPublicos.isEmpty()) {
+            return resultadosPublicos;
+        }
+
+        resultadosPublicos.addAll(buscarNaAudius(query));
+        if (!resultadosPublicos.isEmpty()) {
+            return resultadosPublicos;
+        }
+
         List<Map<String, String>> resultados = new ArrayList<>();
         File temporaryCookies = null;
         
@@ -113,8 +124,48 @@ public class MusicService {
             deleteTemporaryCookies(temporaryCookies);
         }
 
-        if (resultados.isEmpty()) {
-            resultados.addAll(buscarNaAudius(query));
+        return resultados;
+    }
+
+    private List<Map<String, String>> buscarNaDeezer(String query) {
+        List<Map<String, String>> resultados = new ArrayList<>();
+        try {
+            String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
+            URI uri = URI.create("https://api.deezer.com/search?q=" + encodedQuery + "&limit=5");
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofSeconds(20))
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+            );
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                return resultados;
+            }
+
+            JsonNode tracks = objectMapper.readTree(response.body()).path("data");
+            if (!tracks.isArray()) {
+                return resultados;
+            }
+            for (JsonNode track : tracks) {
+                String id = track.path("id").asText();
+                String title = track.path("title").asText("Música");
+                String artist = track.path("artist").path("name").asText("Deezer");
+                String cover = track.path("album").path("cover_medium").asText("");
+                String preview = track.path("preview").asText("");
+                if (!id.isBlank() && !preview.isBlank()) {
+                    resultados.add(Map.of(
+                            "id", DEEZER_PREFIX + id,
+                            "titulo", title,
+                            "artista", artist,
+                            "capa", cover
+                    ));
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao buscar na Deezer: " + e.getMessage());
         }
         return resultados;
     }
@@ -168,6 +219,9 @@ public class MusicService {
     }
 
     public File baixarAudio(String videoId) {
+        if (videoId != null && videoId.startsWith(DEEZER_PREFIX)) {
+            return baixarPreviaDaDeezer(videoId.substring(DEEZER_PREFIX.length()));
+        }
         if (videoId != null && videoId.startsWith(AUDIUS_PREFIX)) {
             return baixarAudioDaAudius(videoId.substring(AUDIUS_PREFIX.length()));
         }
@@ -222,6 +276,59 @@ public class MusicService {
             deleteTemporaryCookies(temporaryCookies);
         }
 
+        return null;
+    }
+
+    private File baixarPreviaDaDeezer(String trackId) {
+        if (!trackId.matches("\\d+")) {
+            return null;
+        }
+
+        File pasta = new File("downloads/");
+        if (!pasta.exists() && !pasta.mkdirs()) {
+            return null;
+        }
+        File arquivoMp3 = new File(pasta, DEEZER_PREFIX + trackId + ".mp3");
+        if (arquivoMp3.exists() && arquivoMp3.length() > 0) {
+            return arquivoMp3;
+        }
+
+        try {
+            HttpRequest metadataRequest = HttpRequest.newBuilder(
+                            URI.create("https://api.deezer.com/track/" + trackId))
+                    .timeout(Duration.ofSeconds(20))
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+            HttpResponse<String> metadataResponse = httpClient.send(
+                    metadataRequest,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+            );
+            String previewUrl = objectMapper.readTree(metadataResponse.body()).path("preview").asText("");
+            if (previewUrl.isBlank()) {
+                return null;
+            }
+
+            HttpRequest audioRequest = HttpRequest.newBuilder(URI.create(previewUrl))
+                    .timeout(Duration.ofMinutes(2))
+                    .header("Accept", "audio/mpeg,audio/*")
+                    .GET()
+                    .build();
+            HttpResponse<java.nio.file.Path> audioResponse = httpClient.send(
+                    audioRequest,
+                    HttpResponse.BodyHandlers.ofFile(arquivoMp3.toPath())
+            );
+            if (audioResponse.statusCode() >= 200 && audioResponse.statusCode() < 300
+                    && arquivoMp3.exists() && arquivoMp3.length() > 0) {
+                return arquivoMp3;
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao baixar prévia da Deezer: " + e.getMessage());
+        }
+
+        if (arquivoMp3.exists()) {
+            arquivoMp3.delete();
+        }
         return null;
     }
 

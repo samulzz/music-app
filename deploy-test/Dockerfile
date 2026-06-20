@@ -1,10 +1,15 @@
 FROM eclipse-temurin:21-jre-jammy
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg python3 \
+    && apt-get install -y --no-install-recommends ca-certificates curl ffmpeg python3 unzip \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
        -o /usr/local/bin/yt-dlp \
+    && curl -fsSL https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip \
+       -o /tmp/deno.zip \
+    && unzip -q /tmp/deno.zip -d /usr/local/bin \
     && chmod 0755 /usr/local/bin/yt-dlp \
+    && chmod 0755 /usr/local/bin/deno \
+    && rm -f /tmp/deno.zip \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

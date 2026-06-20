@@ -77,16 +77,6 @@ public class MusicService {
     }
 
     public List<Map<String, String>> buscarNoYouTube(String query) {
-        List<Map<String, String>> resultadosPublicos = buscarNaDeezer(query);
-        if (!resultadosPublicos.isEmpty()) {
-            return resultadosPublicos;
-        }
-
-        resultadosPublicos.addAll(buscarNaAudius(query));
-        if (!resultadosPublicos.isEmpty()) {
-            return resultadosPublicos;
-        }
-
         List<Map<String, String>> resultados = new ArrayList<>();
         File temporaryCookies = null;
         
@@ -95,6 +85,7 @@ public class MusicService {
             command.add(ytDlpPath);
             temporaryCookies = addCookiesIfConfigured(command);
             command.add("ytsearch5:" + query);
+            command.add("--flat-playlist");
             command.add("--print");
             command.add("%(id)s|%(title)s|%(uploader)s|%(thumbnail)s");
             ProcessBuilder builder = new ProcessBuilder(command);
@@ -124,6 +115,12 @@ public class MusicService {
             deleteTemporaryCookies(temporaryCookies);
         }
 
+        if (resultados.isEmpty()) {
+            resultados.addAll(buscarNaDeezer(query));
+        }
+        if (resultados.isEmpty()) {
+            resultados.addAll(buscarNaAudius(query));
+        }
         return resultados;
     }
 

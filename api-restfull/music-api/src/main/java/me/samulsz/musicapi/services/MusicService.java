@@ -2,18 +2,41 @@ package me.samulsz.musicapi.services;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.InputStreamReader;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 @Service
 public class MusicService {
+
+    private static final String AUDIUS_PREFIX = "audius-";
+    private static final String AUDIUS_APP_NAME = "NationMusics";
+
+    private final ObjectMapper objectMapper;
+    private final HttpClient httpClient;
+
+    public MusicService(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+        this.httpClient = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .connectTimeout(Duration.ofSeconds(15))
+                .build();
+    }
 
     @Value("${tools.yt-dlp-path}")
     private String ytDlpPath;
@@ -89,10 +112,66 @@ public class MusicService {
         } finally {
             deleteTemporaryCookies(temporaryCookies);
         }
+
+        if (resultados.isEmpty()) {
+            resultados.addAll(buscarNaAudius(query));
+        }
+        return resultados;
+    }
+
+    private List<Map<String, String>> buscarNaAudius(String query) {
+        List<Map<String, String>> resultados = new ArrayList<>();
+        try {
+            String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8);
+            URI uri = URI.create("https://api.audius.co/v1/tracks/search?query="
+                    + encodedQuery + "&app_name=" + AUDIUS_APP_NAME);
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofSeconds(20))
+                    .header("Accept", "application/json")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = httpClient.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+            );
+
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                return resultados;
+            }
+
+            JsonNode tracks = objectMapper.readTree(response.body()).path("data");
+            if (!tracks.isArray()) {
+                return resultados;
+            }
+
+            for (JsonNode track : tracks) {
+                String id = track.path("id").asText();
+                String title = track.path("title").asText("Música");
+                String artist = track.path("user").path("name").asText("Audius");
+                String cover = track.path("artwork").path("_480x480").asText("");
+                if (!id.isBlank()) {
+                    resultados.add(Map.of(
+                            "id", AUDIUS_PREFIX + id,
+                            "titulo", title,
+                            "artista", artist,
+                            "capa", cover
+                    ));
+                }
+                if (resultados.size() == 5) {
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao buscar na Audius: " + e.getMessage());
+        }
         return resultados;
     }
 
     public File baixarAudio(String videoId) {
+        if (videoId != null && videoId.startsWith(AUDIUS_PREFIX)) {
+            return baixarAudioDaAudius(videoId.substring(AUDIUS_PREFIX.length()));
+        }
+
         String url = "https://www.youtube.com/watch?v=" + videoId;
         String diretorioSaida = "downloads/";
         String arquivoSaida = diretorioSaida + videoId + ".mp3";
@@ -143,6 +222,47 @@ public class MusicService {
             deleteTemporaryCookies(temporaryCookies);
         }
 
+        return null;
+    }
+
+    private File baixarAudioDaAudius(String trackId) {
+        if (!trackId.matches("[A-Za-z0-9]+")) {
+            return null;
+        }
+
+        File pasta = new File("downloads/");
+        if (!pasta.exists() && !pasta.mkdirs()) {
+            return null;
+        }
+
+        File arquivoMp3 = new File(pasta, AUDIUS_PREFIX + trackId + ".mp3");
+        if (arquivoMp3.exists() && arquivoMp3.length() > 0) {
+            return arquivoMp3;
+        }
+
+        try {
+            URI uri = URI.create("https://api.audius.co/v1/tracks/" + trackId
+                    + "/stream?app_name=" + AUDIUS_APP_NAME);
+            HttpRequest request = HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofMinutes(3))
+                    .header("Accept", "audio/mpeg,audio/*")
+                    .GET()
+                    .build();
+            HttpResponse<java.nio.file.Path> response = httpClient.send(
+                    request,
+                    HttpResponse.BodyHandlers.ofFile(arquivoMp3.toPath())
+            );
+            if (response.statusCode() >= 200 && response.statusCode() < 300
+                    && arquivoMp3.exists() && arquivoMp3.length() > 0) {
+                return arquivoMp3;
+            }
+        } catch (Exception e) {
+            System.err.println("Erro ao baixar áudio da Audius: " + e.getMessage());
+        }
+
+        if (arquivoMp3.exists()) {
+            arquivoMp3.delete();
+        }
         return null;
     }
 }

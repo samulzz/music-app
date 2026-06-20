@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useNetInfo } from '@react-native-community/netinfo';
 
 import type { ApiSearchSong, MusicSong } from '../../types/music';
@@ -77,6 +78,7 @@ const SearchCard = memo(function SearchCard({
 });
 
 export default function SearchScreen() {
+  const router = useRouter();
   const netInfo = useNetInfo();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MusicSong[]>([]);
@@ -206,6 +208,18 @@ export default function SearchScreen() {
           </TouchableOpacity>
         </View>
 
+        <TouchableOpacity
+          style={styles.spotifyButton}
+          onPress={() => router.push('/spotify-import' as never)}
+        >
+          <Ionicons name="list-circle" size={22} color="#1db954" />
+          <View style={styles.spotifyButtonText}>
+            <Text style={styles.spotifyTitle}>Importar playlist do Spotify</Text>
+            <Text style={styles.spotifySubtitle}>Cole um link e baixe as músicas para ouvir offline.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={19} color="#777" />
+        </TouchableOpacity>
+
         <FlatList
           data={results}
           keyExtractor={(item) => item.sourceId || item.id}
@@ -297,6 +311,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  spotifyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#275d38',
+    backgroundColor: '#17281d',
+    borderRadius: 12,
+    paddingHorizontal: 13,
+    paddingVertical: 11,
+    marginBottom: 14,
+  },
+  spotifyButtonText: { flex: 1 },
+  spotifyTitle: { color: '#e8f6ec', fontSize: 13, fontWeight: '700' },
+  spotifySubtitle: { color: '#83a98e', fontSize: 10, marginTop: 2 },
   list: { paddingBottom: 175 },
   card: {
     minHeight: 76,

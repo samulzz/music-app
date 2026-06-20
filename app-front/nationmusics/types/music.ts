@@ -33,6 +33,22 @@ export type ApiPlaylist = {
   iconUrl?: string;
 };
 
+export type SpotifyImportTrack = {
+  spotifyId: string;
+  title: string;
+  artist: string;
+  durationMs: number;
+};
+
+export type SpotifyPlaylistPreview = {
+  spotifyId: string;
+  name: string;
+  coverUrl?: string;
+  totalTracks: number;
+  truncated: boolean;
+  tracks: SpotifyImportTrack[];
+};
+
 export function fromApiLibrarySong(song: ApiLibrarySong): MusicSong {
   return {
     id: String(song.id),

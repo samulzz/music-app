@@ -160,7 +160,7 @@ export default function SpotifyImportScreen() {
           </TouchableOpacity>
           <View style={styles.headerText}>
             <Text style={styles.title}>Importar do Spotify</Text>
-            <Text style={styles.subtitle}>Até 50 faixas por playlist pública.</Text>
+            <Text style={styles.subtitle}>Até 200 faixas por playlist pública.</Text>
           </View>
         </View>
 

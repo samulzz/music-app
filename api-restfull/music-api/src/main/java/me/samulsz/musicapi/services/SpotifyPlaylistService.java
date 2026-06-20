@@ -28,7 +28,7 @@ public class SpotifyPlaylistService {
             "<script[^>]+id=[\"']__NEXT_DATA__[\"'][^>]*>(.*?)</script>",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL
     );
-    private static final int MAX_TRACKS = 50;
+    private static final int MAX_TRACKS = 200;
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;

@@ -10,6 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import java.io.File;
 import java.util.List;
@@ -57,5 +58,15 @@ public class MusicController {
                 .contentType(MediaType.parseMediaType("audio/mpeg"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + nomeLimpo + ".mp3\"")
                 .body(resource);
+    }
+
+    @PostMapping("/preparar/{id}")
+    public ResponseEntity<?> prepararMusica(@PathVariable String id) {
+        return ResponseEntity.accepted().body(musicService.prepararAudio(id));
+    }
+
+    @GetMapping("/preparar/{id}/status")
+    public ResponseEntity<?> statusPreparacao(@PathVariable String id) {
+        return ResponseEntity.ok(musicService.statusAudio(id));
     }
 }

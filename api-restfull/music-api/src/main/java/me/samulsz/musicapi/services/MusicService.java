@@ -21,6 +21,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import jakarta.annotation.PreDestroy;
 
 @Service
 public class MusicService {
@@ -32,6 +35,9 @@ public class MusicService {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final Map<String, Object> downloadLocks = new ConcurrentHashMap<>();
+    private final Map<String, String> preparationStatus = new ConcurrentHashMap<>();
+    private final Map<String, String> preparationErrors = new ConcurrentHashMap<>();
+    private final ExecutorService preparationExecutor = Executors.newSingleThreadExecutor();
 
     public MusicService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -239,6 +245,71 @@ public class MusicService {
         } finally {
             downloadLocks.remove(videoId, lock);
         }
+    }
+
+    public Map<String, String> prepararAudio(String videoId) {
+        File cached = findCachedAudio(videoId);
+        if (cached != null) {
+            preparationStatus.put(videoId, "ready");
+            return Map.of("status", "ready");
+        }
+
+        String current = preparationStatus.get(videoId);
+        if ("preparing".equals(current)) {
+            return Map.of("status", "preparing");
+        }
+
+        preparationStatus.put(videoId, "preparing");
+        preparationErrors.remove(videoId);
+        preparationExecutor.submit(() -> {
+            try {
+                File audio = baixarAudio(videoId);
+                if (audio != null && audio.exists() && audio.length() > 0) {
+                    preparationStatus.put(videoId, "ready");
+                } else {
+                    preparationErrors.put(videoId, "Não foi possível preparar esta música.");
+                    preparationStatus.put(videoId, "error");
+                }
+            } catch (Exception e) {
+                preparationErrors.put(videoId, "Falha ao preparar a música.");
+                preparationStatus.put(videoId, "error");
+            }
+        });
+        return Map.of("status", "preparing");
+    }
+
+    public Map<String, String> statusAudio(String videoId) {
+        File cached = findCachedAudio(videoId);
+        if (cached != null) {
+            preparationStatus.put(videoId, "ready");
+            return Map.of("status", "ready");
+        }
+
+        String status = preparationStatus.getOrDefault(videoId, "not_started");
+        if ("error".equals(status)) {
+            return Map.of(
+                    "status", "error",
+                    "message", preparationErrors.getOrDefault(videoId, "Não foi possível preparar esta música.")
+            );
+        }
+        return Map.of("status", status);
+    }
+
+    private File findCachedAudio(String videoId) {
+        if (videoId == null || videoId.isBlank()) return null;
+        String fileName;
+        if (videoId.startsWith(DEEZER_PREFIX) || videoId.startsWith(AUDIUS_PREFIX)) {
+            fileName = videoId + ".mp3";
+        } else {
+            fileName = videoId + ".mp3";
+        }
+        File file = new File("downloads/", fileName);
+        return file.isFile() && file.length() > 0 ? file : null;
+    }
+
+    @PreDestroy
+    public void shutdownPreparationExecutor() {
+        preparationExecutor.shutdownNow();
     }
 
     private File baixarAudioInterno(String videoId) {

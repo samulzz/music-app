@@ -2,12 +2,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths, type DownloadProgress } from 'expo-file-system';
 
 import type { MusicSong } from '../types/music';
-import { getAuthenticatedHeaders } from './api';
+import { apiRequest, getAuthenticatedHeaders } from './api';
 import { musicDownloadUrl } from './config';
 
 const INDEX_KEY = 'nationmusics.offline-library.v2';
 const MUSIC_DIRECTORY_NAME = 'nationmusics-audio';
 const DOWNLOAD_ATTEMPTS = 3;
+const PREPARATION_POLL_MS = 2000;
+const PREPARATION_TIMEOUT_MS = 8 * 60 * 1000;
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -16,6 +18,30 @@ function wait(milliseconds: number) {
 function isTimeoutError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
   return /timeout|timed out|SocketTimeoutException/i.test(message);
+}
+
+type PreparationResponse = {
+  status: 'not_started' | 'preparing' | 'ready' | 'error';
+  message?: string;
+};
+
+async function waitUntilPrepared(sourceId: string) {
+  await apiRequest<PreparationResponse>(`/musicas/preparar/${encodeURIComponent(sourceId)}`, {
+    method: 'POST',
+  });
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < PREPARATION_TIMEOUT_MS) {
+    await wait(PREPARATION_POLL_MS);
+    const result = await apiRequest<PreparationResponse>(
+      `/musicas/preparar/${encodeURIComponent(sourceId)}/status`
+    );
+    if (result.status === 'ready') return;
+    if (result.status === 'error') {
+      throw new Error(result.message || 'Não foi possível preparar esta música.');
+    }
+  }
+  throw new Error('A preparação demorou demais. Tente novamente mais tarde.');
 }
 
 function getMusicDirectory() {
@@ -138,6 +164,8 @@ export async function downloadSong(
   if (partial.exists) partial.delete();
 
   try {
+    await waitUntilPrepared(sourceId);
+
     let downloaded: File | null = null;
     let lastError: unknown;
 

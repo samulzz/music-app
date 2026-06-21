@@ -3,6 +3,7 @@ package me.samulsz.musicapi.services;
 import me.samulsz.musicapi.dto.SpotifyPlaylistResponse;
 import me.samulsz.musicapi.dto.SpotifyPlaylistTrack;
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -16,6 +17,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.InputStreamReader;
 
 @Service
 public class SpotifyPlaylistService {
@@ -33,6 +37,9 @@ public class SpotifyPlaylistService {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
+    @Value("${tools.spotify-helper-path:}")
+    private String spotifyHelperPath;
+
     public SpotifyPlaylistService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
         this.httpClient = HttpClient.newBuilder()
@@ -43,6 +50,11 @@ public class SpotifyPlaylistService {
 
     public SpotifyPlaylistResponse preview(String spotifyUrl) {
         String playlistId = extractPlaylistId(spotifyUrl);
+        SpotifyPlaylistResponse complete = previewWithHelper(spotifyUrl);
+        if (complete != null) {
+            return complete;
+        }
+
         String embedUrl = "https://open.spotify.com/embed/playlist/" + playlistId;
 
         try {
@@ -115,6 +127,44 @@ public class SpotifyPlaylistService {
             throw e;
         } catch (Exception e) {
             throw new IllegalArgumentException("Não foi possível importar a playlist agora.");
+        }
+    }
+
+    private SpotifyPlaylistResponse previewWithHelper(String spotifyUrl) {
+        if (spotifyHelperPath == null || spotifyHelperPath.isBlank()) {
+            return null;
+        }
+        File helper = new File(spotifyHelperPath);
+        if (!helper.isFile()) {
+            return null;
+        }
+
+        try {
+            Process process = new ProcessBuilder(
+                    "python3",
+                    helper.getAbsolutePath(),
+                    spotifyUrl,
+                    String.valueOf(MAX_TRACKS)
+            ).redirectErrorStream(true).start();
+
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    output.append(line);
+                }
+            }
+            int exitCode = process.waitFor();
+            JsonNode json = objectMapper.readTree(output.toString());
+            if (exitCode != 0 || json.has("error")) {
+                throw new IllegalArgumentException("Não foi possível ler todas as faixas desta playlist.");
+            }
+            return objectMapper.treeToValue(json, SpotifyPlaylistResponse.class);
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            return null;
         }
     }
 

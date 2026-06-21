@@ -87,6 +87,10 @@ async function readIndex(): Promise<MusicSong[]> {
 
 async function writeIndex(songs: MusicSong[]) {
   await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(songs));
+  try {
+    const { refreshAndroidAutoLibrary } = await import('./player');
+    await refreshAndroidAutoLibrary();
+  } catch {}
 }
 
 export async function getOfflineLibrary() {

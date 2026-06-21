@@ -1,11 +1,15 @@
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { setupMusicPlayer } from '../services/player';
+import { refreshAndroidAutoLibrary, setupMusicPlayer } from '../services/player';
 
 export default function RootLayout() {
   setupMusicPlayer();
+  useEffect(() => {
+    refreshAndroidAutoLibrary().catch(() => {});
+  }, []);
 
   return (
     <SafeAreaProvider>

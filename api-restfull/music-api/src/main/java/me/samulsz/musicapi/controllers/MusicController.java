@@ -3,6 +3,7 @@ package me.samulsz.musicapi.controllers;
 import me.samulsz.musicapi.services.MusicService;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 import java.io.File;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 
@@ -52,11 +54,20 @@ public class MusicController {
 
         Resource resource = new FileSystemResource(arquivoDeAudio);
 
-        String nomeLimpo = titulo.replaceAll("[\\\\/:*?\"<>|]", "");
+        String nomeLimpo = titulo
+                .replaceAll("[\\r\\n\\\\/:*?\"<>|]", "")
+                .trim();
+        if (nomeLimpo.isBlank()) {
+            nomeLimpo = "musica";
+        }
+        String contentDisposition = ContentDisposition.attachment()
+                .filename(nomeLimpo + ".mp3", StandardCharsets.UTF_8)
+                .build()
+                .toString();
 
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("audio/mpeg"))
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + nomeLimpo + ".mp3\"")
+                .header(HttpHeaders.CONTENT_DISPOSITION, contentDisposition)
                 .body(resource);
     }
 

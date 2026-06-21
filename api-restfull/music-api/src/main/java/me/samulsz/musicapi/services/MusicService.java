@@ -18,6 +18,8 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -271,11 +273,30 @@ public class MusicService {
                     preparationStatus.put(videoId, "error");
                 }
             } catch (Exception e) {
-                preparationErrors.put(videoId, "Falha ao preparar a música.");
+                preparationErrors.put(videoId, preparationErrorMessage(e));
                 preparationStatus.put(videoId, "error");
             }
         });
         return Map.of("status", "preparing");
+    }
+
+    private String preparationErrorMessage(Exception error) {
+        String message = error.getMessage() == null ? "" : error.getMessage();
+        String normalized = message.toLowerCase();
+        if (normalized.contains("cookies are no longer valid")
+                || normalized.contains("sign in to confirm you")
+                || normalized.contains("not a bot")) {
+            return "O acesso ao YouTube expirou no servidor. Tente novamente mais tarde.";
+        }
+        if (normalized.contains("video unavailable")
+                || normalized.contains("private video")
+                || normalized.contains("has been removed")) {
+            return "Esta música não está disponível no YouTube.";
+        }
+        if (normalized.contains("copyright")) {
+            return "Esta música foi bloqueada pelo YouTube.";
+        }
+        return "Não foi possível preparar esta música.";
     }
 
     public Map<String, String> statusAudio(String videoId) {
@@ -363,21 +384,35 @@ public class MusicService {
             Process process = builder.start();
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            while (reader.readLine() != null) {}
+            Deque<String> outputTail = new ArrayDeque<>();
+            String outputLine;
+            while ((outputLine = reader.readLine()) != null) {
+                if (outputTail.size() == 20) {
+                    outputTail.removeFirst();
+                }
+                outputTail.addLast(outputLine);
+            }
 
-            process.waitFor();
+            int exitCode = process.waitFor();
 
-            if (arquivoMp3.exists()) {
+            if (exitCode == 0 && arquivoMp3.exists() && arquivoMp3.length() > 0) {
                 System.out.println("Download concluído com sucesso!");
                 return arquivoMp3;
             }
+            String details = String.join(System.lineSeparator(), outputTail);
+            System.err.println("yt-dlp falhou para " + videoId + " (código " + exitCode + "): " + details);
+            throw new IllegalStateException(details.isBlank()
+                    ? "yt-dlp encerrou com código " + exitCode
+                    : details);
         } catch (Exception e) {
             System.err.println("Erro crítico ao baixar áudio: " + e.getMessage());
+            if (e instanceof IllegalStateException illegalStateException) {
+                throw illegalStateException;
+            }
+            throw new IllegalStateException("Falha ao executar o yt-dlp: " + e.getMessage(), e);
         } finally {
             deleteTemporaryCookies(temporaryCookies);
         }
-
-        return null;
     }
 
     private File baixarPreviaDaDeezer(String trackId) {

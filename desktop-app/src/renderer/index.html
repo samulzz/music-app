@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; img-src 'self' https: data: file:; media-src 'self' file:; style-src 'self'; script-src 'self'; connect-src 'none'"
+      content="default-src 'self'; img-src 'self' https: data:; media-src 'self' nationmusic:; style-src 'self'; script-src 'self'; connect-src 'none'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>NationMusics</title>
@@ -44,7 +44,6 @@
           <button class="nav-item" data-view="library"><span>♫</span> Biblioteca</button>
         </nav>
         <div class="sidebar-bottom">
-          <button id="settings-button" class="nav-item"><span>⚙</span> Armazenamento</button>
           <div class="profile">
             <div class="avatar" id="avatar">S</div>
             <div>
@@ -99,24 +98,6 @@
         <audio id="audio"></audio>
       </footer>
     </div>
-
-    <dialog id="settings-dialog">
-      <form method="dialog" class="dialog-card">
-        <div class="dialog-header">
-          <div>
-            <p>ARMAZENAMENTO</p>
-            <h2>Músicas offline</h2>
-          </div>
-          <button class="close-button" value="cancel">×</button>
-        </div>
-        <p class="dialog-description">Escolha onde o NationMusics salva os arquivos baixados.</p>
-        <div id="music-directory" class="directory-path"></div>
-        <div class="dialog-actions">
-          <button id="open-folder-button" type="button" class="secondary-button">Abrir pasta</button>
-          <button id="choose-folder-button" type="button" class="primary-button">Alterar local</button>
-        </div>
-      </form>
-    </dialog>
 
     <script src="./renderer.js"></script>
   </body>

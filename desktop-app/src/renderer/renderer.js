@@ -7,19 +7,19 @@ const state = {
   visibleSongs: [],
   queue: [],
   queueIndex: -1,
-  progress: new Map(),
+  preparingSourceId: '',
 };
 
 if (!window.nation && location.hostname === '127.0.0.1') {
   const demoSongs = [
     {
       id: 'demo-1',
+      serverId: 1,
       sourceId: 'demo-1',
       title: 'Noite Perfeita',
       artist: 'Nation Sessions',
       artworkUrl: '',
-      downloaded: true,
-      fileUrl: '',
+      saved: true,
     },
     {
       id: 'demo-2',
@@ -27,8 +27,7 @@ if (!window.nation && location.hostname === '127.0.0.1') {
       title: 'Entrelinhas',
       artist: 'Boaventura',
       artworkUrl: '',
-      downloaded: false,
-      fileUrl: '',
+      saved: false,
     },
   ];
   window.nation = {
@@ -37,9 +36,10 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     register: async ({ username }) => ({ token: 'preview', username }),
     logout: async () => true,
     search: async () => demoSongs,
-    download: async (song) => ({ ...song, downloaded: true }),
-    getLibrary: async () => demoSongs,
-    removeLocal: async () => true,
+    prepareStream: async () => '',
+    getLibrary: async () => demoSongs.filter((song) => song.saved),
+    saveToLibrary: async (song) => ({ ...song, saved: true }),
+    removeFromLibrary: async () => true,
     getPlaylists: async () => [
       { id: 'most-downloaded', name: 'Mais ouvidas', description: 'As favoritas da comunidade.' },
       { id: '1', name: 'Pra dirigir', description: 'Uma seleção leve para seguir viagem.' },
@@ -47,10 +47,6 @@ if (!window.nation && location.hostname === '127.0.0.1') {
       { id: '3', name: 'Fim de noite', description: 'Música baixa, luz apagada.' },
     ],
     getPlaylistSongs: async () => demoSongs,
-    getSettings: async () => ({ musicDirectory: 'C:\\Users\\samulsz\\Music\\NationMusics' }),
-    chooseMusicDirectory: async () => ({ musicDirectory: 'D:\\Músicas\\NationMusics' }),
-    openMusicDirectory: async () => true,
-    onDownloadProgress: () => () => {},
   };
 }
 
@@ -108,7 +104,7 @@ function songRows(songs, emptyText = 'Nada por aqui ainda.') {
     return `
       <div class="empty-state">
         <b>${escapeHtml(emptyText)}</b>
-        <span>Use a busca para encontrar músicas e salvá-las neste computador.</span>
+        <span>Use a busca para encontrar músicas e salvá-las na sua conta.</span>
       </div>
     `;
   }
@@ -117,29 +113,23 @@ function songRows(songs, emptyText = 'Nada por aqui ainda.') {
     <div class="song-list">
       ${songs.map((song, index) => {
         const identity = song.sourceId || song.id;
-        const progress = state.progress.get(identity);
+        const preparing = state.preparingSourceId === identity;
         return `
-          <article
-            class="song-row"
-            data-song-index="${index}"
-            data-source-id="${escapeHtml(identity)}"
-          >
+          <article class="song-row" data-song-index="${index}">
             ${coverMarkup(song)}
             <div class="song-main">
               <strong>${escapeHtml(song.title)}</strong>
-              <span>${song.downloaded ? 'Disponível offline' : 'Disponível para download'}</span>
-              ${progress ? `
-                <div class="progress-line">
-                  <i style="width:${Math.round(progress.progress * 100)}%"></i>
-                </div>
-              ` : ''}
+              <span>${song.saved ? 'Salva na sua conta' : 'Streaming online'}</span>
+              ${preparing ? '<div class="progress-line"><i style="width:55%"></i></div>' : ''}
             </div>
             <div class="song-artist">${escapeHtml(song.artist)}</div>
             <div class="song-actions">
-              ${song.downloaded
-                ? `<button class="icon-button primary play-song" title="Reproduzir" data-index="${index}">▶</button>
-                   <button class="icon-button remove-song" title="Remover arquivo local" data-index="${index}">×</button>`
-                : `<button class="icon-button primary download-song" title="Baixar e reproduzir" data-index="${index}">↓</button>`}
+              <button class="icon-button primary play-song" title="Reproduzir online" data-index="${index}">
+                ${preparing ? '…' : '▶'}
+              </button>
+              ${song.saved
+                ? `<button class="icon-button remove-song" title="Remover da biblioteca" data-index="${index}">×</button>`
+                : `<button class="icon-button save-song" title="Salvar na conta" data-index="${index}">＋</button>`}
             </div>
           </article>
         `;
@@ -152,15 +142,19 @@ function bindSongActions() {
   document.querySelectorAll('.play-song').forEach((button) => {
     button.addEventListener('click', () => playQueue(state.visibleSongs, Number(button.dataset.index)));
   });
-  document.querySelectorAll('.download-song').forEach((button) => {
-    button.addEventListener('click', () => downloadAndPlay(state.visibleSongs[Number(button.dataset.index)]));
+  document.querySelectorAll('.save-song').forEach((button) => {
+    button.addEventListener('click', () => saveSong(state.visibleSongs[Number(button.dataset.index)]));
   });
   document.querySelectorAll('.remove-song').forEach((button) => {
     button.addEventListener('click', async () => {
       const song = state.visibleSongs[Number(button.dataset.index)];
-      await window.nation.removeLocal(song.sourceId || song.id);
-      showBanner('Arquivo removido deste computador.');
-      await renderLibrary();
+      try {
+        await window.nation.removeFromLibrary(song.serverId);
+        showBanner('Música removida da sua biblioteca.');
+        await renderLibrary();
+      } catch (error) {
+        showBanner(error.message, true);
+      }
     });
   });
 }
@@ -202,13 +196,20 @@ async function openPlaylist(playlist) {
   setPageHeader('PLAYLIST', playlist.name);
   setLoading('Abrindo playlist...');
   try {
-    const songs = await window.nation.getPlaylistSongs(playlist.id);
+    const [songs, library] = await Promise.all([
+      window.nation.getPlaylistSongs(playlist.id),
+      window.nation.getLibrary(),
+    ]);
+    const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
+    const merged = songs.map((song) => savedBySource.has(song.sourceId)
+      ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
+      : song);
     contentView.innerHTML = `
       <div class="section-heading">
         <h2>${escapeHtml(playlist.name)}</h2>
-        <span>${songs.length} músicas</span>
+        <span>${merged.length} músicas</span>
       </div>
-      ${songRows(songs, 'Esta playlist está vazia.')}
+      ${songRows(merged, 'Esta playlist está vazia.')}
     `;
     bindSongActions();
   } catch (error) {
@@ -224,20 +225,27 @@ async function renderSearch(query = '') {
     contentView.innerHTML = `
       <div class="empty-state">
         <b>Busque uma música ou artista</b>
-        <span>Os resultados podem ser baixados e ficam disponíveis mesmo sem internet.</span>
+        <span>Ouça imediatamente e salve suas favoritas na conta.</span>
       </div>
     `;
     return;
   }
   setLoading('Buscando músicas...');
   try {
-    const songs = await window.nation.search(query.trim());
+    const [songs, library] = await Promise.all([
+      window.nation.search(query.trim()),
+      window.nation.getLibrary(),
+    ]);
+    const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
+    const merged = songs.map((song) => savedBySource.has(song.sourceId)
+      ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
+      : song);
     contentView.innerHTML = `
       <div class="section-heading">
         <h2>Resultados</h2>
-        <span>${songs.length} encontrados</span>
+        <span>${merged.length} encontrados</span>
       </div>
-      ${songRows(songs, `Nenhum resultado para “${query}”.`)}
+      ${songRows(merged, `Nenhum resultado para “${query}”.`)}
     `;
     bindSongActions();
   } catch (error) {
@@ -247,19 +255,16 @@ async function renderSearch(query = '') {
 
 async function renderLibrary() {
   state.view = 'library';
-  setPageHeader('OFFLINE E SEM PRESSA', 'Sua biblioteca.');
+  setPageHeader('SEMPRE NA SUA CONTA', 'Sua biblioteca.');
   setLoading('Carregando biblioteca...');
   try {
     state.library = await window.nation.getLibrary();
-    const downloaded = state.library.filter((song) => song.downloaded);
-    const cloud = state.library.filter((song) => !song.downloaded);
-    const ordered = [...downloaded, ...cloud];
     contentView.innerHTML = `
       <div class="section-heading">
-        <h2>Suas músicas</h2>
-        <span>${downloaded.length} offline · ${cloud.length} na conta</span>
+        <h2>Músicas salvas</h2>
+        <span>${state.library.length} na sua conta</span>
       </div>
-      ${songRows(ordered, 'Nenhuma música salva ainda.')}
+      ${songRows(state.library, 'Nenhuma música salva ainda.')}
     `;
     bindSongActions();
   } catch (error) {
@@ -272,34 +277,23 @@ function setPageHeader(eyebrow, title) {
   $('#view-title').textContent = title;
 }
 
-async function downloadAndPlay(song) {
-  const identity = song.sourceId || song.id;
-  if (state.progress.has(identity)) return;
-  state.progress.set(identity, { phase: 'preparing', progress: 0 });
-  showBanner(`Preparando “${song.title}”...`);
-  refreshCurrentView();
+async function saveSong(song) {
   try {
-    const downloaded = await window.nation.download(song);
-    state.progress.delete(identity);
-    showBanner('Download concluído. A música já funciona offline.');
-    playQueue([downloaded], 0);
+    await window.nation.saveToLibrary(song);
+    showBanner('Música salva na sua conta.');
     if (state.view === 'library') await renderLibrary();
-    else refreshCurrentView();
+    else await refreshCurrentView();
   } catch (error) {
-    state.progress.delete(identity);
     showBanner(error.message, true);
-    refreshCurrentView();
   }
 }
 
 function playQueue(songs, index) {
-  const playable = songs.filter((song) => song.downloaded && song.fileUrl);
+  const playable = songs.filter((song) => song.sourceId);
   const selected = songs[index];
-  const actualIndex = playable.findIndex(
-    (song) => (song.sourceId || song.id) === (selected.sourceId || selected.id)
-  );
+  const actualIndex = playable.findIndex((song) => song.sourceId === selected.sourceId);
   if (actualIndex < 0) {
-    downloadAndPlay(selected);
+    showBanner('Esta música não possui uma fonte de reprodução.', true);
     return;
   }
   state.queue = playable;
@@ -307,16 +301,31 @@ function playQueue(songs, index) {
   loadCurrentTrack();
 }
 
-function loadCurrentTrack() {
+async function loadCurrentTrack() {
   const song = state.queue[state.queueIndex];
   if (!song) return;
-  audio.src = song.fileUrl;
+
+  state.preparingSourceId = song.sourceId;
   $('#player-title').textContent = song.title;
-  $('#player-artist').textContent = song.artist;
+  $('#player-artist').textContent = `Preparando • ${song.artist}`;
   $('#player-cover').innerHTML = song.artworkUrl
     ? `<img src="${escapeHtml(song.artworkUrl)}" alt="" />`
     : '♫';
-  audio.play().catch((error) => showBanner(`Não foi possível reproduzir: ${error.message}`, true));
+  refreshCurrentView();
+
+  try {
+    const url = await window.nation.prepareStream(song);
+    state.preparingSourceId = '';
+    audio.src = url;
+    $('#player-artist').textContent = song.artist;
+    await audio.play();
+    refreshCurrentView();
+  } catch (error) {
+    state.preparingSourceId = '';
+    $('#player-artist').textContent = song.artist;
+    showBanner(error.message || 'Não foi possível reproduzir esta música.', true);
+    refreshCurrentView();
+  }
 }
 
 function nextTrack(direction) {
@@ -325,21 +334,15 @@ function nextTrack(direction) {
   loadCurrentTrack();
 }
 
-function refreshCurrentView() {
-  if (state.view === 'library') renderLibrary();
-  else if (state.view === 'search') renderSearch($('#search-input').value);
+async function refreshCurrentView() {
+  if (state.view === 'library') await renderLibrary();
+  else if (state.view === 'search') await renderSearch($('#search-input').value);
 }
 
 function activateNavigation(view) {
   document.querySelectorAll('.nav-item[data-view]').forEach((item) => {
     item.classList.toggle('active', item.dataset.view === view);
   });
-}
-
-async function openSettings() {
-  const settings = await window.nation.getSettings();
-  $('#music-directory').textContent = settings.musicDirectory;
-  $('#settings-dialog').showModal();
 }
 
 async function showApp(session) {
@@ -408,16 +411,10 @@ $('#global-search').addEventListener('submit', (event) => {
 
 $('#logout-button').addEventListener('click', async () => {
   audio.pause();
+  audio.removeAttribute('src');
   await window.nation.logout();
   showAuth();
 });
-
-$('#settings-button').addEventListener('click', openSettings);
-$('#choose-folder-button').addEventListener('click', async () => {
-  const settings = await window.nation.chooseMusicDirectory();
-  $('#music-directory').textContent = settings.musicDirectory;
-});
-$('#open-folder-button').addEventListener('click', () => window.nation.openMusicDirectory());
 
 $('#play-button').addEventListener('click', () => {
   if (!audio.src) return;
@@ -439,20 +436,15 @@ audio.volume = 0.85;
 audio.addEventListener('play', () => { $('#play-button').textContent = 'Ⅱ'; });
 audio.addEventListener('pause', () => { $('#play-button').textContent = '▶'; });
 audio.addEventListener('ended', () => nextTrack(1));
+audio.addEventListener('error', () => {
+  if (audio.src) showBanner('O streaming foi interrompido. Tente novamente.', true);
+});
 audio.addEventListener('timeupdate', () => {
   $('#current-time').textContent = formatTime(audio.currentTime);
   $('#duration').textContent = formatTime(audio.duration);
   $('#seek').value = Number.isFinite(audio.duration) && audio.duration > 0
     ? String((audio.currentTime / audio.duration) * 100)
     : '0';
-});
-
-window.nation.onDownloadProgress((payload) => {
-  state.progress.set(payload.sourceId, payload);
-  const row = document.querySelector(
-    `[data-source-id="${CSS.escape(payload.sourceId)}"] .progress-line i`
-  );
-  if (row && payload.progress) row.style.width = `${Math.round(payload.progress * 100)}%`;
 });
 
 window.addEventListener('DOMContentLoaded', async () => {

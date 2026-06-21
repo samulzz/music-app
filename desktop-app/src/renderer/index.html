@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' https: data: file:; media-src 'self' file:; style-src 'self'; script-src 'self'; connect-src 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NationMusics</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="auth-screen" class="auth-screen">
+      <div class="auth-card">
+        <div class="brand-mark">N</div>
+        <h1>NationMusics</h1>
+        <p id="auth-subtitle">Entre para acessar sua música.</p>
+        <form id="auth-form">
+          <label>
+            Usuário
+            <input id="username" autocomplete="username" minlength="3" required />
+          </label>
+          <label>
+            Senha
+            <input id="password" type="password" autocomplete="current-password" minlength="6" required />
+          </label>
+          <button id="auth-submit" class="primary-button" type="submit">Entrar</button>
+          <button id="auth-toggle" class="text-button" type="button">Criar uma conta</button>
+          <p id="auth-error" class="form-error"></p>
+        </form>
+      </div>
+    </div>
+
+    <div id="app-shell" class="app-shell hidden">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-mark small">N</div>
+          <span>NationMusics</span>
+        </div>
+        <nav>
+          <button class="nav-item active" data-view="home"><span>⌂</span> Início</button>
+          <button class="nav-item" data-view="search"><span>⌕</span> Buscar</button>
+          <button class="nav-item" data-view="library"><span>♫</span> Biblioteca</button>
+        </nav>
+        <div class="sidebar-bottom">
+          <button id="settings-button" class="nav-item"><span>⚙</span> Armazenamento</button>
+          <div class="profile">
+            <div class="avatar" id="avatar">S</div>
+            <div>
+              <strong id="profile-name">Usuário</strong>
+              <button id="logout-button">Sair</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <p id="eyebrow">BEM-VINDO DE VOLTA</p>
+            <h1 id="view-title">Sua música, do seu jeito.</h1>
+          </div>
+          <form id="global-search" class="search-box">
+            <span>⌕</span>
+            <input id="search-input" placeholder="Músicas ou artistas..." />
+            <button type="submit" title="Buscar">→</button>
+          </form>
+        </header>
+
+        <section id="status-banner" class="status-banner hidden"></section>
+        <section id="content-view" class="content-view"></section>
+      </main>
+
+      <footer class="player">
+        <div class="now-playing">
+          <div id="player-cover" class="player-cover">♫</div>
+          <div>
+            <strong id="player-title">Nenhuma música tocando</strong>
+            <span id="player-artist">Escolha uma música para começar</span>
+          </div>
+        </div>
+        <div class="player-center">
+          <div class="player-controls">
+            <button id="previous-button" title="Anterior">‹</button>
+            <button id="play-button" class="play-button" title="Reproduzir">▶</button>
+            <button id="next-button" title="Próxima">›</button>
+          </div>
+          <div class="timeline">
+            <span id="current-time">0:00</span>
+            <input id="seek" type="range" min="0" max="100" value="0" />
+            <span id="duration">0:00</span>
+          </div>
+        </div>
+        <div class="volume">
+          <span>◖</span>
+          <input id="volume" type="range" min="0" max="1" step="0.05" value="0.85" />
+        </div>
+        <audio id="audio"></audio>
+      </footer>
+    </div>
+
+    <dialog id="settings-dialog">
+      <form method="dialog" class="dialog-card">
+        <div class="dialog-header">
+          <div>
+            <p>ARMAZENAMENTO</p>
+            <h2>Músicas offline</h2>
+          </div>
+          <button class="close-button" value="cancel">×</button>
+        </div>
+        <p class="dialog-description">Escolha onde o NationMusics salva os arquivos baixados.</p>
+        <div id="music-directory" class="directory-path"></div>
+        <div class="dialog-actions">
+          <button id="open-folder-button" type="button" class="secondary-button">Abrir pasta</button>
+          <button id="choose-folder-button" type="button" class="primary-button">Alterar local</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

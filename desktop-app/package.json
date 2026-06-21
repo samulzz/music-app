@@ -1,0 +1,51 @@
+{
+  "name": "nationmusics-desktop",
+  "version": "1.0.0",
+  "description": "NationMusics para Windows",
+  "main": "src/main.cjs",
+  "author": "NationMusics",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron": "42.4.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.samulsz.nationmusics.desktop",
+    "productName": "NationMusics",
+    "artifactName": "NationMusics-Setup-${version}.${ext}",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "../app-front/nationmusics/assets/images/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NationMusics",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
+    }
+  }
+}

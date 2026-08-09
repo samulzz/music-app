@@ -10,7 +10,7 @@
   "sshHost": "38.18.230.83",
   "sshPort": 22,
   "sshUser": "root",
-  "sshKeyPath": "~/.ssh/nationmusics_vps_ed25519",
+  "sshKeyPath": "~/.ssh/barbershop_vps_ed25519",
   "apiBase": "https://marlonbarbershop.com/nationmusics/api",
   "sources": [
     {

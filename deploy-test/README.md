@@ -30,6 +30,11 @@ cd /opt/nationmusics-test
 docker compose up -d --build
 ```
 
+Em uma VPS nova que ja possua a barbearia em `/opt/barbershop-site`, execute
+primeiro `provision-vps.sh`. Ele cria o banco e o usuario isolados, gera os
+segredos diretamente no servidor e valida o Compose sem expor credenciais no
+Git.
+
 ## Operação
 
 ```bash

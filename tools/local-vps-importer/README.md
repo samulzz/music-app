@@ -127,6 +127,16 @@ Consulte o total concluido, falhas e as ultimas execucoes:
 powershell -ExecutionPolicy Bypass -File tools\local-vps-importer\run-nightly.ps1 -Status
 ```
 
+Para o notebook retomar sozinho sempre que o Windows iniciar:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools\local-vps-importer\install-nightly-task.ps1 -StartNow
+```
+
+Para remover essa inicializacao automatica, use o mesmo comando com
+`-Uninstall`. A tarefa reinicia o importador se o processo cair e continua
+funcionando na bateria.
+
 Faixas com erro sao tentadas no maximo cinco vezes (configuravel por
 `maxRetries`). A automacao possui trava contra duas execucoes simultaneas e nao
 mantem uma fila gigante: descobre no maximo 200 itens por fonte e envia lotes

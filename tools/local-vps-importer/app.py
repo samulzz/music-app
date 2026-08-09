@@ -937,7 +937,7 @@ HTML = r"""<!doctype html>
         <label>Senha SSH da VPS (opcional quando usar chave)</label>
         <input name="sshPassword" type="password" placeholder="senha da VPS" />
         <label>Caminho da chave SSH (recomendado para 24/7)</label>
-        <input name="sshKeyPath" value="~/.ssh/nationmusics_vps_ed25519" />
+        <input name="sshKeyPath" value="~/.ssh/barbershop_vps_ed25519" />
         <div class="auto-grid">
           <div><label>Por lote/fonte</label><input name="maxPerSource" type="number" min="1" max="10" value="3" /></div>
           <div><label>Intervalo entre ciclos (min)</label><input name="cycleMinutes" type="number" min="2" max="120" value="10" /></div>
@@ -973,7 +973,7 @@ HTML = r"""<!doctype html>
         <label>SSH senha</label>
         <input name="sshPassword" type="password" placeholder="senha da VPS" />
         <label>Chave SSH (opcional)</label>
-        <input name="sshKeyPath" value="~/.ssh/nationmusics_vps_ed25519" />
+        <input name="sshKeyPath" value="~/.ssh/barbershop_vps_ed25519" />
         <label>API base</label>
         <input name="apiBase" value="https://marlonbarbershop.com/nationmusics/api" />
 

@@ -4,7 +4,7 @@ services:
     container_name: nationmusics-test-pot-provider
     restart: unless-stopped
     networks:
-      - barbershop
+      - music
     mem_limit: 256m
     mem_reservation: 96m
     cpus: 0.35
@@ -18,9 +18,10 @@ services:
   warp:
     image: caomingjun/warp:latest
     container_name: nationmusics-test-warp
+    user: root
     restart: unless-stopped
     networks:
-      - barbershop
+      - music
     environment:
       WARP_SLEEP: "5"
     device_cgroup_rules:
@@ -53,7 +54,7 @@ services:
       - .env
     environment:
       SERVER_PORT: 8080
-      DATABASE_URL: jdbc:mysql://barbershop-mysql:3306/nationmusics_test?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DATABASE_URL: jdbc:mysql://mysql:3306/nationmusics_test?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
       DATABASE_USERNAME: nationmusics_test
       SPRING_JPA_HIBERNATE_DDL_AUTO: update
       SPRING_JPA_OPEN_IN_VIEW: "false"
@@ -75,7 +76,8 @@ services:
     volumes:
       - nationmusics-downloads:/app/downloads
     networks:
-      - barbershop
+      - music
+      - database
     mem_limit: 640m
     mem_reservation: 256m
     cpus: 1.0
@@ -93,6 +95,8 @@ volumes:
     name: nationmusics-test-warp
 
 networks:
-  barbershop:
+  music:
+    name: nationmusics-test-network
+  database:
     external: true
-    name: barbershop-site_default
+    name: barbershop_database

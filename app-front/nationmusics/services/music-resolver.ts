@@ -6,11 +6,11 @@ export async function ensureSourceId(song: MusicSong) {
 
   const query = `${song.title} ${song.artist}`.trim();
   const results = await apiRequest<ApiSearchSong[]>(
-    `/musicas/buscar?q=${encodeURIComponent(query)}`
+    `/songs/search?q=${encodeURIComponent(query)}`
   );
-  const sourceId = results[0]?.id;
+  const sourceId = results[0]?.sourceId || results[0]?.id;
   if (!sourceId) {
-    throw new Error('Não foi possível localizar a origem desta música.');
+    throw new Error('Esta musica ainda nao esta pre-baixada no servidor.');
   }
-  return { ...song, sourceId };
+  return { ...song, sourceId: String(sourceId) };
 }

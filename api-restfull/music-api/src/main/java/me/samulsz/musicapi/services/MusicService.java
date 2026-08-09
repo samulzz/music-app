@@ -33,13 +33,39 @@ public class MusicService {
     private static final String AUDIUS_PREFIX = "audius-";
     private static final String AUDIUS_APP_NAME = "NationMusics";
     private static final String DEEZER_PREFIX = "deezer-";
+    private static final long YOUTUBE_BLOCK_COOLDOWN_MILLIS = 45 * 60 * 1000L;
+    private static final long MIN_YOUTUBE_AUDIO_BYTES = 512 * 1024L;
+    private static final double MIN_YOUTUBE_AUDIO_DURATION_SECONDS = 60.0;
+    private static final long AUDIO_VALIDATION_CACHE_MILLIS = 30 * 60 * 1000L;
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final Map<String, Object> downloadLocks = new ConcurrentHashMap<>();
     private final Map<String, String> preparationStatus = new ConcurrentHashMap<>();
     private final Map<String, String> preparationErrors = new ConcurrentHashMap<>();
+    private final Map<String, AudioValidation> audioValidationCache = new ConcurrentHashMap<>();
     private final ExecutorService preparationExecutor = Executors.newSingleThreadExecutor();
+    private final Object youtubeRequestRateLock = new Object();
+    private long nextYoutubeRequestAtMillis = 0L;
+    private volatile long youtubeBlockedUntilMillis = 0L;
+
+    @Value("${tools.yt-dlp-path}")
+    private String ytDlpPath;
+
+    @Value("${tools.ffmpeg-path}")
+    private String ffmpegPath;
+
+    @Value("${tools.youtube-pot-provider-url:}")
+    private String youtubePotProviderUrl;
+
+    @Value("${tools.youtube-cookies-path:}")
+    private String youtubeCookiesPath;
+
+    @Value("${tools.youtube-proxy:}")
+    private String youtubeProxy;
+
+    @Value("${tools.youtube-min-request-interval-seconds:10}")
+    private long youtubeMinRequestIntervalSeconds;
 
     public MusicService(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -49,14 +75,88 @@ public class MusicService {
                 .build();
     }
 
-    @Value("${tools.yt-dlp-path}")
-    private String ytDlpPath;
+    private record AudioValidation(long length, long lastModified, long checkedAt, boolean valid) {
+        boolean matches(File file, long now) {
+            return file.length() == length
+                    && file.lastModified() == lastModified
+                    && now - checkedAt < AUDIO_VALIDATION_CACHE_MILLIS;
+        }
+    }
 
-    @Value("${tools.ffmpeg-path}")
-    private String ffmpegPath;
+    private boolean isYoutubeTemporarilyBlocked() {
+        return System.currentTimeMillis() < youtubeBlockedUntilMillis;
+    }
 
-    @Value("${tools.youtube-cookies-path:}")
-    private String youtubeCookiesPath;
+    private void markYoutubeTemporarilyBlocked(String reason) {
+        youtubeBlockedUntilMillis = System.currentTimeMillis() + YOUTUBE_BLOCK_COOLDOWN_MILLIS;
+        System.err.println("YouTube bloqueado temporariamente para este servidor. Downloads do YouTube pausados por "
+                + (YOUTUBE_BLOCK_COOLDOWN_MILLIS / 60_000L)
+                + " minutos. Motivo: " + reason);
+    }
+
+    private boolean isYoutubeAccessBlockedMessage(String message) {
+        String normalized = message == null ? "" : message.toLowerCase();
+        return normalized.contains("unusual traffic")
+                || normalized.contains("http error 429")
+                || normalized.contains("too many requests")
+                || normalized.contains("automated queries");
+    }
+
+    private String fallbackQuery(String title, String artist) {
+        String safeTitle = title == null ? "" : title.trim();
+        String safeArtist = artist == null ? "" : artist.trim();
+        String query = (safeTitle + " " + safeArtist).trim();
+        return query.isBlank() ? safeTitle : query;
+    }
+
+    private void addYoutubeAccessOptions(List<String> command) {
+        command.add("--extractor-args");
+        command.add("youtube:player_client=mweb;fetch_pot=always;formats=missing_pot");
+
+        if (youtubePotProviderUrl != null && !youtubePotProviderUrl.isBlank()) {
+            command.add("--extractor-args");
+            command.add("youtubepot-bgutilhttp:base_url=" + youtubePotProviderUrl.trim());
+        }
+
+        File cacheDirectory = new File("downloads/.yt-dlp-cache");
+        if (!cacheDirectory.exists()) {
+            cacheDirectory.mkdirs();
+        }
+        command.add("--cache-dir");
+        command.add(cacheDirectory.getAbsolutePath());
+        command.add("--sleep-requests");
+        command.add("1");
+        command.add("--force-ipv4");
+
+        String configuredProxy = configuredYoutubeProxy();
+        if (!configuredProxy.isBlank()) {
+            command.add("--proxy");
+            command.add(configuredProxy);
+            System.out.println("yt-dlp usando proxy configurado para YouTube.");
+        }
+    }
+
+    private String configuredYoutubeProxy() {
+        String fromProperty = youtubeProxy == null ? "" : youtubeProxy.trim();
+        if (!fromProperty.isBlank()) {
+            return fromProperty;
+        }
+        String fromEnvironment = System.getenv("YOUTUBE_PROXY");
+        return fromEnvironment == null ? "" : fromEnvironment.trim();
+    }
+
+    private void waitForYoutubeRequestSlot() throws InterruptedException {
+        synchronized (youtubeRequestRateLock) {
+            long now = System.currentTimeMillis();
+            long waitMillis = Math.max(0L, nextYoutubeRequestAtMillis - now);
+            if (waitMillis > 0L) {
+                Thread.sleep(waitMillis);
+            }
+
+            long intervalMillis = Math.max(0L, youtubeMinRequestIntervalSeconds) * 1_000L;
+            nextYoutubeRequestAtMillis = System.currentTimeMillis() + intervalMillis;
+        }
+    }
 
     private File addCookiesIfConfigured(List<String> command) {
         if (youtubeCookiesPath != null && !youtubeCookiesPath.isBlank()) {
@@ -91,8 +191,14 @@ public class MusicService {
         File temporaryCookies = null;
         
         try {
+            if (isYoutubeTemporarilyBlocked()) {
+                System.err.println("Busca no YouTube ignorada temporariamente; sem usar fontes curtas alternativas.");
+                return List.of();
+            }
+
             List<String> command = new ArrayList<>();
             command.add(ytDlpPath);
+            addYoutubeAccessOptions(command);
             temporaryCookies = addCookiesIfConfigured(command);
             command.add("ytsearch5:" + query);
             command.add("--flat-playlist");
@@ -101,12 +207,19 @@ public class MusicService {
             ProcessBuilder builder = new ProcessBuilder(command);
 
             builder.redirectErrorStream(true);
+            waitForYoutubeRequestSlot();
             Process process = builder.start();
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            Deque<String> outputTail = new ArrayDeque<>();
             String linha;
 
             while ((linha = reader.readLine()) != null) {
+                if (outputTail.size() == 20) {
+                    outputTail.removeFirst();
+                }
+                outputTail.addLast(linha);
+
                 String[] partes = linha.split("\\|", 4);
 
                 if (partes.length >= 4) {
@@ -131,20 +244,36 @@ public class MusicService {
                     ));
                 }
             }
-            process.waitFor();
+            int exitCode = process.waitFor();
+            if (exitCode != 0) {
+                String details = String.join(System.lineSeparator(), outputTail);
+                if (isYoutubeAccessBlockedMessage(details)) {
+                    markYoutubeTemporarilyBlocked(details);
+                }
+                System.err.println("yt-dlp falhou na busca (código " + exitCode + "): " + details);
+            }
         } catch (Exception e) {
             System.err.println("Erro ao buscar música: " + e.getMessage());
+            if (isYoutubeAccessBlockedMessage(e.getMessage())) {
+                markYoutubeTemporarilyBlocked(e.getMessage());
+            }
         } finally {
             deleteTemporaryCookies(temporaryCookies);
         }
 
         if (resultados.isEmpty()) {
-            resultados.addAll(buscarNaDeezer(query));
-        }
-        if (resultados.isEmpty()) {
-            resultados.addAll(buscarNaAudius(query));
+            System.err.println("Nenhum resultado confiável no YouTube para: " + query);
         }
         return resultados;
+    }
+
+    private List<Map<String, String>> buscarFontesAlternativas(String query) {
+        List<Map<String, String>> resultados = new ArrayList<>();
+        resultados.addAll(buscarNaAudius(query));
+        if (resultados.size() < 5) {
+            resultados.addAll(buscarNaDeezer(query));
+        }
+        return resultados.stream().limit(5).toList();
     }
 
     private List<Map<String, String>> buscarNaDeezer(String query) {
@@ -239,10 +368,14 @@ public class MusicService {
     }
 
     public File baixarAudio(String videoId) {
+        return baixarAudio(videoId, "", "");
+    }
+
+    public File baixarAudio(String videoId, String title, String artist) {
         Object lock = downloadLocks.computeIfAbsent(videoId, ignored -> new Object());
         try {
             synchronized (lock) {
-                return baixarAudioInterno(videoId);
+                return baixarAudioInterno(videoId, title, artist);
             }
         } finally {
             downloadLocks.remove(videoId, lock);
@@ -250,6 +383,10 @@ public class MusicService {
     }
 
     public Map<String, String> prepararAudio(String videoId) {
+        return prepararAudio(videoId, "", "");
+    }
+
+    public Map<String, String> prepararAudio(String videoId, String title, String artist) {
         File cached = findCachedAudio(videoId);
         if (cached != null) {
             preparationStatus.put(videoId, "ready");
@@ -265,7 +402,7 @@ public class MusicService {
         preparationErrors.remove(videoId);
         preparationExecutor.submit(() -> {
             try {
-                File audio = baixarAudio(videoId);
+                File audio = baixarAudio(videoId, title, artist);
                 if (audio != null && audio.exists() && audio.length() > 0) {
                     preparationStatus.put(videoId, "ready");
                 } else {
@@ -286,7 +423,12 @@ public class MusicService {
         if (normalized.contains("cookies are no longer valid")
                 || normalized.contains("sign in to confirm you")
                 || normalized.contains("not a bot")) {
-            return "O acesso ao YouTube expirou no servidor. Tente novamente mais tarde.";
+            return "O YouTube recusou temporariamente o acesso do servidor. Tente novamente mais tarde.";
+        }
+        if (normalized.contains("po token")
+                || normalized.contains("pot provider")
+                || normalized.contains("bgutil")) {
+            return "O gerador de acesso do YouTube está indisponível no servidor.";
         }
         if (normalized.contains("video unavailable")
                 || normalized.contains("private video")
@@ -318,14 +460,32 @@ public class MusicService {
 
     private File findCachedAudio(String videoId) {
         if (videoId == null || videoId.isBlank()) return null;
-        String fileName;
-        if (videoId.startsWith(DEEZER_PREFIX) || videoId.startsWith(AUDIUS_PREFIX)) {
-            fileName = videoId + ".mp3";
-        } else {
-            fileName = videoId + ".mp3";
+        File file = cachedAudioFile(videoId);
+        if (file == null || !file.isFile() || file.length() <= 0) {
+            return null;
         }
-        File file = new File("downloads/", fileName);
-        return file.isFile() && file.length() > 0 ? file : null;
+        if (!isCachedYoutubeAudioValid(videoId, file)) {
+            System.err.println("Cache inválido/removido para " + videoId + ": áudio curto ou incompleto.");
+            invalidateAudioValidation(videoId);
+            if (!file.delete()) {
+                file.deleteOnExit();
+            }
+            return null;
+        }
+        return file;
+    }
+
+    public boolean hasPrecachedAudio(String videoId) {
+        File file = cachedAudioFile(videoId);
+        return file != null && file.isFile() && file.length() >= MIN_YOUTUBE_AUDIO_BYTES;
+    }
+
+    private File cachedAudioFile(String videoId) {
+        if (videoId == null || videoId.isBlank()) return null;
+        if (videoId.startsWith(DEEZER_PREFIX) || videoId.startsWith(AUDIUS_PREFIX)) {
+            return null;
+        }
+        return new File("downloads/", videoId + ".mp3");
     }
 
     @PreDestroy
@@ -333,12 +493,47 @@ public class MusicService {
         preparationExecutor.shutdownNow();
     }
 
-    private File baixarAudioInterno(String videoId) {
+    private File baixarAlternativaParaYoutube(String originalVideoId, String title, String artist) {
+        String query = fallbackQuery(title, artist);
+        if (query.isBlank()) {
+            return null;
+        }
+
+        System.err.println("Tentando fallback de áudio para: " + query);
+        List<Map<String, String>> alternativas = buscarFontesAlternativas(query);
+        for (Map<String, String> alternativa : alternativas) {
+            String alternativeId = alternativa.getOrDefault("id", "");
+            if (alternativeId.isBlank() || alternativeId.equals(originalVideoId)) {
+                continue;
+            }
+            try {
+                File alternativeFile = baixarAudioInterno(alternativeId, "", "");
+                if (alternativeFile == null || !alternativeFile.exists() || alternativeFile.length() == 0) {
+                    continue;
+                }
+
+                File pasta = new File("downloads/");
+                if (!pasta.exists()) {
+                    pasta.mkdirs();
+                }
+                File originalCache = new File(pasta, originalVideoId + ".mp3");
+                Files.copy(alternativeFile.toPath(), originalCache.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                rememberValidAudio(originalVideoId, originalCache);
+                System.err.println("Fallback pronto para " + originalVideoId + " usando " + alternativeId);
+                return originalCache;
+            } catch (Exception fallbackError) {
+                System.err.println("Fallback falhou para " + alternativeId + ": " + fallbackError.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private File baixarAudioInterno(String videoId, String title, String artist) {
         if (videoId != null && videoId.startsWith(DEEZER_PREFIX)) {
-            return baixarPreviaDaDeezer(videoId.substring(DEEZER_PREFIX.length()));
+            throw new IllegalStateException("Fonte Deezer removida: ela fornece apenas previas curtas.");
         }
         if (videoId != null && videoId.startsWith(AUDIUS_PREFIX)) {
-            return baixarAudioDaAudius(videoId.substring(AUDIUS_PREFIX.length()));
+            throw new IllegalStateException("Fonte alternativa removida para evitar musicas incompletas.");
         }
 
         String url = "https://www.youtube.com/watch?v=" + videoId;
@@ -354,7 +549,14 @@ public class MusicService {
 
         if (arquivoMp3.exists()) {
             System.out.println("Música já existe no servidor. Puxando do cache...");
-            return arquivoMp3;
+            if (isCachedYoutubeAudioValid(videoId, arquivoMp3)) {
+                return arquivoMp3;
+            }
+            System.err.println("Cache inválido/removido para " + videoId + ": áudio curto ou incompleto.");
+            invalidateAudioValidation(videoId);
+            if (!arquivoMp3.delete()) {
+                arquivoMp3.deleteOnExit();
+            }
         }
 
         File temporaryCookies = null;
@@ -362,11 +564,12 @@ public class MusicService {
             System.out.println("Iniciando download e conversão para MP3...");
             List<String> command = new ArrayList<>();
             command.add(ytDlpPath);
+            addYoutubeAccessOptions(command);
             temporaryCookies = addCookiesIfConfigured(command);
             command.add("-x");
             command.add("--no-playlist");
             command.add("--concurrent-fragments");
-            command.add("4");
+            command.add("1");
             command.add("--socket-timeout");
             command.add("20");
             command.add("--retries");
@@ -381,6 +584,7 @@ public class MusicService {
             ProcessBuilder builder = new ProcessBuilder(command);
 
             builder.redirectErrorStream(true);
+            waitForYoutubeRequestSlot();
             Process process = builder.start();
 
             BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
@@ -395,23 +599,124 @@ public class MusicService {
 
             int exitCode = process.waitFor();
 
-            if (exitCode == 0 && arquivoMp3.exists() && arquivoMp3.length() > 0) {
+            if (exitCode == 0 && arquivoMp3.exists() && isValidYoutubeAudio(arquivoMp3)) {
+                rememberValidAudio(videoId, arquivoMp3);
                 System.out.println("Download concluído com sucesso!");
                 return arquivoMp3;
             }
+            if (arquivoMp3.exists()) {
+                System.err.println("Download inválido para " + videoId + ": arquivo curto ou incompleto. Removendo cache.");
+                invalidateAudioValidation(videoId);
+                if (!arquivoMp3.delete()) {
+                    arquivoMp3.deleteOnExit();
+                }
+            }
             String details = String.join(System.lineSeparator(), outputTail);
             System.err.println("yt-dlp falhou para " + videoId + " (código " + exitCode + "): " + details);
+            if (isYoutubeAccessBlockedMessage(details)) {
+                markYoutubeTemporarilyBlocked(details);
+            }
             throw new IllegalStateException(details.isBlank()
                     ? "yt-dlp encerrou com código " + exitCode
                     : details);
         } catch (Exception e) {
             System.err.println("Erro crítico ao baixar áudio: " + e.getMessage());
+            if (isYoutubeAccessBlockedMessage(e.getMessage())) {
+                markYoutubeTemporarilyBlocked(e.getMessage());
+            }
             if (e instanceof IllegalStateException illegalStateException) {
                 throw illegalStateException;
             }
             throw new IllegalStateException("Falha ao executar o yt-dlp: " + e.getMessage(), e);
         } finally {
             deleteTemporaryCookies(temporaryCookies);
+        }
+    }
+
+    private boolean isValidYoutubeAudio(File file) {
+        if (file == null || !file.isFile() || file.length() < MIN_YOUTUBE_AUDIO_BYTES) {
+            return false;
+        }
+
+        Double duration = probeAudioDurationSeconds(file);
+        return duration == null || duration >= MIN_YOUTUBE_AUDIO_DURATION_SECONDS;
+    }
+
+    private boolean isCachedYoutubeAudioValid(String videoId, File file) {
+        if (file == null || !file.isFile() || file.length() < MIN_YOUTUBE_AUDIO_BYTES) {
+            return false;
+        }
+
+        long now = System.currentTimeMillis();
+        AudioValidation cached = audioValidationCache.get(videoId);
+        if (cached != null && cached.matches(file, now)) {
+            return cached.valid();
+        }
+
+        boolean valid = isValidYoutubeAudio(file);
+        audioValidationCache.put(videoId, new AudioValidation(
+                file.length(),
+                file.lastModified(),
+                now,
+                valid
+        ));
+        return valid;
+    }
+
+    private void rememberValidAudio(String videoId, File file) {
+        if (file == null || !file.isFile()) return;
+        audioValidationCache.put(videoId, new AudioValidation(
+                file.length(),
+                file.lastModified(),
+                System.currentTimeMillis(),
+                true
+        ));
+    }
+
+    private void invalidateAudioValidation(String videoId) {
+        if (videoId != null && !videoId.isBlank()) {
+            audioValidationCache.remove(videoId);
+        }
+    }
+
+    private Double probeAudioDurationSeconds(File file) {
+        try {
+            String ffprobeExecutable = "ffprobe";
+            if (ffmpegPath != null && !ffmpegPath.isBlank()) {
+                File configured = new File(ffmpegPath);
+                if (configured.isDirectory()) {
+                    ffprobeExecutable = new File(configured, "ffprobe").getAbsolutePath();
+                } else {
+                    File parent = configured.getParentFile();
+                    if (parent != null) {
+                        ffprobeExecutable = new File(parent, "ffprobe").getAbsolutePath();
+                    }
+                }
+            }
+
+            Process process = new ProcessBuilder(
+                    ffprobeExecutable,
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    file.getAbsolutePath()
+            ).redirectErrorStream(true).start();
+
+            String output;
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                output = reader.readLine();
+            }
+            int exitCode = process.waitFor();
+            if (exitCode != 0 || output == null || output.isBlank()) {
+                return null;
+            }
+            return Double.parseDouble(output.trim());
+        } catch (Exception e) {
+            System.err.println("Não foi possível medir duração de " + file.getName() + ": " + e.getMessage());
+            return null;
         }
     }
 

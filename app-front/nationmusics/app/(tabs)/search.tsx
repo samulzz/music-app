@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { useNetInfo } from '@react-native-community/netinfo';
 
 import type { ApiSearchSong, MusicSong } from '../../types/music';
@@ -21,6 +20,8 @@ import { apiRequest } from '../../services/api';
 import { getSession } from '../../services/auth';
 import { downloadSong } from '../../services/offline-library';
 import { playSongQueue } from '../../services/player';
+
+const SEARCH_DEBOUNCE_MS = 220;
 
 const SearchCard = memo(function SearchCard({
   song,
@@ -78,41 +79,77 @@ const SearchCard = memo(function SearchCard({
 });
 
 export default function SearchScreen() {
-  const router = useRouter();
   const netInfo = useNetInfo();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MusicSong[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState('');
   const [username, setUsername] = useState('');
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
+  const searchRequestId = useRef(0);
 
   useEffect(() => {
     getSession().then((session) => setUsername(session?.username || '')).catch(() => {});
   }, []);
 
-  const search = async () => {
-    const value = query.trim();
-    if (!value) return;
+  const searchCatalog = useCallback(async (rawValue = query) => {
+    const value = rawValue.trim();
+    const requestId = searchRequestId.current + 1;
+    searchRequestId.current = requestId;
+
+    if (!value) {
+      setResults([]);
+      setSearchError('');
+      setSearching(false);
+      return;
+    }
+
     if (netInfo.isConnected === false) {
-      Alert.alert('Você está offline', 'A busca precisa de internet. As músicas baixadas estão na Biblioteca.');
+      setResults([]);
+      setSearchError('Busca indisponivel offline. Abra a Biblioteca.');
+      setSearching(false);
       return;
     }
 
     setSearching(true);
+    setSearchError('');
     try {
       const data = await apiRequest<ApiSearchSong[]>(
-        `/musicas/buscar?q=${encodeURIComponent(value)}`
+        `/songs/search?q=${encodeURIComponent(value)}`
       );
+      if (requestId !== searchRequestId.current) return;
       const songs = data.map(fromApiSearchSong);
       setResults(songs);
-      if (!songs.length) Alert.alert('Sem resultados', `Nenhuma música encontrada para “${value}”.`);
+      setSearchError(songs.length ? '' : 'Nenhuma musica pre-baixada encontrada.');
     } catch (error) {
-      Alert.alert('Erro na busca', error instanceof Error ? error.message : 'Tente novamente.');
+      if (requestId !== searchRequestId.current) return;
+      setResults([]);
+      setSearchError(error instanceof Error ? error.message : 'Tente novamente.');
     } finally {
+      if (requestId === searchRequestId.current) setSearching(false);
+    }
+  }, [netInfo.isConnected, query]);
+
+  useEffect(() => {
+    const value = query.trim();
+    if (!value) return;
+
+    const timer = setTimeout(() => {
+      void searchCatalog(value);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query, searchCatalog]);
+
+  const changeQuery = useCallback((value: string) => {
+    setQuery(value);
+    if (!value.trim()) {
+      searchRequestId.current += 1;
+      setResults([]);
+      setSearchError('');
       setSearching(false);
     }
-  };
+  }, []);
 
   const play = useCallback(async (song: MusicSong) => {
     try {
@@ -173,9 +210,6 @@ export default function SearchScreen() {
             <Text style={styles.greeting}>Olá, {username || 'músico'} 👋</Text>
             <Text style={styles.headerTitle}>O que vai ouvir hoje?</Text>
           </View>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={20} color="#1db954" />
-          </View>
         </View>
 
         {netInfo.isConnected === false && (
@@ -193,13 +227,13 @@ export default function SearchScreen() {
               placeholder="Músicas ou artistas..."
               placeholderTextColor="#666"
               value={query}
-              onChangeText={setQuery}
-              onSubmitEditing={search}
+              onChangeText={changeQuery}
+              onSubmitEditing={() => searchCatalog(query)}
               returnKeyType="search"
               autoCorrect={false}
             />
           </View>
-          <TouchableOpacity style={styles.searchButton} onPress={search} disabled={searching}>
+          <TouchableOpacity style={styles.searchButton} onPress={() => searchCatalog(query)} disabled={searching}>
             {searching ? (
               <ActivityIndicator size="small" color="#121212" />
             ) : (
@@ -208,17 +242,12 @@ export default function SearchScreen() {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={styles.spotifyButton}
-          onPress={() => router.push('/spotify-import' as never)}
-        >
-          <Ionicons name="list-circle" size={22} color="#1db954" />
-          <View style={styles.spotifyButtonText}>
-            <Text style={styles.spotifyTitle}>Importar playlist do Spotify</Text>
-            <Text style={styles.spotifySubtitle}>Cole um link e baixe as músicas para ouvir offline.</Text>
+        {Boolean(searchError) && (
+          <View style={styles.catalogNotice}>
+            <Ionicons name="information-circle-outline" size={17} color="#d5bd83" />
+            <Text style={styles.catalogNoticeText}>{searchError}</Text>
           </View>
-          <Ionicons name="chevron-forward" size={19} color="#777" />
-        </TouchableOpacity>
+        )}
 
         <FlatList
           data={results}
@@ -267,16 +296,6 @@ const styles = StyleSheet.create({
   },
   greeting: { color: '#888', fontSize: 13 },
   headerTitle: { color: '#fff', fontSize: 24, fontWeight: '800', marginTop: 3 },
-  avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#1db95418',
-    borderWidth: 1,
-    borderColor: '#1db95440',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   offlineBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -311,21 +330,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  spotifyButton: {
+  catalogNotice: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    backgroundColor: '#2b2518',
+    borderColor: '#5a4825',
     borderWidth: 1,
-    borderColor: '#275d38',
-    backgroundColor: '#17281d',
-    borderRadius: 12,
-    paddingHorizontal: 13,
-    paddingVertical: 11,
-    marginBottom: 14,
+    padding: 10,
+    borderRadius: 10,
+    marginBottom: 12,
   },
-  spotifyButtonText: { flex: 1 },
-  spotifyTitle: { color: '#e8f6ec', fontSize: 13, fontWeight: '700' },
-  spotifySubtitle: { color: '#83a98e', fontSize: 10, marginTop: 2 },
+  catalogNoticeText: { color: '#d5bd83', fontSize: 12, flex: 1 },
   list: { paddingBottom: 175 },
   card: {
     minHeight: 76,

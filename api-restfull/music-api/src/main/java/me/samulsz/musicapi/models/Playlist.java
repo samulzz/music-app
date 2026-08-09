@@ -1,5 +1,6 @@
 package me.samulsz.musicapi.models;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 
 import java.util.HashSet;
@@ -24,7 +25,13 @@ public class Playlist {
     @Column(nullable = false)
     private boolean globalPlaylist = true;
 
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "owner_id")
+    private User owner;
+
     @ManyToMany(fetch = FetchType.EAGER)
+    @OrderBy("title ASC, artist ASC, id ASC")
     @JoinTable(
             name = "playlist_songs",
             joinColumns = @JoinColumn(name = "playlist_id"),
@@ -70,6 +77,14 @@ public class Playlist {
 
     public void setGlobalPlaylist(boolean globalPlaylist) {
         this.globalPlaylist = globalPlaylist;
+    }
+
+    public User getOwner() {
+        return owner;
+    }
+
+    public void setOwner(User owner) {
+        this.owner = owner;
     }
 
     public Set<Song> getSongs() {

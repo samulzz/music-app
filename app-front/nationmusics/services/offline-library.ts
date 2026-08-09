@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Directory, File, Paths, type DownloadProgress } from 'expo-file-system';
+import { DeviceEventEmitter, NativeModules, Platform } from 'react-native';
 
 import type { MusicSong } from '../types/music';
-import { apiRequest, getAuthenticatedHeaders } from './api';
+import { apiRequest, getMediaHeaders } from './api';
 import { musicDownloadUrl } from './config';
 
 const INDEX_KEY = 'nationmusics.offline-library.v2';
@@ -10,6 +11,52 @@ const MUSIC_DIRECTORY_NAME = 'nationmusics-audio';
 const DOWNLOAD_ATTEMPTS = 3;
 const PREPARATION_POLL_MS = 2000;
 const PREPARATION_TIMEOUT_MS = 8 * 60 * 1000;
+const MIN_OFFLINE_AUDIO_BYTES = 512 * 1024;
+
+type NativeOfflineDownloadsModule = {
+  downloadSongs: (
+    songs: Array<Record<string, string>>,
+    headers: Record<string, string>,
+    taskId: string
+  ) => Promise<string>;
+};
+
+type NativeDownloadFailure = {
+  id?: string;
+  sourceId?: string;
+  title?: string;
+  message?: string;
+};
+
+type NativeDownloadResult = {
+  downloaded: MusicSong[];
+  failures: NativeDownloadFailure[];
+};
+
+export type NativeDownloadProgressEvent = {
+  taskId: string;
+  type: 'progress' | 'song-complete' | 'song-failed' | 'complete' | 'error';
+  id?: string;
+  sourceId?: string;
+  title?: string;
+  done?: number;
+  total?: number;
+  currentPercent?: number;
+  indeterminate?: boolean;
+  song?: MusicSong;
+  failure?: NativeDownloadFailure;
+  failures?: number;
+  message?: string;
+};
+
+type OfflineLibraryOptions = {
+  validateFiles?: boolean;
+};
+
+const nativeOfflineDownloads = NativeModules.NationOfflineDownloads as
+  | NativeOfflineDownloadsModule
+  | undefined;
+const NATIVE_DOWNLOAD_PROGRESS_EVENT = 'NationOfflineDownloadProgress';
 
 function wait(milliseconds: number) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -25,16 +72,24 @@ type PreparationResponse = {
   message?: string;
 };
 
-async function waitUntilPrepared(sourceId: string) {
-  await apiRequest<PreparationResponse>(`/musicas/preparar/${encodeURIComponent(sourceId)}`, {
+async function waitUntilPrepared(song: Pick<MusicSong, 'sourceId' | 'title' | 'artist'>) {
+  const sourceId = song.sourceId?.trim();
+  if (!sourceId) {
+    throw new Error('Esta música não possui uma origem válida para download.');
+  }
+  const metadata = `?titulo=${encodeURIComponent(song.title)}&artista=${encodeURIComponent(song.artist)}`;
+
+  await apiRequest<PreparationResponse>(`/musicas/preparar/${encodeURIComponent(sourceId)}${metadata}`, {
     method: 'POST',
+    authenticated: false,
   });
 
   const startedAt = Date.now();
   while (Date.now() - startedAt < PREPARATION_TIMEOUT_MS) {
     await wait(PREPARATION_POLL_MS);
     const result = await apiRequest<PreparationResponse>(
-      `/musicas/preparar/${encodeURIComponent(sourceId)}/status`
+      `/musicas/preparar/${encodeURIComponent(sourceId)}/status`,
+      { authenticated: false }
     );
     if (result.status === 'ready') return;
     if (result.status === 'error') {
@@ -68,9 +123,101 @@ function fileForSong(song: Pick<MusicSong, 'id' | 'sourceId' | 'title'>) {
   return new File(getMusicDirectory(), `${identity}.mp3`);
 }
 
+function nativePayloadForSong(song: MusicSong) {
+  const sourceId = song.sourceId?.trim();
+  if (!sourceId) {
+    throw new Error('Esta música não possui uma origem válida para download.');
+  }
+
+  const fileName = normalizeFilePart(songIdentity(song)) || normalizeFilePart(song.title) || 'track';
+  return {
+    id: song.id,
+    sourceId,
+    title: song.title,
+    artist: song.artist,
+    artworkUrl: song.artworkUrl || '',
+    fileName,
+    url: musicDownloadUrl(sourceId, song.title, song.artist),
+  };
+}
+
+function nativeTaskId() {
+  return `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function normalizeNativeDownloadedSong(item: MusicSong & { localUri: string; downloadedAt?: number; sizeBytes?: number }): MusicSong {
+  return {
+    id: String(item.id || item.sourceId),
+    sourceId: item.sourceId,
+    title: item.title,
+    artist: item.artist,
+    artworkUrl: item.artworkUrl,
+    localUri: item.localUri,
+    downloadedAt: item.downloadedAt || Date.now(),
+    sizeBytes: item.sizeBytes,
+  };
+}
+
 function legacyFileForSong(song: Pick<MusicSong, 'title'>) {
   const cleanTitle = song.title.replace(/[^a-zA-Z0-9 ]/g, '').trim();
   return new File(Paths.document, `${cleanTitle}.mp3`);
+}
+
+function fileFromUri(uri?: string) {
+  if (!uri) return null;
+  try {
+    return new File(uri);
+  } catch {
+    return null;
+  }
+}
+
+function isUsableAudioFile(file: File | null | undefined) {
+  try {
+    return Boolean(file?.exists && file.size >= MIN_OFFLINE_AUDIO_BYTES);
+  } catch {
+    return false;
+  }
+}
+
+function offlineFileCandidates(song: Pick<MusicSong, 'id' | 'sourceId' | 'title' | 'localUri'>) {
+  const candidates = [
+    fileFromUri(song.localUri),
+    fileForSong(song),
+    legacyFileForSong(song),
+  ].filter((file): file is File => Boolean(file));
+
+  const seen = new Set<string>();
+  return candidates.filter((file) => {
+    const key = file.uri;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function resolveOfflineFile(song: Pick<MusicSong, 'id' | 'sourceId' | 'title' | 'localUri'>) {
+  return offlineFileCandidates(song).find(isUsableAudioFile) || null;
+}
+
+function withResolvedOfflineFile(song: MusicSong): MusicSong | null {
+  const file = resolveOfflineFile(song);
+  if (!file) return null;
+
+  return {
+    ...song,
+    localUri: file.uri,
+    downloadedAt: song.downloadedAt || file.lastModified || Date.now(),
+    sizeBytes: file.size,
+  };
+}
+
+function requireUsableOfflineSong(song: MusicSong) {
+  const resolved = withResolvedOfflineFile(song);
+  if (!resolved) {
+    throw new Error('O arquivo baixado ficou incompleto. Tente baixar esta musica novamente.');
+  }
+  return resolved;
 }
 
 async function readIndex(): Promise<MusicSong[]> {
@@ -93,14 +240,26 @@ async function writeIndex(songs: MusicSong[]) {
   } catch {}
 }
 
-export async function getOfflineLibrary() {
+export async function getOfflineLibrary(options: OfflineLibraryOptions = {}) {
   const stored = await readIndex();
-  const valid = stored.filter((song) => {
-    if (!song.localUri) return false;
-    return new File(song.localUri).exists;
-  });
+  const validateFiles = options.validateFiles ?? true;
 
-  if (valid.length !== stored.length) {
+  if (!validateFiles) {
+    return stored.filter((song) => Boolean(song.localUri));
+  }
+
+  const valid = stored
+    .map((song) => withResolvedOfflineFile(song))
+    .filter((song): song is MusicSong => Boolean(song));
+
+  const changed = valid.length !== stored.length
+    || valid.some((song, index) =>
+      song.localUri !== stored[index]?.localUri
+      || song.sizeBytes !== stored[index]?.sizeBytes
+      || song.downloadedAt !== stored[index]?.downloadedAt
+    );
+
+  if (changed) {
     await writeIndex(valid);
   }
   return valid;
@@ -123,9 +282,7 @@ export async function findOfflineSong(song: MusicSong) {
     return refreshed;
   }
 
-  const currentFile = fileForSong(song);
-  const legacyFile = legacyFileForSong(song);
-  const existingFile = currentFile.exists ? currentFile : legacyFile.exists ? legacyFile : null;
+  const existingFile = resolveOfflineFile(song);
   if (!existingFile) return null;
 
   const imported: MusicSong = {
@@ -149,6 +306,84 @@ export async function upsertOfflineSong(song: MusicSong) {
   await writeIndex(next);
 }
 
+export function canUseNativeBackgroundDownloads() {
+  return Platform.OS === 'android' && Boolean(nativeOfflineDownloads?.downloadSongs);
+}
+
+async function requestAndroidNotificationPermission() {
+  if (Platform.OS !== 'android') return;
+  try {
+    const Notifications = await import('expo-notifications');
+    const permissions = await Notifications.getPermissionsAsync();
+    if (!permissions.granted) {
+      await Notifications.requestPermissionsAsync();
+    }
+  } catch {
+    // O download nativo continua funcionando; apenas a notificação pode ficar oculta se o sistema negar.
+  }
+}
+
+export async function downloadSongsWithNativeService(
+  songs: MusicSong[],
+  onEvent?: (event: NativeDownloadProgressEvent) => void
+): Promise<NativeDownloadResult | null> {
+  if (!canUseNativeBackgroundDownloads() || !nativeOfflineDownloads) return null;
+
+  await requestAndroidNotificationPermission();
+  const headers = await getMediaHeaders();
+  const payload = songs.map(nativePayloadForSong);
+  const taskId = nativeTaskId();
+  const subscription = onEvent
+    ? DeviceEventEmitter.addListener(NATIVE_DOWNLOAD_PROGRESS_EVENT, (rawEvent) => {
+        try {
+          const parsed = JSON.parse(String(rawEvent || '{}')) as NativeDownloadProgressEvent;
+          if (parsed.taskId !== taskId) return;
+          if (parsed.song?.localUri) {
+            parsed.song = normalizeNativeDownloadedSong(parsed.song as MusicSong & { localUri: string });
+          }
+          onEvent(parsed);
+        } catch {}
+      })
+    : null;
+
+  let rawResult = '{}';
+  try {
+    rawResult = await nativeOfflineDownloads.downloadSongs(payload, headers, taskId);
+  } finally {
+    subscription?.remove();
+  }
+  const parsed = JSON.parse(rawResult || '{}') as {
+    downloaded?: Array<MusicSong & { localUri: string; downloadedAt?: number; sizeBytes?: number }>;
+    failures?: NativeDownloadFailure[];
+  };
+
+  const failures = [...(parsed.failures || [])];
+  const downloaded = (parsed.downloaded || []).reduce<MusicSong[]>((result, item) => {
+    const normalized = normalizeNativeDownloadedSong(item);
+    const verified = withResolvedOfflineFile(normalized);
+    if (verified) {
+      result.push(verified);
+    } else {
+      failures.push({
+        id: normalized.id,
+        sourceId: normalized.sourceId,
+        title: normalized.title,
+        message: 'Arquivo offline incompleto.',
+      });
+    }
+    return result;
+  }, []);
+
+  for (const song of downloaded) {
+    await upsertOfflineSong(song);
+  }
+
+  return {
+    downloaded,
+    failures,
+  };
+}
+
 export async function downloadSong(
   song: MusicSong,
   onProgress?: (progress: DownloadProgress) => void
@@ -161,14 +396,23 @@ export async function downloadSong(
   const existing = await findOfflineSong(song);
   if (existing) return existing;
 
-  const headers = await getAuthenticatedHeaders();
+  const nativeResult = await downloadSongsWithNativeService([{ ...song, sourceId }]);
+  if (nativeResult) {
+    const downloaded = nativeResult.downloaded[0];
+    if (downloaded) return downloaded;
+
+    const failure = nativeResult.failures[0];
+    throw new Error(failure?.message || 'O download não foi concluído.');
+  }
+
+  const headers = await getMediaHeaders();
   const destination = fileForSong(song);
   const partial = new File(destination.parentDirectory, `${destination.name}.part`);
 
   if (partial.exists) partial.delete();
 
   try {
-    await waitUntilPrepared(sourceId);
+    await waitUntilPrepared({ ...song, sourceId });
 
     let downloaded: File | null = null;
     let lastError: unknown;
@@ -177,7 +421,7 @@ export async function downloadSong(
       try {
         if (partial.exists) partial.delete();
         downloaded = await File.downloadFileAsync(
-          musicDownloadUrl(sourceId, song.title),
+          musicDownloadUrl(sourceId, song.title, song.artist),
           partial,
           {
             headers,
@@ -206,13 +450,13 @@ export async function downloadSong(
     if (destination.exists) destination.delete();
     await downloaded.move(destination);
 
-    const offlineSong: MusicSong = {
+    const offlineSong = requireUsableOfflineSong({
       ...song,
       sourceId,
       localUri: destination.uri,
       downloadedAt: Date.now(),
       sizeBytes: destination.size,
-    };
+    });
     await upsertOfflineSong(offlineSong);
     return offlineSong;
   } catch (error) {
@@ -235,13 +479,41 @@ export async function removeOfflineSong(song: MusicSong) {
   await writeIndex(library.filter((candidate) => songIdentity(candidate) !== identity));
 }
 
-export async function mergeWithOfflineLibrary(songs: MusicSong[]) {
-  return Promise.all(
-    songs.map(async (song) => {
-      const offline = await findOfflineSong(song);
-      return offline ? { ...song, ...offline } : song;
-    })
-  );
+function offlineLookupKeys(song: Pick<MusicSong, 'id' | 'sourceId'>) {
+  return [
+    songIdentity(song),
+    song.id,
+    song.sourceId?.trim(),
+  ].filter((key): key is string => Boolean(key));
+}
+
+export async function mergeWithOfflineLibrary(songs: MusicSong[], offlineSongs?: MusicSong[]) {
+  const library = offlineSongs ?? await getOfflineLibrary();
+  const offlineByKey = new Map<string, MusicSong>();
+
+  for (const offline of library) {
+    for (const key of offlineLookupKeys(offline)) {
+      offlineByKey.set(key, offline);
+    }
+  }
+
+  return songs.map((song) => {
+    const offline = offlineLookupKeys(song)
+      .map((key) => offlineByKey.get(key))
+      .find(Boolean);
+
+    if (!offline) return song;
+
+    return {
+      ...song,
+      ...offline,
+      id: song.id || offline.id,
+      sourceId: song.sourceId || offline.sourceId,
+      title: song.title || offline.title,
+      artist: song.artist || offline.artist,
+      artworkUrl: song.artworkUrl || offline.artworkUrl,
+    };
+  });
 }
 
 export function formatBytes(bytes?: number) {

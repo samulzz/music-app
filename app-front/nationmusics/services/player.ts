@@ -1,4 +1,6 @@
 import TrackPlayer, {
+  Event,
+  PlaybackState,
   PlayerCommand,
   RepeatMode,
   type BrowseCategory,
@@ -9,11 +11,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
 import type { MusicSong } from '../types/music';
-import { getAuthenticatedHeaders } from './api';
-import { musicDownloadUrl } from './config';
+import { apiRequest, getMediaHeaders } from './api';
+import { musicDownloadUrl, musicPreparePath } from './config';
+import { mergeWithOfflineLibrary } from './offline-library';
+import { getDailyMixSongs } from './recommendations';
+import { sortSongsAlphabetically } from './song-order';
+import { getLatestConnectState, markConnectRevisionProcessed, takeOverConnectPlayback } from './connect';
 
 let initialized = false;
 const OFFLINE_INDEX_KEY = 'nationmusics.offline-library.v2';
+const PREFETCH_RETRY_MS = 5 * 60 * 1000;
+const prefetchAttemptAt = new Map<string, number>();
+const shuffleListeners = new Set<(enabled: boolean) => void>();
+let lastShuffleEnabled = false;
+let recommendationAppendInFlight: Promise<void> | null = null;
+let playbackQueueRevision = 0;
 
 function offlineBrowseItem(song: MusicSong): BrowseItem | null {
   if (!song.localUri) return null;
@@ -26,6 +38,7 @@ function offlineBrowseItem(song: MusicSong): BrowseItem | null {
     mimeType: 'audio/mpeg',
     extras: {
       sourceId: song.sourceId,
+      songId: song.id,
       localUri: song.localUri,
       origin: 'android-auto',
     },
@@ -49,12 +62,13 @@ export async function refreshAndroidAutoLibrary() {
     songs = [];
   }
 
-  const downloaded = songs
+  const orderedSongs = sortSongsAlphabetically(songs);
+  const downloaded = orderedSongs
     .map(offlineBrowseItem)
     .filter((item): item is BrowseItem => item !== null);
 
   const byArtist = new Map<string, BrowseItem[]>();
-  songs.forEach((song) => {
+  orderedSongs.forEach((song) => {
     const item = offlineBrowseItem(song);
     if (!item) return;
     const artist = song.artist?.trim() || 'Artista desconhecido';
@@ -70,7 +84,9 @@ export async function refreshAndroidAutoLibrary() {
       title: artist,
       artist: `${children.length} ${children.length === 1 ? 'música' : 'músicas'}`,
       artworkUrl: children.find((item) => item.artworkUrl)?.artworkUrl,
-      children,
+      children: [...children].sort((left, right) =>
+        left.title.localeCompare(right.title, 'pt-BR', { sensitivity: 'base', numeric: true })
+      ),
     }));
 
   const categories: BrowseCategory[] = [
@@ -122,18 +138,28 @@ export function setupMusicPlayer() {
     ],
     handling: 'native',
   });
-  TrackPlayer.setRepeatMode(RepeatMode.All);
+  // A fila precisa terminar para só então iniciar as recomendações. Com RepeatMode.All,
+  // as sugestões precisavam ser anexadas antes e acabavam entrando no aleatório.
+  TrackPlayer.setRepeatMode(RepeatMode.Off);
+  TrackPlayer.addEventListener(Event.MediaItemTransition, () => {
+    prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
+  });
+  TrackPlayer.addEventListener(Event.PlaybackStateChanged, ({ state }) => {
+    if (state !== PlaybackState.Ended) return;
+    const revision = playbackQueueRevision;
+    void continueWithDailyRecommendations(revision);
+  });
   initialized = true;
 }
 
 function toMediaItem(song: MusicSong, headers?: Record<string, string>): MediaItem | null {
   const sourceId = song.sourceId?.trim();
-  const remoteUrl = song.remoteUrl || (sourceId ? musicDownloadUrl(sourceId, song.title) : '');
+  const remoteUrl = song.remoteUrl || (sourceId ? musicDownloadUrl(sourceId, song.title, song.artist) : '');
   const url = song.localUri || remoteUrl;
   if (!url) return null;
 
   return {
-    mediaId: song.id,
+    mediaId: sourceId || song.id,
     url: song.localUri || !headers ? url : { uri: url, headers },
     title: song.title,
     artist: song.artist,
@@ -141,26 +167,128 @@ function toMediaItem(song: MusicSong, headers?: Record<string, string>): MediaIt
     mimeType: 'audio/mpeg',
     extras: {
       sourceId: song.sourceId,
+      songId: song.id,
       localUri: song.localUri,
     },
   };
 }
 
+function mediaItemSourceId(item: MediaItem | null | undefined) {
+  const sourceId = item?.extras && typeof item.extras === 'object' ? item.extras.sourceId : '';
+  return typeof sourceId === 'string' ? sourceId.trim() : '';
+}
+
+function shouldPrefetch(sourceId: string) {
+  if (!sourceId) return false;
+  const lastAttempt = prefetchAttemptAt.get(sourceId) || 0;
+  if (Date.now() - lastAttempt < PREFETCH_RETRY_MS) return false;
+  prefetchAttemptAt.set(sourceId, Date.now());
+  return true;
+}
+
+function prefetchMediaItem(item: MediaItem | null | undefined) {
+  const sourceId = mediaItemSourceId(item);
+  const localUri = item?.extras && typeof item.extras === 'object' ? item.extras.localUri : '';
+  if (!item || localUri || !shouldPrefetch(sourceId)) return;
+
+  try {
+    TrackPlayer.preload(item);
+  } catch {}
+
+  void apiRequest(musicPreparePath(sourceId, String(item.title || 'Música'), String(item.artist || '')), {
+    method: 'POST',
+    authenticated: false,
+  }).catch(() => {});
+}
+
+function nextPrefetchIndex(currentIndex: number | null, queueLength: number) {
+  if (currentIndex === null || currentIndex < 0 || queueLength <= 1) return -1;
+  if (!TrackPlayer.isShuffleEnabled()) return (currentIndex + 1) % queueLength;
+
+  let next = currentIndex;
+  while (next === currentIndex) {
+    next = Math.floor(Math.random() * queueLength);
+  }
+  return next;
+}
+
+function prefetchNextInQueue(currentIndex = TrackPlayer.getActiveMediaItemIndex()) {
+  const queue = TrackPlayer.getQueue();
+  const index = nextPrefetchIndex(currentIndex, queue.length);
+  if (index < 0) return;
+  prefetchMediaItem(queue[index]);
+}
+
+async function continueWithDailyRecommendations(expectedRevision: number) {
+  if (recommendationAppendInFlight) return recommendationAppendInFlight;
+  recommendationAppendInFlight = (async () => {
+    try {
+      const endedQueue = TrackPlayer.getQueue();
+      const dailySongs = await mergeWithOfflineLibrary(await getDailyMixSongs());
+      if (expectedRevision !== playbackQueueRevision || TrackPlayer.getPlaybackState() !== PlaybackState.Ended) return;
+      const existing = new Set(
+        endedQueue.map((item) => mediaItemSourceId(item) || String(item.mediaId || ''))
+      );
+      const needsNetwork = dailySongs.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
+      const headers = needsNetwork ? await getMediaHeaders() : undefined;
+      const additions = dailySongs
+        .filter((song) => {
+          const identity = song.sourceId?.trim() || song.id;
+          if (!identity || existing.has(identity)) return false;
+          existing.add(identity);
+          return true;
+        })
+        .map((song) => toMediaItem(song, headers))
+        .filter((item): item is MediaItem => item !== null);
+      if (additions.length) {
+        // A playlist original já terminou. Começamos outra fila para que músicas
+        // recomendadas nunca sejam misturadas ao aleatório da seleção original.
+        playbackQueueRevision += 1;
+        TrackPlayer.setMediaItems(additions, 0);
+        TrackPlayer.play();
+        prefetchNextInQueue(0);
+      }
+    } catch {
+      // A fila original continua funcionando quando o usuário estiver offline.
+    } finally {
+      recommendationAppendInFlight = null;
+      if (expectedRevision !== playbackQueueRevision && TrackPlayer.getPlaybackState() === PlaybackState.Ended) {
+        queueMicrotask(() => { void continueWithDailyRecommendations(playbackQueueRevision); });
+      }
+    }
+  })();
+  return recommendationAppendInFlight;
+}
+
+function emitShuffleEnabled(enabled: boolean) {
+  lastShuffleEnabled = enabled;
+  shuffleListeners.forEach((listener) => {
+    try {
+      listener(enabled);
+    } catch {}
+  });
+}
+
 export async function playSongQueue(songs: MusicSong[], requestedIndex: number) {
   setupMusicPlayer();
+  if (getLatestConnectState() && !getLatestConnectState()?.currentDeviceActive) {
+    try {
+      const state = await takeOverConnectPlayback();
+      markConnectRevisionProcessed(state.commandRevision);
+    } catch {}
+  }
+  const playableSongs = await mergeWithOfflineLibrary(songs);
 
-  const needsNetwork = songs.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
+  const needsNetwork = playableSongs.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
   let headers: Record<string, string> | undefined;
   if (needsNetwork) {
-    try {
-      headers = await getAuthenticatedHeaders();
-    } catch {}
+    headers = await getMediaHeaders();
   }
 
   const queue: MediaItem[] = [];
   let queueIndex = -1;
 
-  songs.forEach((song, index) => {
+  playableSongs.forEach((song, index) => {
     if (!song.localUri && !headers) return;
     const item = toMediaItem(song, headers);
     if (!item) return;
@@ -172,8 +300,10 @@ export async function playSongQueue(songs: MusicSong[], requestedIndex: number) 
     throw new Error('Esta música não está disponível sem internet. Baixe-a antes de sair da rede.');
   }
 
+  playbackQueueRevision += 1;
   TrackPlayer.setMediaItems(queue, queueIndex);
   TrackPlayer.play();
+  prefetchNextInQueue(queueIndex);
   return queueIndex;
 }
 
@@ -190,21 +320,53 @@ export function playNext() {
   setupMusicPlayer();
   TrackPlayer.skipToNext();
   TrackPlayer.play();
+  prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
 }
 
 export function playPrevious() {
   setupMusicPlayer();
   TrackPlayer.skipToPrevious();
   TrackPlayer.play();
+  prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
 }
 
 export function stopMusicPlayer(clearQueue = false) {
   if (!initialized) return;
   TrackPlayer.stop();
-  if (clearQueue) TrackPlayer.clear();
+  if (clearQueue) {
+    playbackQueueRevision += 1;
+    TrackPlayer.clear();
+  }
 }
 
 export function setShuffleEnabled(enabled: boolean) {
   setupMusicPlayer();
   TrackPlayer.setShuffleEnabled(enabled);
+  emitShuffleEnabled(enabled);
+  prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
+  return enabled;
+}
+
+export function getShuffleEnabled() {
+  setupMusicPlayer();
+  lastShuffleEnabled = TrackPlayer.isShuffleEnabled();
+  return lastShuffleEnabled;
+}
+
+export function toggleShuffleEnabled() {
+  const enabled = !getShuffleEnabled();
+  setShuffleEnabled(enabled);
+  return enabled;
+}
+
+export function subscribeShuffleEnabled(listener: (enabled: boolean) => void) {
+  shuffleListeners.add(listener);
+  try {
+    listener(getShuffleEnabled());
+  } catch {
+    listener(lastShuffleEnabled);
+  }
+  return () => {
+    shuffleListeners.delete(listener);
+  };
 }

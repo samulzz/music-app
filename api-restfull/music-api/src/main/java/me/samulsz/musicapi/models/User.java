@@ -19,6 +19,7 @@ public class User {
     private String password;
 
     @ManyToMany(fetch = FetchType.EAGER)
+    @OrderBy("title ASC, artist ASC, id ASC")
     @JoinTable(
             name = "user_downloads",
             joinColumns = @JoinColumn(name = "user_id"),

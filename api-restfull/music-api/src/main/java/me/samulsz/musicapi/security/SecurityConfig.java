@@ -34,8 +34,14 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
+                .requestMatchers("/error").permitAll()
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/admin/**").permitAll()
+                .requestMatchers("/api/musicas/**").permitAll()
+                .requestMatchers("/api/spotify/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/playlists/global").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/playlists/most-downloaded/songs").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/playlists/*/songs").permitAll()
                 .anyRequest().authenticated()
             )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint((request, response, authException) -> {

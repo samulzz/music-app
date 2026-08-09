@@ -20,9 +20,14 @@ export type ApiLibrarySong = {
 };
 
 export type ApiSearchSong = {
-  id: string;
-  titulo: string;
-  artista: string;
+  id: number | string;
+  sourceId?: string;
+  title?: string;
+  artist?: string;
+  coverUrl?: string;
+  uri?: string;
+  titulo?: string;
+  artista?: string;
   capa?: string;
 };
 
@@ -31,6 +36,8 @@ export type ApiPlaylist = {
   name: string;
   description?: string;
   iconUrl?: string;
+  globalPlaylist?: boolean;
+  songs?: ApiLibrarySong[];
 };
 
 export type SpotifyImportTrack = {
@@ -42,6 +49,7 @@ export type SpotifyImportTrack = {
 
 export type SpotifyPlaylistPreview = {
   spotifyId: string;
+  type: 'playlist' | 'album' | 'track';
   name: string;
   coverUrl?: string;
   totalTracks: number;
@@ -60,11 +68,12 @@ export function fromApiLibrarySong(song: ApiLibrarySong): MusicSong {
 }
 
 export function fromApiSearchSong(song: ApiSearchSong): MusicSong {
+  const sourceId = String(song.sourceId || song.id || '');
   return {
-    id: song.id,
-    sourceId: song.id,
-    title: song.titulo,
-    artist: song.artista,
-    artworkUrl: song.capa,
+    id: String(song.id || sourceId),
+    sourceId,
+    title: song.title || song.titulo || 'Musica',
+    artist: song.artist || song.artista || 'Artista desconhecido',
+    artworkUrl: song.coverUrl || song.capa,
   };
 }

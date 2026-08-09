@@ -1,10 +1,15 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import GlobalMiniPlayer from '../../components/global-mini-player';
+import { UserMenu } from '../../components/user-menu';
 
 export default function TabLayout() {
+  const insets = useSafeAreaInsets();
+  const bottomInset = Math.max(insets.bottom, 0);
+
   return (
     <View style={{ flex: 1, backgroundColor: '#121212' }}>
       <Tabs
@@ -14,8 +19,8 @@ export default function TabLayout() {
             backgroundColor: '#121212',
             borderTopColor: '#262626',
             borderTopWidth: 1,
-            height: 62,
-            paddingBottom: 8,
+            height: 62 + bottomInset,
+            paddingBottom: 8 + bottomInset,
             paddingTop: 5,
           },
           tabBarActiveTintColor: '#1db954',
@@ -40,12 +45,26 @@ export default function TabLayout() {
         <Tabs.Screen
           name="explore"
           options={{
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="playlists"
+          options={{
             title: 'Biblioteca',
             tabBarIcon: ({ color, size }) => <Ionicons name="library" size={size} color={color} />,
           }}
         />
+        <Tabs.Screen
+          name="friends"
+          options={{
+            title: 'Amigos',
+            tabBarIcon: ({ color, size }) => <Ionicons name="people" size={size} color={color} />,
+          }}
+        />
       </Tabs>
-      <GlobalMiniPlayer bottomOffset={68} />
+      <UserMenu />
+      <GlobalMiniPlayer bottomOffset={68 + bottomInset} />
     </View>
   );
 }

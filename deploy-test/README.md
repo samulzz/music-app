@@ -5,6 +5,7 @@ Implantação ativa em `/opt/nationmusics-test` no servidor de testes.
 - API pública: `https://marlonbarbershop.com/nationmusics/api`
 - APK: `https://marlonbarbershop.com/nationmusics/download/nationmusics.apk`
 - Container: `nationmusics-test-api`
+- Gerador de PO Token: `nationmusics-test-pot-provider`
 - Porta local: `127.0.0.1:8090`
 - Limite de memória: 640 MiB
 - Limite de CPU: 1 núcleo
@@ -38,8 +39,18 @@ docker compose logs -f --tail=100
 docker stats nationmusics-test-api
 ```
 
-## Limitação conhecida
+## Acesso ao YouTube
 
-O YouTube está bloqueando o IP da VPS com a validação antirrobô. Cadastro, login, sessão, banco, API e download da APK funcionam normalmente. Busca e conversão de músicas do YouTube exigem um arquivo de cookies válido ou um proxy residencial.
+O deploy usa o `yt-dlp` nightly com o provedor `bgutil` recomendado pela documentação do projeto. O container `pot-provider` gera PO Tokens automaticamente para cada vídeo, então não há arquivo de cookies para renovar no funcionamento normal.
 
-Não use APIs públicas aleatórias como substituição: elas são instáveis e podem expor tráfego ou credenciais.
+Cookies continuam opcionais via `YOUTUBE_COOKIES_PATH` apenas para conteúdo que exige uma conta (privado, restrito por idade ou exclusivo para membros). O app não depende deles para músicas públicas.
+
+As chamadas ao YouTube são serializadas e espaçadas por 10 segundos para evitar o bloqueio temporário do IP da VPS. O intervalo pode ser alterado por `YOUTUBE_MIN_REQUEST_INTERVAL_SECONDS`. Se for necessário trocar o IP de saída sem alterar o aplicativo, configure um proxy em `YOUTUBE_PROXY`.
+
+Para confirmar que o plugin foi carregado:
+
+```bash
+docker compose exec api yt-dlp -v "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
+O log deve listar um provedor `bgutil:http`.

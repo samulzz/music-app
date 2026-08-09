@@ -5,6 +5,7 @@ import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,17 +37,25 @@ public class MusicController {
 
     @GetMapping("/status")
     public String status() {
-        return "Servidor Online e Conectado ao YouTube! 🚀";
+        return "Servidor online com acesso automático ao YouTube.";
     }
 
     @GetMapping("/baixar/{id}")
-    public ResponseEntity<Resource> baixarMusica(
+    public ResponseEntity<?> baixarMusica(
             @PathVariable String id,
-            @RequestParam(defaultValue = "musica_legal") String titulo) {
+            @RequestParam(defaultValue = "musica_legal") String titulo,
+            @RequestParam(defaultValue = "") String artista) {
 
         System.out.println("Baixando: " + titulo + " (ID: " + id + ")");
 
-        File arquivoDeAudio = musicService.baixarAudio(id);
+        File arquivoDeAudio;
+        try {
+            arquivoDeAudio = musicService.baixarAudio(id, titulo, artista);
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .contentType(MediaType.TEXT_PLAIN)
+                    .body(downloadErrorMessage(e));
+        }
 
         if (arquivoDeAudio == null || !arquivoDeAudio.exists()) {
             return ResponseEntity.notFound().build();
@@ -71,9 +80,38 @@ public class MusicController {
                 .body(resource);
     }
 
+    private String downloadErrorMessage(Exception error) {
+        String message = error.getMessage() == null ? "" : error.getMessage();
+        String normalized = message.toLowerCase();
+        if (normalized.contains("sign in to confirm you")
+                || normalized.contains("not a bot")
+                || normalized.contains("unusual traffic")
+                || normalized.contains("http error 429")
+                || normalized.contains("too many requests")) {
+            return "O YouTube recusou temporariamente o acesso do servidor para esta musica.";
+        }
+        if (normalized.contains("po token")
+                || normalized.contains("pot provider")
+                || normalized.contains("bgutil")) {
+            return "O gerador de acesso do YouTube esta indisponivel no servidor.";
+        }
+        if (normalized.contains("video unavailable")
+                || normalized.contains("private video")
+                || normalized.contains("has been removed")) {
+            return "Esta musica nao esta disponivel no YouTube.";
+        }
+        if (normalized.contains("copyright")) {
+            return "Esta musica foi bloqueada pelo YouTube.";
+        }
+        return "Nao foi possivel baixar esta musica agora.";
+    }
+
     @PostMapping("/preparar/{id}")
-    public ResponseEntity<?> prepararMusica(@PathVariable String id) {
-        return ResponseEntity.accepted().body(musicService.prepararAudio(id));
+    public ResponseEntity<?> prepararMusica(
+            @PathVariable String id,
+            @RequestParam(defaultValue = "") String titulo,
+            @RequestParam(defaultValue = "") String artista) {
+        return ResponseEntity.accepted().body(musicService.prepararAudio(id, titulo, artista));
     }
 
     @GetMapping("/preparar/{id}/status")

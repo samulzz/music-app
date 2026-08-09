@@ -13,7 +13,7 @@
   <body>
     <div id="auth-screen" class="auth-screen">
       <div class="auth-card">
-        <div class="brand-mark">N</div>
+        <div class="brand-mark"><img src="../assets/icon.png" alt="" /></div>
         <h1>NationMusics</h1>
         <p id="auth-subtitle">Entre para acessar sua música.</p>
         <form id="auth-form">
@@ -23,7 +23,7 @@
           </label>
           <label>
             Senha
-            <input id="password" type="password" autocomplete="current-password" minlength="6" required />
+            <input id="password" type="password" autocomplete="current-password" required />
           </label>
           <button id="auth-submit" class="primary-button" type="submit">Entrar</button>
           <button id="auth-toggle" class="text-button" type="button">Criar uma conta</button>
@@ -35,15 +35,26 @@
     <div id="app-shell" class="app-shell hidden">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <div class="brand-mark small">N</div>
+          <div class="brand-mark small"><img src="../assets/icon.png" alt="" /></div>
           <span>NationMusics</span>
         </div>
         <nav>
-          <button class="nav-item active" data-view="home"><span>⌂</span> Início</button>
-          <button class="nav-item" data-view="search"><span>⌕</span> Buscar</button>
-          <button class="nav-item" data-view="library"><span>♫</span> Biblioteca</button>
+          <button class="nav-item active" data-view="home"><span class="icon-slot" data-icon="home"></span> Início</button>
+          <button class="nav-item" data-view="search"><span class="icon-slot" data-icon="search"></span> Buscar</button>
+          <button class="nav-item" data-view="library"><span class="icon-slot" data-icon="library"></span> Biblioteca</button>
+          <button class="nav-item" data-view="friends"><span class="icon-slot" data-icon="users"></span> Amigos</button>
         </nav>
         <div class="sidebar-bottom">
+          <button id="discord-button" class="discord-button" type="button" title="Configurar Discord Rich Presence">
+            <span class="discord-brand-icon">
+              <span class="icon-slot" data-icon="discord"></span>
+              <span id="discord-dot" class="discord-dot"></span>
+            </span>
+            <div>
+              <strong>Discord</strong>
+              <small id="discord-label">Configurar</small>
+            </div>
+          </button>
           <div class="profile">
             <div class="avatar" id="avatar">S</div>
             <div>
@@ -56,15 +67,31 @@
 
       <main class="content">
         <header class="topbar">
+          <div class="top-brand"><img src="../assets/icon.png" alt="" /><strong>NationMusics</strong></div>
+          <nav class="top-nav" aria-label="Navegação principal">
+            <button class="nav-item active" data-view="home"><span class="icon-slot" data-icon="home"></span> Início</button>
+            <button class="nav-item" data-view="search"><span class="icon-slot" data-icon="search"></span> Buscar</button>
+            <button class="nav-item" data-view="library"><span class="icon-slot" data-icon="library"></span> Biblioteca</button>
+            <button class="nav-item" data-view="friends"><span class="icon-slot" data-icon="users"></span> Amigos</button>
+          </nav>
           <div>
             <p id="eyebrow">BEM-VINDO DE VOLTA</p>
             <h1 id="view-title">Sua música, do seu jeito.</h1>
           </div>
           <form id="global-search" class="search-box">
-            <span>⌕</span>
+            <span class="icon-slot" data-icon="search"></span>
             <input id="search-input" placeholder="Músicas ou artistas..." />
-            <button type="submit" title="Buscar">→</button>
+            <button type="submit" title="Buscar"><span class="icon-slot" data-icon="arrow-right"></span></button>
           </form>
+          <div class="top-profile">
+            <button id="top-discord-button" class="top-discord-button" type="button" title="Configurar presença no Discord">
+              <span id="top-discord-dot" class="discord-dot"></span>
+              <span class="icon-slot" data-icon="discord"></span>
+            </button>
+            <span class="avatar" id="top-avatar">S</span>
+            <strong id="top-profile-name">Usuário</strong>
+            <button id="top-logout-button" type="button" title="Sair"><span class="icon-slot" data-icon="logout"></span></button>
+          </div>
         </header>
 
         <section id="status-banner" class="status-banner hidden"></section>
@@ -81,9 +108,16 @@
         </div>
         <div class="player-center">
           <div class="player-controls">
-            <button id="previous-button" title="Anterior">‹</button>
-            <button id="play-button" class="play-button" title="Reproduzir">▶</button>
-            <button id="next-button" title="Próxima">›</button>
+            <button id="jam-player-button" class="mode-button" title="Abrir JAM">
+              <span class="icon-slot" data-icon="radio"></span><span>JAM</span>
+            </button>
+            <button id="shuffle-button" class="mode-button" title="Aleatório">
+              <span class="icon-slot" data-icon="shuffle"></span>
+              <span id="shuffle-label">Aleatório</span>
+            </button>
+            <button id="previous-button" class="control-button" title="Anterior"><span class="icon-slot" data-icon="skip-back"></span></button>
+            <button id="play-button" class="play-button" title="Reproduzir"><span class="icon-slot" data-icon="play"></span></button>
+            <button id="next-button" class="control-button" title="Próxima"><span class="icon-slot" data-icon="skip-forward"></span></button>
           </div>
           <div class="timeline">
             <span id="current-time">0:00</span>
@@ -92,9 +126,21 @@
           </div>
         </div>
         <div class="volume">
-          <span>◖</span>
-          <input id="volume" type="range" min="0" max="1" step="0.05" value="0.85" />
+          <button id="connect-button" class="volume-button connect-button" type="button" title="Dispositivos conectados">
+            <span class="icon-slot" data-icon="devices"></span>
+          </button>
+          <button id="mute-button" class="volume-button" type="button" title="Mutar">
+            <span class="icon-slot" data-icon="volume-high"></span>
+          </button>
+          <input id="volume" type="range" min="0" max="100" step="1" value="85" aria-label="Volume" />
+          <span id="volume-value">85%</span>
+          <section id="connect-panel" class="connect-panel hidden">
+            <div class="connect-panel-head"><div><strong>NationMusics Connect</strong><small>Escolha onde o som deve tocar</small></div><button id="connect-close" type="button">&times;</button></div>
+            <div id="connect-devices" class="connect-devices"></div>
+            <button id="connect-takeover" class="primary-button compact hidden" type="button">Ouvir neste computador</button>
+          </section>
         </div>
+        <section id="jam-player-panel" class="jam-player-panel hidden"></section>
         <audio id="audio"></audio>
       </footer>
     </div>

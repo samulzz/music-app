@@ -24,8 +24,9 @@ import java.io.InputStreamReader;
 @Service
 public class SpotifyPlaylistService {
 
-    private static final Pattern PLAYLIST_ID = Pattern.compile(
-            "(?:open\\.spotify\\.com/(?:intl-[a-z]{2}/)?playlist/|spotify:playlist:)([A-Za-z0-9]{22})",
+    private static final Pattern SPOTIFY_RESOURCE = Pattern.compile(
+            "(?:open\\.spotify\\.com/(?:intl-[a-z]{2}/)?(playlist|album|track)/"
+                    + "|spotify:(playlist|album|track):)([A-Za-z0-9]{22})",
             Pattern.CASE_INSENSITIVE
     );
     private static final Pattern NEXT_DATA = Pattern.compile(
@@ -49,13 +50,13 @@ public class SpotifyPlaylistService {
     }
 
     public SpotifyPlaylistResponse preview(String spotifyUrl) {
-        String playlistId = extractPlaylistId(spotifyUrl);
+        SpotifyResource resource = extractResource(spotifyUrl);
         SpotifyPlaylistResponse complete = previewWithHelper(spotifyUrl);
         if (complete != null) {
             return complete;
         }
 
-        String embedUrl = "https://open.spotify.com/embed/playlist/" + playlistId;
+        String embedUrl = "https://open.spotify.com/embed/" + resource.type() + "/" + resource.id();
 
         try {
             HttpRequest request = HttpRequest.newBuilder(URI.create(embedUrl))
@@ -70,18 +71,19 @@ public class SpotifyPlaylistService {
                     HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
             );
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalArgumentException("O Spotify não disponibilizou esta playlist.");
+                throw new IllegalArgumentException("O Spotify não disponibilizou este link.");
             }
 
             Matcher dataMatcher = NEXT_DATA.matcher(response.body());
             if (!dataMatcher.find()) {
-                throw new IllegalArgumentException("Não foi possível ler esta playlist pública.");
+                throw new IllegalArgumentException("Não foi possível ler este conteúdo público.");
             }
 
             JsonNode entity = objectMapper.readTree(dataMatcher.group(1))
                     .path("props").path("pageProps").path("state").path("data").path("entity");
-            if (!"playlist".equalsIgnoreCase(entity.path("type").asText())) {
-                throw new IllegalArgumentException("O link informado não é de uma playlist.");
+            String entityType = entity.path("type").asText(resource.type());
+            if (!resource.type().equalsIgnoreCase(entityType)) {
+                throw new IllegalArgumentException("O Spotify retornou um conteúdo diferente do link informado.");
             }
 
             JsonNode trackList = entity.path("trackList");
@@ -89,25 +91,14 @@ public class SpotifyPlaylistService {
             if (trackList.isArray()) {
                 for (JsonNode track : trackList) {
                     if (tracks.size() == MAX_TRACKS) break;
-                    String uri = track.path("uri").asText();
-                    String id = uri.startsWith("spotify:track:")
-                            ? uri.substring("spotify:track:".length())
-                            : track.path("uid").asText();
-                    String title = track.path("title").asText("").trim();
-                    String artist = track.path("subtitle").asText("").trim();
-                    if (!title.isBlank() && !artist.isBlank()) {
-                        tracks.add(new SpotifyPlaylistTrack(
-                                id,
-                                title,
-                                artist,
-                                track.path("duration").asInt(0)
-                        ));
-                    }
+                    addTrack(tracks, track);
                 }
+            } else if ("track".equalsIgnoreCase(resource.type())) {
+                addTrack(tracks, entity);
             }
             if (tracks.isEmpty()) {
                 throw new IllegalArgumentException(
-                        "A playlist está vazia, privada ou não está disponível publicamente."
+                        "Este conteúdo está vazio, é privado ou não está disponível publicamente."
                 );
             }
 
@@ -116,8 +107,9 @@ public class SpotifyPlaylistService {
                     : tracks.size();
             String coverUrl = entity.path("coverArt").path("sources").path(0).path("url").asText("");
             return new SpotifyPlaylistResponse(
-                    playlistId,
-                    entity.path("name").asText("Playlist do Spotify"),
+                    resource.id(),
+                    resource.type(),
+                    entity.path("name").asText(defaultName(resource.type())),
                     coverUrl,
                     totalTracks,
                     totalTracks > MAX_TRACKS,
@@ -126,8 +118,41 @@ public class SpotifyPlaylistService {
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
-            throw new IllegalArgumentException("Não foi possível importar a playlist agora.");
+            throw new IllegalArgumentException("Não foi possível importar este link agora.");
         }
+    }
+
+    private void addTrack(List<SpotifyPlaylistTrack> tracks, JsonNode track) {
+        String uri = track.path("uri").asText();
+        String id = uri.startsWith("spotify:track:")
+                ? uri.substring("spotify:track:".length())
+                : track.path("uid").asText(track.path("id").asText(""));
+        String title = track.path("title").asText(track.path("name").asText("")).trim();
+        String artist = track.path("subtitle").asText("").trim();
+        if (artist.isBlank() && track.path("artists").isArray()) {
+            List<String> names = new ArrayList<>();
+            for (JsonNode artistNode : track.path("artists")) {
+                String name = artistNode.path("name").asText("").trim();
+                if (!name.isBlank()) names.add(name);
+            }
+            artist = String.join(", ", names);
+        }
+        if (!id.isBlank() && !title.isBlank() && !artist.isBlank()) {
+            tracks.add(new SpotifyPlaylistTrack(
+                    id,
+                    title,
+                    artist,
+                    track.path("duration").asInt(track.path("durationMs").asInt(0))
+            ));
+        }
+    }
+
+    private String defaultName(String type) {
+        return switch (type) {
+            case "album" -> "Álbum do Spotify";
+            case "track" -> "Música do Spotify";
+            default -> "Playlist do Spotify";
+        };
     }
 
     private SpotifyPlaylistResponse previewWithHelper(String spotifyUrl) {
@@ -158,7 +183,7 @@ public class SpotifyPlaylistService {
             int exitCode = process.waitFor();
             JsonNode json = objectMapper.readTree(output.toString());
             if (exitCode != 0 || json.has("error")) {
-                throw new IllegalArgumentException("Não foi possível ler todas as faixas desta playlist.");
+                throw new IllegalArgumentException("Não foi possível ler todas as faixas deste link.");
             }
             return objectMapper.treeToValue(json, SpotifyPlaylistResponse.class);
         } catch (IllegalArgumentException e) {
@@ -168,14 +193,17 @@ public class SpotifyPlaylistService {
         }
     }
 
-    private String extractPlaylistId(String spotifyUrl) {
+    SpotifyResource extractResource(String spotifyUrl) {
         if (spotifyUrl == null || spotifyUrl.isBlank()) {
-            throw new IllegalArgumentException("Cole o link da playlist do Spotify.");
+            throw new IllegalArgumentException("Cole o link de uma música, álbum ou playlist do Spotify.");
         }
-        Matcher matcher = PLAYLIST_ID.matcher(spotifyUrl.trim());
+        Matcher matcher = SPOTIFY_RESOURCE.matcher(spotifyUrl.trim());
         if (!matcher.find()) {
-            throw new IllegalArgumentException("Link de playlist do Spotify inválido.");
+            throw new IllegalArgumentException("Link do Spotify inválido. Use uma música, álbum ou playlist.");
         }
-        return matcher.group(1);
+        String type = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
+        return new SpotifyResource(type.toLowerCase(), matcher.group(3));
     }
+
+    record SpotifyResource(String type, String id) {}
 }

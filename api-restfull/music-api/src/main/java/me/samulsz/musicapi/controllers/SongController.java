@@ -8,7 +8,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Set;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/songs")
@@ -31,10 +31,19 @@ public class SongController {
     public ResponseEntity<?> getMyLibrary(Authentication authentication) {
         try {
             String username = authentication.getName();
-            Set<Song> mySongs = songService.getUserLibrary(username);
+            List<Song> mySongs = songService.getUserLibrary(username);
             return ResponseEntity.ok(mySongs);
         } catch (Exception e) {
             return ResponseEntity.badRequest().body("Erro ao carregar a biblioteca: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/search")
+    public ResponseEntity<?> searchPrecachedCatalog(@RequestParam(required = false, defaultValue = "") String q) {
+        try {
+            return ResponseEntity.ok(songService.searchPrecachedCatalog(q));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Erro ao pesquisar o catalogo: " + e.getMessage());
         }
     }
 

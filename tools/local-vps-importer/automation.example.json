@@ -1,0 +1,38 @@
+{
+  "maxTracksPerRun": 100,
+  "maxTracksPerSource": 25,
+  "maxRuntimeMinutes": 480,
+  "maxRetries": 3,
+  "sleepSeconds": 8,
+  "spotifyReadLimit": 100,
+  "sshHost": "38.18.229.2",
+  "sshPort": 22,
+  "sshUser": "root",
+  "apiBase": "https://marlonbarbershop.com/nationmusics/api",
+  "sources": [
+    {
+      "name": "Top 50 Brasil",
+      "url": "https://open.spotify.com/playlist/37i9dQZEVXbMXbN3EUUhlg",
+      "publishPlaylist": true,
+      "enabled": true
+    },
+    {
+      "name": "Top Brasil",
+      "url": "https://open.spotify.com/playlist/37i9dQZF1DX0FOF1IUWK1W",
+      "publishPlaylist": true,
+      "enabled": true
+    },
+    {
+      "name": "Top 50 Global",
+      "url": "https://open.spotify.com/playlist/37i9dQZEVXbMDoHDwVN2tF",
+      "publishPlaylist": true,
+      "enabled": true
+    },
+    {
+      "name": "Novidades da semana",
+      "url": "https://open.spotify.com/playlist/37i9dQZF1DX4JAvHpjipBk",
+      "publishPlaylist": false,
+      "enabled": true
+    }
+  ]
+}

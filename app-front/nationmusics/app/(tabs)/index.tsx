@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,16 +19,24 @@ import { useNetInfo } from '@react-native-community/netinfo';
 import type { ApiPlaylist } from '../../types/music';
 import { apiRequest, OfflineError } from '../../services/api';
 import { getSession } from '../../services/auth';
+import { getDailyMix } from '../../services/recommendations';
 
 type HomePlaylist = {
   id: string;
   title: string;
   description: string;
   iconUrl?: string;
-  kind: 'most-downloaded' | 'global';
+  kind: 'daily' | 'most-downloaded' | 'global';
 };
 
-const CACHE_KEY = 'nationmusics.home-playlists.v1';
+const CACHE_KEY = 'nationmusics.home-playlists.v2';
+const LEGACY_CACHE_KEY = 'nationmusics.home-playlists.v1';
+const HOME_CACHE_TTL_MS = 5 * 60 * 1000;
+
+type HomePlaylistsCache = {
+  savedAt: number;
+  playlists: HomePlaylist[];
+};
 
 const PlaylistCard = memo(function PlaylistCard({
   item,
@@ -44,7 +52,7 @@ const PlaylistCard = memo(function PlaylistCard({
       ) : (
         <View style={styles.coverPlaceholder}>
           <Ionicons
-            name={item.kind === 'most-downloaded' ? 'flame' : 'musical-notes'}
+            name={item.kind === 'daily' ? 'sparkles' : item.kind === 'most-downloaded' ? 'flame' : 'musical-notes'}
             size={28}
             color="#1db954"
           />
@@ -54,7 +62,6 @@ const PlaylistCard = memo(function PlaylistCard({
         <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
         <Text style={styles.description} numberOfLines={2}>{item.description}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={20} color="#777" />
     </TouchableOpacity>
   );
 });
@@ -67,26 +74,65 @@ export default function HomePlaylistsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [playlists, setPlaylists] = useState<HomePlaylist[]>([]);
   const [offline, setOffline] = useState(false);
+  const hydratedRef = useRef(false);
+  const lastRefreshAtRef = useRef(0);
+  const refreshInFlightRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     getSession().then((session) => setUsername(session?.username || '')).catch(() => {});
   }, []);
 
-  const readCache = useCallback(async () => {
-    const raw = await AsyncStorage.getItem(CACHE_KEY);
-    if (!raw) return [];
+  const readCache = useCallback(async (): Promise<HomePlaylistsCache> => {
+    const raw = await AsyncStorage.getItem(CACHE_KEY) || await AsyncStorage.getItem(LEGACY_CACHE_KEY);
+    if (!raw) return { savedAt: 0, playlists: [] };
     try {
-      return JSON.parse(raw) as HomePlaylist[];
+      const parsed = JSON.parse(raw) as HomePlaylistsCache | HomePlaylist[];
+      if (Array.isArray(parsed)) return { savedAt: 0, playlists: parsed };
+      if (Array.isArray(parsed.playlists)) {
+        return { savedAt: Number(parsed.savedAt) || 0, playlists: parsed.playlists };
+      }
+      return { savedAt: 0, playlists: [] };
     } catch {
-      return [];
+      return { savedAt: 0, playlists: [] };
     }
   }, []);
 
-  const loadHome = useCallback(async (showSpinner = true) => {
-    if (showSpinner) setLoading(true);
-    try {
-      const globalData = await apiRequest<ApiPlaylist[]>('/playlists/global');
+  const writeCache = useCallback(async (next: HomePlaylist[]) => {
+    const savedAt = Date.now();
+    lastRefreshAtRef.current = savedAt;
+    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt, playlists: next }));
+  }, []);
+
+  const loadHome = useCallback(async (showSpinner = true, force = false) => {
+    const cacheIsFresh = lastRefreshAtRef.current > 0
+      && Date.now() - lastRefreshAtRef.current < HOME_CACHE_TTL_MS;
+
+    if (!force && cacheIsFresh) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    if (refreshInFlightRef.current) {
+      if (showSpinner && !lastRefreshAtRef.current) setLoading(true);
+      return refreshInFlightRef.current;
+    }
+
+    if (showSpinner && !lastRefreshAtRef.current) setLoading(true);
+
+    const operation = (async () => {
+      try {
+      const [globalData, dailyMix] = await Promise.all([
+        apiRequest<ApiPlaylist[]>('/playlists/global', { authenticated: false }),
+        getDailyMix().catch(() => null),
+      ]);
       const next: HomePlaylist[] = [
+        ...(dailyMix ? [{
+          id: 'daily',
+          title: dailyMix.name,
+          description: dailyMix.description,
+          kind: 'daily' as const,
+        }] : []),
         {
           id: 'most-downloaded',
           title: 'Mais ouvidas',
@@ -103,24 +149,51 @@ export default function HomePlaylistsScreen() {
       ];
       setPlaylists(next);
       setOffline(false);
-      await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(next));
+      await writeCache(next);
     } catch (error) {
       const cached = await readCache();
-      setPlaylists(cached);
+      if (cached.playlists.length) {
+        setPlaylists(cached.playlists);
+        lastRefreshAtRef.current = cached.savedAt;
+      }
       setOffline(error instanceof OfflineError || netInfo.isConnected === false);
-      if (!cached.length && !(error instanceof OfflineError)) {
+      if (!cached.playlists.length && !(error instanceof OfflineError)) {
         Alert.alert('Erro', error instanceof Error ? error.message : 'Não foi possível carregar as playlists.');
       }
     } finally {
       setLoading(false);
       setRefreshing(false);
+      refreshInFlightRef.current = null;
     }
-  }, [netInfo.isConnected, readCache]);
+    })();
+
+    refreshInFlightRef.current = operation;
+    return operation;
+  }, [netInfo.isConnected, readCache, writeCache]);
+
+  const hydrateHome = useCallback(async () => {
+    const cached = await readCache();
+    if (cached.playlists.length) {
+      setPlaylists(cached.playlists);
+      lastRefreshAtRef.current = cached.savedAt;
+      setLoading(false);
+      void loadHome(false);
+      return;
+    }
+
+    void loadHome(true, true);
+  }, [loadHome, readCache]);
 
   useFocusEffect(
     useCallback(() => {
-      void loadHome();
-    }, [loadHome])
+      if (!hydratedRef.current) {
+        hydratedRef.current = true;
+        void hydrateHome();
+        return;
+      }
+
+      void loadHome(false);
+    }, [hydrateHome, loadHome])
   );
 
   const openPlaylist = useCallback((item: HomePlaylist) => {
@@ -136,10 +209,7 @@ export default function HomePlaylistsScreen() {
         <View style={styles.header}>
           <View>
             <Text style={styles.greeting}>Olá, {username || 'músico'} 👋</Text>
-            <Text style={styles.headerTitle}>Escolha uma playlist</Text>
-          </View>
-          <View style={styles.avatar}>
-            <Ionicons name="person" size={20} color="#1db954" />
+            <Text style={styles.headerTitle}>Feito para você</Text>
           </View>
         </View>
 
@@ -158,9 +228,11 @@ export default function HomePlaylistsScreen() {
           </View>
         ) : (
           <FlatList
-            data={playlists}
+            data={playlists.slice(1)}
             keyExtractor={(item) => item.id}
             renderItem={({ item }) => <PlaylistCard item={item} onPress={openPlaylist} />}
+            numColumns={2}
+            columnWrapperStyle={styles.columns}
             contentContainerStyle={styles.list}
             showsVerticalScrollIndicator={false}
             initialNumToRender={8}
@@ -173,17 +245,37 @@ export default function HomePlaylistsScreen() {
                 colors={['#1db954']}
                 onRefresh={() => {
                   setRefreshing(true);
-                  void loadHome(false);
+                  void loadHome(false, true);
                 }}
               />
             }
-            ListEmptyComponent={
+            ListEmptyComponent={playlists.length ? null : (
               <View style={styles.empty}>
                 <Ionicons name="cloud-offline-outline" size={42} color="#555" />
                 <Text style={styles.emptyTitle}>Nenhuma playlist em cache</Text>
                 <Text style={styles.emptyText}>Abra a biblioteca para ouvir suas músicas offline.</Text>
               </View>
-            }
+            )}
+            ListHeaderComponent={playlists[0] ? (
+              <View>
+                <TouchableOpacity style={styles.featuredCard} onPress={() => openPlaylist(playlists[0])} activeOpacity={0.84}>
+                  {playlists[0].iconUrl ? (
+                    <Image source={{ uri: playlists[0].iconUrl }} style={styles.featuredCover} />
+                  ) : (
+                    <View style={styles.featuredPlaceholder}>
+                      <Ionicons name={playlists[0].kind === 'daily' ? 'sparkles' : 'flame'} size={38} color="#fff" />
+                    </View>
+                  )}
+                  <View style={styles.featuredMeta}>
+                    <Text style={styles.featuredEyebrow}>{playlists[0].kind === 'daily' ? 'ATUALIZADA TODO DIA' : 'EM DESTAQUE'}</Text>
+                    <Text style={styles.featuredTitle} numberOfLines={1}>{playlists[0].title}</Text>
+                    <Text style={styles.featuredDescription} numberOfLines={2}>{playlists[0].description}</Text>
+                  </View>
+                  <View style={styles.featuredPlay}><Ionicons name="play" size={20} color="#111" /></View>
+                </TouchableOpacity>
+                <Text style={styles.sectionTitle}>Feito para ouvir agora</Text>
+              </View>
+            ) : null}
           />
         )}
       </View>
@@ -202,16 +294,6 @@ const styles = StyleSheet.create({
   },
   greeting: { color: '#888', fontSize: 13 },
   headerTitle: { color: '#fff', fontSize: 25, fontWeight: '800', marginTop: 3 },
-  avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: '#1db95418',
-    borderWidth: 1,
-    borderColor: '#1db95440',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   offlineBanner: {
     flexDirection: 'row',
     gap: 9,
@@ -226,30 +308,55 @@ const styles = StyleSheet.create({
   offlineText: { flex: 1, color: '#d5bd83', fontSize: 12, lineHeight: 17 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   list: { paddingBottom: 170 },
-  card: {
-    minHeight: 86,
-    borderRadius: 14,
-    backgroundColor: '#1b1b1b',
-    borderWidth: 1,
-    borderColor: '#292929',
+  columns: { gap: 10 },
+  featuredCard: {
+    minHeight: 116,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#253d2c',
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    marginBottom: 11,
+    padding: 13,
+    marginBottom: 22,
   },
-  cover: { width: 58, height: 58, borderRadius: 10, marginRight: 12 },
+  featuredCover: { width: 88, height: 88, borderRadius: 12, marginRight: 14 },
+  featuredPlaceholder: {
+    width: 88,
+    height: 88,
+    borderRadius: 12,
+    marginRight: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1db954',
+  },
+  featuredMeta: { flex: 1, paddingRight: 8 },
+  featuredEyebrow: { color: '#8fe4ad', fontSize: 9, fontWeight: '900', letterSpacing: 1.1 },
+  featuredTitle: { color: '#fff', fontSize: 20, fontWeight: '900', marginTop: 4 },
+  featuredDescription: { color: '#c4d1c8', fontSize: 11, lineHeight: 16, marginTop: 5 },
+  featuredPlay: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#1db954', alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end' },
+  sectionTitle: { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 12 },
+  card: {
+    flex: 1,
+    maxWidth: '48.5%',
+    minWidth: 0,
+    borderRadius: 12,
+    backgroundColor: '#1b1b1b',
+    padding: 9,
+    marginBottom: 10,
+  },
+  cover: { width: '100%', aspectRatio: 1.35, borderRadius: 9, marginBottom: 9 },
   coverPlaceholder: {
-    width: 58,
-    height: 58,
-    borderRadius: 10,
-    marginRight: 12,
+    width: '100%',
+    aspectRatio: 1.35,
+    borderRadius: 9,
+    marginBottom: 9,
     backgroundColor: '#242424',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  meta: { flex: 1, paddingRight: 9 },
-  title: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  description: { color: '#858585', fontSize: 12, lineHeight: 17, marginTop: 5 },
+  meta: { minHeight: 49 },
+  title: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  description: { color: '#858585', fontSize: 10, lineHeight: 14, marginTop: 4 },
   empty: { alignItems: 'center', paddingTop: 70, paddingHorizontal: 24 },
   emptyTitle: { color: '#ddd', fontSize: 17, fontWeight: '700', marginTop: 14 },
   emptyText: { color: '#777', fontSize: 13, textAlign: 'center', marginTop: 6 },

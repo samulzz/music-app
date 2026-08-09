@@ -58,6 +58,10 @@ public class PlaylistAdminService {
                 .orElseThrow(() -> new RuntimeException("Playlist não encontrada."));
     }
 
+    public List<Song> getPlaylistSongs(Long playlistId) {
+        return SongOrder.alphabetically(getPlaylist(playlistId).getSongs());
+    }
+
     public Playlist addSongsToPlaylist(Long playlistId, List<Long> songIds) {
         Playlist playlist = getPlaylist(playlistId);
         if (songIds == null || songIds.isEmpty()) {
@@ -86,9 +90,14 @@ public class PlaylistAdminService {
     public List<Song> searchSongs(String query) {
         String safeQuery = query == null ? "" : query.trim();
         if (safeQuery.isEmpty()) {
-            return songRepository.findAll();
+            return SongOrder.alphabetically(songRepository.findAll());
         }
-        return songRepository.findTop50ByTitleContainingIgnoreCaseOrArtistContainingIgnoreCase(safeQuery, safeQuery);
+        return SongOrder.alphabetically(
+                songRepository.findTop50ByTitleContainingIgnoreCaseOrArtistContainingIgnoreCase(
+                        safeQuery,
+                        safeQuery
+                )
+        );
     }
 
     public Song importSong(SongRequest request) {

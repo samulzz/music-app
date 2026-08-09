@@ -20,7 +20,7 @@ public class SpotifyPlaylistController {
         this.spotifyPlaylistService = spotifyPlaylistService;
     }
 
-    @PostMapping("/playlist/preview")
+    @PostMapping({"/import/preview", "/playlist/preview"})
     public ResponseEntity<?> preview(@RequestBody SpotifyPlaylistRequest request) {
         try {
             return ResponseEntity.ok(spotifyPlaylistService.preview(request.url()));

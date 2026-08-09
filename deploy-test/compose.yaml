@@ -1,4 +1,49 @@
 services:
+  pot-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:1.3.1
+    container_name: nationmusics-test-pot-provider
+    restart: unless-stopped
+    networks:
+      - barbershop
+    mem_limit: 256m
+    mem_reservation: 96m
+    cpus: 0.35
+    pids_limit: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+
+  warp:
+    image: caomingjun/warp:latest
+    container_name: nationmusics-test-warp
+    restart: unless-stopped
+    networks:
+      - barbershop
+    environment:
+      WARP_SLEEP: "5"
+    device_cgroup_rules:
+      - 'c 10:200 rwm'
+    cap_add:
+      - MKNOD
+      - AUDIT_WRITE
+      - NET_ADMIN
+    sysctls:
+      net.ipv6.conf.all.disable_ipv6: 0
+      net.ipv4.conf.all.src_valid_mark: 1
+    volumes:
+      - nationmusics-warp:/var/lib/cloudflare-warp
+    mem_limit: 512m
+    mem_reservation: 128m
+    cpus: 0.40
+    pids_limit: 160
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "2"
+
   api:
     build:
       context: .
@@ -14,15 +59,21 @@ services:
       SPRING_JPA_OPEN_IN_VIEW: "false"
       YT_DLP_PATH: /usr/local/bin/yt-dlp
       FFMPEG_PATH: /usr/bin
+      YT_DLP_POT_PROVIDER_URL: http://pot-provider:4416
+      YOUTUBE_PROXY: socks5h://warp:1080
+      YOUTUBE_MIN_REQUEST_INTERVAL_SECONDS: "10"
       SPOTIFY_HELPER_PATH: /app/spotify_playlist.py
-      YOUTUBE_COOKIES_PATH: /run/secrets/youtube-cookies.txt
+      HOME: /app
+      XDG_CACHE_HOME: /app/downloads/.cache
       JAVA_TOOL_OPTIONS: -Xms96m -Xmx384m -XX:MaxMetaspaceSize=128m -XX:+UseSerialGC -Duser.timezone=America/Sao_Paulo
       TZ: America/Sao_Paulo
+    depends_on:
+      - pot-provider
+      - warp
     ports:
       - 127.0.0.1:8090:8080
     volumes:
       - nationmusics-downloads:/app/downloads
-      - ./secrets/youtube-cookies.txt:/run/secrets/youtube-cookies.txt:ro
     networks:
       - barbershop
     mem_limit: 640m
@@ -38,6 +89,8 @@ services:
 volumes:
   nationmusics-downloads:
     name: nationmusics-test-downloads
+  nationmusics-warp:
+    name: nationmusics-test-warp
 
 networks:
   barbershop:

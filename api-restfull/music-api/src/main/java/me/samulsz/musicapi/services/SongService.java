@@ -17,6 +17,9 @@ public class SongService {
     @Autowired
     private SongRepository songRepository;
 
+    @Autowired
+    private MusicService musicService;
+
     public void saveSongForUser(String username, SongRequest request) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("Usuário não encontrado!"));
@@ -46,11 +49,21 @@ public class SongService {
         user.getDownloadedSongs().add(song);
         userRepository.save(user);
     }
-    public java.util.Set<Song> getUserLibrary(String username) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new RuntimeException("Utilizador não encontrado!"));
 
-        return user.getDownloadedSongs();
+    public java.util.List<Song> getUserLibrary(String username) {
+        if (userRepository.findByUsername(username).isEmpty()) {
+            throw new RuntimeException("Utilizador não encontrado!");
+        }
+
+        return songRepository.findLibraryByUsername(username);
+    }
+
+    public java.util.List<Song> searchPrecachedCatalog(String query) {
+        String safeQuery = query == null ? "" : query.trim();
+        return songRepository.searchCatalogSongs(safeQuery).stream()
+                .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
+                .limit(50)
+                .toList();
     }
 
     public void removeSongFromUser(String username, Long songId) {

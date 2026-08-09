@@ -1,35 +1,67 @@
 import json
+import re
 import sys
 
 from spotify_scraper import SpotifyClient
 
 
+RESOURCE_PATTERN = re.compile(
+    r"(?:open\.spotify\.com/(?:intl-[a-z]{2}/)?(playlist|album|track)/"
+    r"|spotify:(playlist|album|track):)([A-Za-z0-9]{22})",
+    re.IGNORECASE,
+)
+
+
+def resource_type(url):
+    match = RESOURCE_PATTERN.search(url)
+    if not match:
+        raise ValueError("Link do Spotify inválido. Use uma música, álbum ou playlist.")
+    return (match.group(1) or match.group(2)).lower()
+
+
+def serialize_track(track):
+    return {
+        "spotifyId": track.id,
+        "title": track.name,
+        "artist": ", ".join(artist.name for artist in track.artists),
+        "durationMs": track.duration_ms,
+    }
+
+
 def main():
     if len(sys.argv) < 2:
-        raise ValueError("Link da playlist não informado.")
+        raise ValueError("Link do Spotify não informado.")
 
     url = sys.argv[1]
     limit = min(max(int(sys.argv[2]) if len(sys.argv) > 2 else 200, 1), 200)
-    playlist = SpotifyClient(timeout=25).get_playlist(url, max_tracks=limit)
+    kind = resource_type(url)
 
-    tracks = []
-    for item in playlist.tracks[:limit]:
-        track = item.track
-        artists = ", ".join(artist.name for artist in track.artists)
-        tracks.append({
-            "spotifyId": track.id,
-            "title": track.name,
-            "artist": artists,
-            "durationMs": track.duration_ms,
-        })
+    with SpotifyClient(timeout=25) as client:
+        if kind == "playlist":
+            entity = client.get_playlist(url, max_tracks=limit)
+            source_tracks = [item.track for item in entity.tracks[:limit]]
+            total_tracks = entity.total_tracks or len(source_tracks)
+        elif kind == "album":
+            entity = client.get_album(url)
+            source_tracks = list(entity.tracks[:limit])
+            total_tracks = entity.total_tracks or len(entity.tracks)
+        else:
+            entity = client.get_track(url)
+            source_tracks = [entity]
+            total_tracks = 1
 
-    cover_url = playlist.images[0].url if playlist.images else ""
+    tracks = [serialize_track(track) for track in source_tracks]
+    images = entity.images
+    if kind == "track" and not images and entity.album:
+        images = entity.album.images
+    cover_url = images[0].url if images else ""
     print(json.dumps({
-        "spotifyId": playlist.id,
-        "name": playlist.name,
+        "spotifyId": entity.id,
+        "type": kind,
+        "name": entity.name,
         "coverUrl": cover_url,
-        "totalTracks": playlist.total_tracks,
-        "truncated": playlist.total_tracks > limit,
+        "totalTracks": total_tracks,
+        "truncated": total_tracks > limit,
         "tracks": tracks,
     }, ensure_ascii=False))
 

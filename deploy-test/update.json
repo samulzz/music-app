@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-09T06:01:23-03:00",
+  "android": {
+    "enabled": true,
+    "mandatory": true,
+    "version": "1.1.18",
+    "versionCode": 20,
+    "minimumVersion": "1.1.18",
+    "minimumVersionCode": 20,
+    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.18.apk",
+    "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
+    "releaseNotes": "O modo aleatorio agora respeita somente as musicas da playlist. Recomendacoes entram apenas depois que a fila original terminar."
+  },
+  "desktop": {
+    "enabled": true,
+    "mandatory": true,
+    "version": "1.2.22",
+    "minimumVersion": "1.2.22",
+    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.22.exe",
+    "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
+    "releaseNotes": "Interface desktop realinhada e responsiva, player sempre visivel, avisos amarelos removidos e icone correto do Discord."
+  }
+}

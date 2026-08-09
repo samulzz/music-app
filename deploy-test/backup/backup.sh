@@ -28,6 +28,14 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 SNAPSHOT_DIR="${BACKUP_DIR}/${STAMP}"
 REMOTE_ROOT="${NATIONMUSICS_RCLONE_DEST%/}/nationmusics"
 
+case "${BACKUP_DIR}" in
+  /var/backups/nationmusics|/var/backups/nationmusics/*) ;;
+  *)
+    echo "Diretorio de backup recusado por seguranca: ${BACKUP_DIR}" >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "${SNAPSHOT_DIR}/config"
 chmod 700 "${BACKUP_DIR}" "${SNAPSHOT_DIR}"
 

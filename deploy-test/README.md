@@ -39,6 +39,13 @@ docker compose logs -f --tail=100
 docker stats nationmusics-test-api
 ```
 
+## Backup externo
+
+O diretorio `backup/` contem o script e o timer para backup diario criptografado
+no Google Drive. Ele guarda snapshots do banco/configuracao e sincroniza o
+acervo de forma incremental, sem reenviar os MP3 ja preservados. Consulte
+`backup/README.md` para a primeira autorizacao OAuth e ativacao do timer.
+
 ## Acesso ao YouTube
 
 O deploy usa o `yt-dlp` nightly com o provedor `bgutil` recomendado pela documentação do projeto. O container `pot-provider` gera PO Tokens automaticamente para cada vídeo, então não há arquivo de cookies para renovar no funcionamento normal.

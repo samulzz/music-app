@@ -1,0 +1,12 @@
+[Unit]
+Description=Backup do NationMusics para Google Drive
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nationmusics-test
+ExecStart=/opt/nationmusics-test/backup/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

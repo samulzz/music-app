@@ -17,6 +17,7 @@ import { useRouter } from 'expo-router';
 
 import { apiRequest } from '../services/api';
 import { saveSession } from '../services/auth';
+import { scheduleDailyMixNotification } from '../services/engagement-notifications';
 
 type LoginResponse = {
   token: string;
@@ -55,6 +56,7 @@ export default function LoginScreen() {
         username: data.username || normalizedUsername,
         lastSuccessfulLoginAt: Date.now(),
       });
+      void scheduleDailyMixNotification().catch(() => {});
       router.replace('/(tabs)');
     } catch (error) {
       Alert.alert(

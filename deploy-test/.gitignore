@@ -1,3 +1,5 @@
 music-api.jar
 .env
 secrets/
+backup/.env
+backup/*.log

@@ -6,6 +6,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { MandatoryUpdateGate } from '../components/mandatory-update-gate';
 import { ConnectSync } from '../components/connect-sync';
 import { PresenceHeartbeat } from '../components/presence-heartbeat';
+import { EngagementNotifications } from '../components/engagement-notifications';
 import { refreshAndroidAutoLibrary, setupMusicPlayer } from '../services/player';
 
 export default function RootLayout() {
@@ -19,6 +20,7 @@ export default function RootLayout() {
       <MandatoryUpdateGate>
         <ConnectSync />
         <PresenceHeartbeat />
+        <EngagementNotifications />
         <StatusBar style="light" />
         <Stack
           screenOptions={{

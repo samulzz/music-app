@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-09T06:01:23-03:00",
+  "generatedAt": "2026-08-09T18:45:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.18",
-    "versionCode": 20,
-    "minimumVersion": "1.1.18",
-    "minimumVersionCode": 20,
+    "version": "1.1.19",
+    "versionCode": 21,
+    "minimumVersion": "1.1.19",
+    "minimumVersionCode": 21,
     "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.18.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.19.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "O modo aleatorio agora respeita somente as musicas da playlist. Recomendacoes entram apenas depois que a fila original terminar."
+    "releaseNotes": "Nova notificacao diaria avisa quando o Top 100 personalizado esta pronto, com acesso direto ao app."
   },
   "desktop": {
     "enabled": true,

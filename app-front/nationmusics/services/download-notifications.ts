@@ -9,15 +9,6 @@ type DownloadProgress = {
   force?: boolean;
 };
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
-
 let prepared = false;
 let progressNotificationId: string | null = null;
 let lastProgressSignature = '';

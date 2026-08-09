@@ -46,6 +46,7 @@ class ImportConfig:
     ssh_port: int
     ssh_user: str
     ssh_password: str
+    ssh_key_path: str
     api_base: str
     app_username: str
     app_password: str
@@ -155,12 +156,16 @@ def as_bool(value: Any, default: bool = False) -> bool:
 
 def parse_config(data: dict[str, Any]) -> ImportConfig:
     ssh_password = str(data.get("sshPassword") or os.environ.get("NATIONMUSICS_SSH_PASSWORD") or "")
+    ssh_key_path = str(data.get("sshKeyPath") or os.environ.get("NATIONMUSICS_SSH_KEY_PATH") or "").strip()
+    if ssh_key_path:
+        ssh_key_path = str(Path(ssh_key_path).expanduser().resolve())
     app_password = str(data.get("appPassword") or os.environ.get("NATIONMUSICS_APP_PASSWORD") or "")
     config = ImportConfig(
-        ssh_host=str(data.get("sshHost") or os.environ.get("NATIONMUSICS_SSH_HOST") or "38.18.229.2").strip(),
+        ssh_host=str(data.get("sshHost") or os.environ.get("NATIONMUSICS_SSH_HOST") or "38.18.230.83").strip(),
         ssh_port=int(data.get("sshPort") or os.environ.get("NATIONMUSICS_SSH_PORT") or 22),
         ssh_user=str(data.get("sshUser") or os.environ.get("NATIONMUSICS_SSH_USER") or "root").strip(),
         ssh_password=ssh_password,
+        ssh_key_path=ssh_key_path,
         api_base=str(data.get("apiBase") or os.environ.get("NATIONMUSICS_API_BASE") or DEFAULT_API_BASE).strip(),
         app_username=str(data.get("appUsername") or "").strip(),
         app_password=app_password,
@@ -174,8 +179,10 @@ def parse_config(data: dict[str, Any]) -> ImportConfig:
         raise ValueError("SSH host nao informado.")
     if not config.ssh_user:
         raise ValueError("SSH user nao informado.")
-    if not config.ssh_password:
-        raise ValueError("Senha SSH nao informada.")
+    if not config.ssh_password and not config.ssh_key_path:
+        raise ValueError("Informe a senha SSH ou o caminho de uma chave privada.")
+    if config.ssh_key_path and not Path(config.ssh_key_path).is_file():
+        raise ValueError(f"Chave SSH nao encontrada: {config.ssh_key_path}")
     if config.create_personal_playlist and not config.app_username:
         raise ValueError("Usuario do app nao informado.")
     if config.create_personal_playlist and not config.app_password:
@@ -195,7 +202,10 @@ def connect_ssh(config: ImportConfig) -> paramiko.SSHClient:
                 config.ssh_host,
                 config.ssh_port,
                 config.ssh_user,
-                config.ssh_password,
+                password=config.ssh_password or None,
+                key_filename=config.ssh_key_path or None,
+                look_for_keys=True,
+                allow_agent=True,
                 timeout=30,
                 banner_timeout=45,
                 auth_timeout=30,
@@ -924,21 +934,25 @@ HTML = r"""<!doctype html>
       <h1>Importador automático</h1>
       <p class="hint">Sem copiar links. Usa listas famosas e lançamentos, baixa em lotes pequenos e lembra o que já foi concluído.</p>
       <form id="autoForm">
-        <label>Senha SSH da VPS</label>
-        <input name="sshPassword" type="password" placeholder="senha da VPS" required />
+        <label>Senha SSH da VPS (opcional quando usar chave)</label>
+        <input name="sshPassword" type="password" placeholder="senha da VPS" />
+        <label>Caminho da chave SSH (recomendado para 24/7)</label>
+        <input name="sshKeyPath" value="~/.ssh/nationmusics_vps_ed25519" />
         <div class="auto-grid">
-          <div><label>Máximo nesta execução</label><input name="maxTracks" type="number" min="1" max="500" value="100" /></div>
-          <div><label>Por lote/fonte</label><input name="maxPerSource" type="number" min="1" max="50" value="10" /></div>
+          <div><label>Por lote/fonte</label><input name="maxPerSource" type="number" min="1" max="10" value="3" /></div>
+          <div><label>Intervalo entre ciclos (min)</label><input name="cycleMinutes" type="number" min="2" max="120" value="10" /></div>
         </div>
         <div class="auto-grid">
-          <div><label>Tempo máximo (horas)</label><input name="maxHours" type="number" min="1" max="24" value="8" /></div>
           <div><label>Pausa (segundos)</label><input name="sleepSeconds" type="number" min="2" max="120" value="8" /></div>
+          <div><label>Modo</label><input value="Contínuo 24/7, sem limite total" disabled /></div>
         </div>
         <h2>Fontes automáticas</h2>
-        <div class="source">🔥 Top 50 Brasil — aparece na página principal</div>
-        <div class="source">🇧🇷 Top Brasil — aparece na página principal</div>
-        <div class="source">🌎 Top 50 Global — aparece na página principal</div>
-        <div class="source">✨ Novidades da semana — entra na busca</div>
+        <div class="source">🇧🇷 Hits Brasil — mistura dos maiores sucessos</div>
+        <div class="source">🔥 Funk brasileiro — hits e lançamentos</div>
+        <div class="source">🤠 Sertanejo — mais tocadas e novidades</div>
+        <div class="source">🥁 Pagode e samba — destaques atuais</div>
+        <div class="source">💎 Trap nacional — artistas e lançamentos</div>
+        <div class="source">🪗 Forró e piseiro — sucessos brasileiros</div>
         <div class="actions">
           <button id="autoStart" type="submit">Iniciar automático</button>
           <button id="autoStop" class="danger" type="button" disabled>Parar</button>
@@ -951,13 +965,15 @@ HTML = r"""<!doctype html>
         <h2>VPS</h2>
         <label>SSH host</label>
         <div class="row">
-          <input name="sshHost" value="38.18.229.2" />
+          <input name="sshHost" value="38.18.230.83" />
           <input name="sshPort" value="22" />
         </div>
         <label>SSH usuario</label>
         <input name="sshUser" value="root" />
         <label>SSH senha</label>
         <input name="sshPassword" type="password" placeholder="senha da VPS" />
+        <label>Chave SSH (opcional)</label>
+        <input name="sshKeyPath" value="~/.ssh/nationmusics_vps_ed25519" />
         <label>API base</label>
         <input name="apiBase" value="https://marlonbarbershop.com/nationmusics/api" />
 
@@ -1113,18 +1129,21 @@ def automatic_config(data: dict[str, Any]) -> tuple[dict[str, Any], str]:
         config_path = Path(__file__).with_name("automation.example.json")
     config = automation.load_json(config_path)
     ssh_password = str(data.get("sshPassword") or "")
-    if not ssh_password:
-        raise ValueError("Informe a senha SSH da VPS.")
-    max_tracks = min(500, max(1, int(data.get("maxTracks") or 100)))
-    max_per_source = min(50, max(1, int(data.get("maxPerSource") or 10)))
-    max_hours = min(24, max(1, float(data.get("maxHours") or 8)))
+    ssh_key_path = str(data.get("sshKeyPath") or config.get("sshKeyPath") or "").strip()
+    if not ssh_password and not (ssh_key_path and Path(ssh_key_path).expanduser().is_file()):
+        raise ValueError("Informe a senha SSH ou uma chave privada existente.")
+    max_per_source = min(10, max(1, int(data.get("maxPerSource") or 3)))
+    cycle_minutes = min(120, max(2, int(data.get("cycleMinutes") or 10)))
     sleep_seconds = min(120, max(2, float(data.get("sleepSeconds") or 8)))
     config.update(
         {
-            "maxTracksPerRun": max_tracks,
+            "continuous": True,
+            "maxTracksPerRun": 1000000,
             "maxTracksPerSource": max_per_source,
-            "maxRuntimeMinutes": int(max_hours * 60),
+            "maxRuntimeMinutes": 1440,
+            "cycleDelayMinutes": cycle_minutes,
             "sleepSeconds": sleep_seconds,
+            "sshKeyPath": ssh_key_path,
         }
     )
     automation.enabled_sources(config)
@@ -1135,14 +1154,23 @@ def run_automation_job(job: AutomationJob) -> None:
     try:
         with automation.single_instance(automation.LOCK_PATH):
             job.log("Automacao iniciada. Nao e necessario fornecer links.")
-            automation.run(
-                Path(__file__).with_name("automation.example.json"),
-                automation.DEFAULT_STATE,
-                config_override=job.config,
-                ssh_password=job.ssh_password,
-                should_stop=job.stop_event.is_set,
-                logger=job.log,
-            )
+            cycle = 0
+            while not job.stop_event.is_set():
+                cycle += 1
+                job.log(f"Ciclo {cycle}: procurando musicas brasileiras novas.")
+                automation.run(
+                    Path(__file__).with_name("automation.example.json"),
+                    automation.DEFAULT_STATE,
+                    config_override=job.config,
+                    ssh_password=job.ssh_password,
+                    should_stop=job.stop_event.is_set,
+                    logger=job.log,
+                )
+                if job.stop_event.is_set():
+                    break
+                delay_minutes = max(2, int(job.config.get("cycleDelayMinutes", 10)))
+                job.log(f"Ciclo concluido. Nova verificacao em {delay_minutes} minuto(s).")
+                job.stop_event.wait(delay_minutes * 60)
         with job.lock:
             job.status = "stopped" if job.stop_event.is_set() else "done"
             job.finished_at = time.time()

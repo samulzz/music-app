@@ -17,8 +17,9 @@ http://127.0.0.1:8765
 ```
 
 O painel abre primeiro no modo automatico. Nesse modo, nao e necessario copiar
-nenhum link: informe somente a senha SSH da VPS e clique em `Iniciar
-automatico`. O computador pode ficar ligado durante a madrugada; o painel
+nenhum link: use a chave SSH recomendada (ou informe a senha, se a VPS aceitar)
+e clique em `Iniciar automatico`. O processo fica ativo 24/7, verifica as fontes
+em ciclos, baixa lotes pequenos e nao possui limite total de musicas. O painel
 mostra cada musica encontrada, baixada e enviada. O botao `Parar` espera o lote
 atual terminar para nao interromper um upload pela metade.
 
@@ -70,13 +71,15 @@ python tools\local-vps-importer\app.py --once --no-personal-playlist --spotify-u
 
 As senhas nao ficam salvas nesse diretorio. Preencha na tela quando for importar.
 
-## Importacao automatica durante a madrugada
+## Importacao automatica continua (24/7)
 
-O `nightly.py` consulta uma lista pequena de playlists/album do Spotify, escolhe
-somente faixas ainda nao processadas e reaproveita o mesmo download/upload do
-importador manual. Ele trabalha uma fonte por vez e, por padrao, para em 100
-musicas ou 8 horas. O historico fica em SQLite dentro de `.local-precache`, entao
-uma faixa concluida hoje nao volta para a fila amanha.
+O `nightly.py` consulta playlists brasileiras de destaque, escolhe somente
+faixas ainda nao processadas e reaproveita o mesmo download/upload do importador
+manual. Ele trabalha uma fonte por vez, em lotes pequenos, e espera alguns
+minutos antes do proximo ciclo. O historico fica em SQLite dentro de
+`.local-precache`, entao uma faixa concluida hoje nao volta para a fila amanha.
+As fontes iniciais cobrem Top Brasil, funk, sertanejo, pagode, trap nacional,
+forro e piseiro.
 
 Primeira configuracao:
 
@@ -86,7 +89,7 @@ powershell -ExecutionPolicy Bypass -File tools\local-vps-importer\run-nightly.ps
 ```
 
 Na primeira chamada o script cria `automation.json` a partir do exemplo. Edite
-esse arquivo se quiser trocar limites ou fontes. Cada fonte aceita playlist,
+esse arquivo se quiser trocar o tamanho dos lotes, intervalo ou fontes. Cada fonte aceita playlist,
 album ou faixa do Spotify:
 
 ```json
@@ -108,15 +111,15 @@ Antes de baixar, simule a selecao:
 powershell -ExecutionPolicy Bypass -File tools\local-vps-importer\run-nightly.ps1 -DryRun
 ```
 
-Para iniciar a execucao real, rode e informe a senha SSH quando solicitada:
+Para iniciar a execucao real:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tools\local-vps-importer\run-nightly.ps1
 ```
 
-Para uma tarefa agendada e sem interacao, defina
-`NATIONMUSICS_SSH_PASSWORD` no ambiente da conta que executara a tarefa. Nao
-coloque a senha em `automation.json` nem em um arquivo versionado.
+Para rodar sem interacao, configure `sshKeyPath` em `automation.json` ou defina
+`NATIONMUSICS_SSH_KEY_PATH`. A chave privada nunca deve entrar no Git. Se a VPS
+aceitar senha, tambem e possivel usar `NATIONMUSICS_SSH_PASSWORD`.
 
 Consulte o total concluido, falhas e as ultimas execucoes:
 
@@ -124,7 +127,7 @@ Consulte o total concluido, falhas e as ultimas execucoes:
 powershell -ExecutionPolicy Bypass -File tools\local-vps-importer\run-nightly.ps1 -Status
 ```
 
-Faixas com erro sao tentadas no maximo tres vezes (configuravel por
+Faixas com erro sao tentadas no maximo cinco vezes (configuravel por
 `maxRetries`). A automacao possui trava contra duas execucoes simultaneas e nao
 mantem uma fila gigante: descobre no maximo 200 itens por fonte e envia lotes
 pequenos, sequencialmente.

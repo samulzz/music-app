@@ -26,7 +26,15 @@ if ($DryRun) {
     exit $LASTEXITCODE
 }
 
-if (-not $env:NATIONMUSICS_SSH_PASSWORD) {
+$AutomationConfig = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+$ConfiguredKeyPath = [string]$AutomationConfig.sshKeyPath
+if ($ConfiguredKeyPath.StartsWith('~/') -or $ConfiguredKeyPath.StartsWith('~\')) {
+    $UserProfilePath = [Environment]::GetFolderPath('UserProfile')
+    $ConfiguredKeyPath = Join-Path $UserProfilePath $ConfiguredKeyPath.Substring(2)
+}
+$HasSshKey = $ConfiguredKeyPath -and (Test-Path -LiteralPath $ConfiguredKeyPath)
+
+if (-not $env:NATIONMUSICS_SSH_PASSWORD -and -not $HasSshKey) {
     $SecurePassword = Read-Host "Senha SSH da VPS" -AsSecureString
     $PasswordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword)
     try {

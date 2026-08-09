@@ -1,13 +1,16 @@
 {
-  "maxTracksPerRun": 100,
-  "maxTracksPerSource": 25,
-  "maxRuntimeMinutes": 480,
-  "maxRetries": 3,
+  "continuous": true,
+  "maxTracksPerRun": 1000000,
+  "maxTracksPerSource": 3,
+  "maxRuntimeMinutes": 1440,
+  "cycleDelayMinutes": 10,
+  "maxRetries": 5,
   "sleepSeconds": 8,
-  "spotifyReadLimit": 100,
-  "sshHost": "38.18.229.2",
+  "spotifyReadLimit": 200,
+  "sshHost": "38.18.230.83",
   "sshPort": 22,
   "sshUser": "root",
+  "sshKeyPath": "~/.ssh/nationmusics_vps_ed25519",
   "apiBase": "https://marlonbarbershop.com/nationmusics/api",
   "sources": [
     {
@@ -23,15 +26,33 @@
       "enabled": true
     },
     {
-      "name": "Top 50 Global",
-      "url": "https://open.spotify.com/playlist/37i9dQZEVXbMDoHDwVN2tF",
+      "name": "Funk Brasil - Hits e Lancamentos",
+      "url": "https://open.spotify.com/playlist/5La5wskoYVzxS2msY5VxcR",
       "publishPlaylist": true,
       "enabled": true
     },
     {
-      "name": "Novidades da semana",
-      "url": "https://open.spotify.com/playlist/37i9dQZF1DX4JAvHpjipBk",
-      "publishPlaylist": false,
+      "name": "Sertanejo - Mais Tocadas",
+      "url": "https://open.spotify.com/playlist/1yywe9WL3ntIiyiGHuvNZ6",
+      "publishPlaylist": true,
+      "enabled": true
+    },
+    {
+      "name": "Pagode - Mais Tocadas",
+      "url": "https://open.spotify.com/playlist/09aS6DRj56bU3GZy0J318n",
+      "publishPlaylist": true,
+      "enabled": true
+    },
+    {
+      "name": "Trap Brasil - Hits",
+      "url": "https://open.spotify.com/playlist/41DaC679RB5QyZZjBQwOgL",
+      "publishPlaylist": true,
+      "enabled": true
+    },
+    {
+      "name": "Forro e Piseiro - Mais Tocadas",
+      "url": "https://open.spotify.com/playlist/2Nt7DpU2TI5egiL9TiuUrv",
+      "publishPlaylist": true,
       "enabled": true
     }
   ]

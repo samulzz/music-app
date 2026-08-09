@@ -267,6 +267,7 @@ def run(
                     "sshPort": raw.get("sshPort"),
                     "sshUser": raw.get("sshUser"),
                     "sshPassword": ssh_password or os.environ.get("NATIONMUSICS_SSH_PASSWORD", ""),
+                    "sshKeyPath": raw.get("sshKeyPath") or os.environ.get("NATIONMUSICS_SSH_KEY_PATH", ""),
                     "apiBase": raw.get("apiBase"),
                     "spotifyUrl": source.url,
                     "createPersonalPlaylist": False,
@@ -346,8 +347,22 @@ def main() -> None:
             f"Configuracao nao encontrada: {args.config}\n"
             f"Copie automation.example.json para automation.json e ajuste as fontes."
         )
+    config_path = args.config.resolve()
+    raw = load_json(config_path)
     with single_instance(LOCK_PATH):
-        raise SystemExit(run(args.config.resolve(), args.state.resolve(), args.dry_run))
+        if not bool(raw.get("continuous", False)) or args.dry_run:
+            raise SystemExit(run(config_path, args.state.resolve(), args.dry_run))
+        cycle = 0
+        try:
+            while True:
+                cycle += 1
+                log(f"Ciclo continuo {cycle}: procurando novidades.")
+                run(config_path, args.state.resolve(), False)
+                delay_minutes = max(2, int(raw.get("cycleDelayMinutes", 10)))
+                log(f"Nova verificacao em {delay_minutes} minuto(s).")
+                time.sleep(delay_minutes * 60)
+        except KeyboardInterrupt:
+            log("Automacao encerrada pelo usuario.")
 
 
 if __name__ == "__main__":

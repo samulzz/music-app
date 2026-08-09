@@ -9,6 +9,7 @@ from typing import Any
 from app import (
     CACHE_ROOT,
     DEFAULT_API_BASE,
+    DEFAULT_API_KEY,
     ImportConfig,
     import_songs_to_catalog,
     login_admin_from_remote,
@@ -24,6 +25,11 @@ PUBLISHED_PLAYLISTS = {
     "37i9dQZF1DX0FOF1IUWK1W",
     "mc-mn-hits-20260801",
 }
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 
 def load_json(path: Path) -> Any:
@@ -42,7 +48,7 @@ def main() -> int:
         app_password="",
         spotify_url="",
         create_personal_playlist=False,
-        create_global_playlist=False,
+        create_global_playlist=True,
     )
     if not Path(SSH_KEY).is_file():
         raise FileNotFoundError(f"Chave SSH ausente: {SSH_KEY}")
@@ -78,6 +84,31 @@ def main() -> int:
             source_locations.setdefault(source_id, directory)
 
     print(f"Restaurando {len(unique_entries)} audios de {len(sources)} manifestos.", flush=True)
+    if "--playlists-only" in sys.argv:
+        admin_token = login_admin_from_remote(config, DEFAULT_API_KEY)
+        for _directory, playlist, entries in sources:
+            playlist_id = str(playlist.get("spotifyId") or "")
+            if playlist_id not in PUBLISHED_PLAYLISTS:
+                continue
+            song_ids = import_songs_to_catalog(
+                config,
+                entries,
+                DEFAULT_API_KEY,
+                admin_token,
+                print,
+            )
+            upsert_global_playlist(
+                config,
+                playlist,
+                entries,
+                song_ids,
+                DEFAULT_API_KEY,
+                admin_token,
+                print,
+            )
+        print("Playlists globais restauradas.", flush=True)
+        return 0
+
     upload_groups: dict[Path, list[dict[str, Any]]] = {}
     for source_id, entry in unique_entries.items():
         upload_groups.setdefault(source_locations[source_id], []).append(entry)

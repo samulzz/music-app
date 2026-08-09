@@ -43,7 +43,7 @@ echo "[$(date --iso-8601=seconds)] Gerando dump do MySQL"
 docker exec \
   -e MYSQL_PWD="${NATIONMUSICS_MYSQL_PASSWORD}" \
   "${NATIONMUSICS_MYSQL_CONTAINER}" \
-  mysqldump --single-transaction --quick --routines --events \
+  mysqldump --single-transaction --quick --routines --events --no-tablespaces \
   -u "${NATIONMUSICS_MYSQL_USERNAME}" "${NATIONMUSICS_MYSQL_DATABASE}" \
   | gzip -9 > "${SNAPSHOT_DIR}/database.sql.gz"
 

@@ -631,13 +631,10 @@ def ensure_user_token(config: ImportConfig, api_key: str, log) -> str:
 
 
 def stream_url(api_base: str, entry: dict[str, Any]) -> str:
-    query = urllib.parse.urlencode(
-        {
-            "titulo": entry.get("title") or "musica",
-            "artista": entry.get("artist") or "",
-        }
-    )
-    return f"{api_base.rstrip('/')}/musicas/baixar/{urllib.parse.quote(entry['sourceId'])}?{query}"
+    # Titulo e artista ja sao persistidos em colunas proprias. Manter esses
+    # valores tambem na query podia ultrapassar o varchar da URI em faixas com
+    # muitos artistas ou nomes extensos.
+    return f"{api_base.rstrip('/')}/musicas/baixar/{urllib.parse.quote(entry['sourceId'])}"
 
 
 def save_to_user_library(

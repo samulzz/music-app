@@ -111,7 +111,7 @@ public class MusicService {
 
     private void addYoutubeAccessOptions(List<String> command) {
         command.add("--extractor-args");
-        command.add("youtube:player_client=mweb;fetch_pot=always;formats=missing_pot");
+        command.add("youtube:player_client=android_vr;formats=missing_pot");
 
         if (youtubePotProviderUrl != null && !youtubePotProviderUrl.isBlank()) {
             command.add("--extractor-args");

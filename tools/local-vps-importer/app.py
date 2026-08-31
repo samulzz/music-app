@@ -5,6 +5,7 @@ import json
 import os
 import posixpath
 import queue
+import re
 import shlex
 import shutil
 import site
@@ -17,6 +18,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import unicodedata
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -717,8 +719,13 @@ def upsert_personal_playlist(
         "globalPlaylist": False,
     }
     playlists = request_json(config.api_base, "/playlists/personal", api_key=api_key, token=token, timeout=60)
+    name_key = normalize_playlist_name(name)
     existing = next(
-        (item for item in playlists if isinstance(item, dict) and item.get("name") == name),
+        (
+            item for item in playlists
+            if isinstance(item, dict)
+            and normalize_playlist_name(str(item.get("name") or "")) == name_key
+        ),
         None,
     )
     if existing:
@@ -777,6 +784,12 @@ def login_admin_from_remote(config: ImportConfig, api_key: str) -> str:
     return str(token)
 
 
+def normalize_playlist_name(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value or "")
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    return " ".join(re.findall(r"[a-z0-9]+", normalized.lower()))
+
+
 def upsert_global_playlist(
     config: ImportConfig,
     playlist: dict[str, Any],
@@ -796,13 +809,14 @@ def upsert_global_playlist(
         "globalPlaylist": True,
     }
     playlists = request_json(config.api_base, "/admin/playlists", api_key=api_key, admin_token=admin_token)
+    name_key = normalize_playlist_name(name)
     existing = next(
         (
             item
             for item in playlists
             if isinstance(item, dict)
             and item.get("globalPlaylist") is not False
-            and item.get("name") == name
+            and normalize_playlist_name(str(item.get("name") or "")) == name_key
         ),
         None,
     )

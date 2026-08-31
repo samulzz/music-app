@@ -19,6 +19,7 @@ import type { ApiPlaylist } from '../../types/music';
 import { apiRequest, OfflineError } from '../../services/api';
 import { getSession } from '../../services/auth';
 import { getDailyMix } from '../../services/recommendations';
+import { MUSIC_GENRES } from '../../constants/music-genres';
 
 type HomePlaylist = {
   id: string;
@@ -201,6 +202,13 @@ export default function HomePlaylistsScreen() {
     });
   }, [router]);
 
+  const openGenre = useCallback((query: string) => {
+    router.push({
+      pathname: '/(tabs)/search' as never,
+      params: { genre: query },
+    });
+  }, [router]);
+
   return (
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
@@ -271,6 +279,20 @@ export default function HomePlaylistsScreen() {
                   </View>
                   <View style={styles.featuredPlay}><Ionicons name="play" size={20} color="#111" /></View>
                 </TouchableOpacity>
+                <Text style={styles.sectionTitle}>Explore por gênero</Text>
+                <View style={styles.genreGrid}>
+                  {MUSIC_GENRES.map((genre) => (
+                    <TouchableOpacity
+                      key={genre.query}
+                      style={[styles.genreCard, { backgroundColor: genre.color }]}
+                      onPress={() => openGenre(genre.query)}
+                      activeOpacity={0.82}
+                    >
+                      <Text style={styles.genreName}>{genre.name}</Text>
+                      <Ionicons name={genre.icon} size={25} color="#ffffffcc" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
                 <Text style={styles.sectionTitle}>Feito para ouvir agora</Text>
               </View>
             ) : null}
@@ -333,6 +355,17 @@ const styles = StyleSheet.create({
   featuredDescription: { color: '#c4d1c8', fontSize: 11, lineHeight: 16, marginTop: 5 },
   featuredPlay: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#1db954', alignItems: 'center', justifyContent: 'center', alignSelf: 'flex-end' },
   sectionTitle: { color: '#fff', fontSize: 18, fontWeight: '800', marginBottom: 12 },
+  genreGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginBottom: 23 },
+  genreCard: {
+    width: '48.5%',
+    minHeight: 68,
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  genreName: { color: '#fff', fontSize: 15, fontWeight: '900' },
   card: {
     flex: 1,
     maxWidth: '48.5%',

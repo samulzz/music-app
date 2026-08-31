@@ -12,13 +12,15 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import type { ApiSearchSong, MusicSong } from '../../types/music';
+import type { ApiPlaylist, ApiSearchSong, MusicSong } from '../../types/music';
 import { fromApiSearchSong } from '../../types/music';
 import { apiRequest } from '../../services/api';
 import { getSession } from '../../services/auth';
 import { downloadSong } from '../../services/offline-library';
 import { playSongQueue } from '../../services/player';
+import { MUSIC_GENRES } from '../../constants/music-genres';
 
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -78,8 +80,11 @@ const SearchCard = memo(function SearchCard({
 });
 
 export default function SearchScreen() {
+  const router = useRouter();
+  const { genre } = useLocalSearchParams<{ genre?: string }>();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MusicSong[]>([]);
+  const [playlistResults, setPlaylistResults] = useState<ApiPlaylist[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [username, setUsername] = useState('');
@@ -91,6 +96,12 @@ export default function SearchScreen() {
     getSession().then((session) => setUsername(session?.username || '')).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (typeof genre !== 'string' || !genre.trim()) return;
+    const timer = setTimeout(() => setQuery(genre.trim()), 0);
+    return () => clearTimeout(timer);
+  }, [genre]);
+
   const searchCatalog = useCallback(async (rawValue = query) => {
     const value = rawValue.trim();
     const requestId = searchRequestId.current + 1;
@@ -98,6 +109,7 @@ export default function SearchScreen() {
 
     if (!value) {
       setResults([]);
+      setPlaylistResults([]);
       setSearchError('');
       setSearching(false);
       return;
@@ -106,16 +118,27 @@ export default function SearchScreen() {
     setSearching(true);
     setSearchError('');
     try {
-      const data = await apiRequest<ApiSearchSong[]>(
-        `/songs/search?q=${encodeURIComponent(value)}`
-      );
+      const [data, playlists] = await Promise.all([
+        apiRequest<ApiSearchSong[]>(`/songs/search?q=${encodeURIComponent(value)}`),
+        apiRequest<ApiPlaylist[]>('/playlists/global', { authenticated: false }),
+      ]);
       if (requestId !== searchRequestId.current) return;
       const songs = data.map(fromApiSearchSong);
+      const normalizedValue = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+      const matchingPlaylists = playlists.filter((playlist) => (
+        `${playlist.name} ${playlist.description || ''}`
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .includes(normalizedValue)
+      ));
       setResults(songs);
-      setSearchError(songs.length ? '' : 'Nenhuma musica pre-baixada encontrada.');
+      setPlaylistResults(matchingPlaylists);
+      setSearchError(songs.length || matchingPlaylists.length ? '' : 'Nenhuma música ou playlist encontrada.');
     } catch (error) {
       if (requestId !== searchRequestId.current) return;
       setResults([]);
+      setPlaylistResults([]);
       setSearchError(error instanceof Error ? error.message : 'Tente novamente.');
     } finally {
       if (requestId === searchRequestId.current) setSearching(false);
@@ -137,6 +160,7 @@ export default function SearchScreen() {
     if (!value.trim()) {
       searchRequestId.current += 1;
       setResults([]);
+      setPlaylistResults([]);
       setSearchError('');
       setSearching(false);
     }
@@ -254,9 +278,55 @@ export default function SearchScreen() {
           initialNumToRender={8}
           windowSize={7}
           removeClippedSubviews
+          ListHeaderComponent={
+            <View>
+              <Text style={styles.genreTitle}>Navegue por gênero</Text>
+              <View style={styles.genreGrid}>
+                {MUSIC_GENRES.map((item) => (
+                  <TouchableOpacity
+                    key={item.query}
+                    style={[styles.genreCard, { backgroundColor: item.color }]}
+                    onPress={() => changeQuery(item.query)}
+                    activeOpacity={0.82}
+                  >
+                    <Text style={styles.genreName}>{item.name}</Text>
+                    <Ionicons name={item.icon} size={22} color="#ffffffcc" />
+                  </TouchableOpacity>
+                ))}
+              </View>
+              {playlistResults.length > 0 && (
+                <View style={styles.playlistSection}>
+                  <Text style={styles.genreTitle}>Playlists</Text>
+                  {playlistResults.map((playlist) => (
+                    <TouchableOpacity
+                      key={playlist.id}
+                      style={styles.playlistCard}
+                      activeOpacity={0.82}
+                      onPress={() => router.push({
+                        pathname: '/playlist/[id]' as never,
+                        params: { id: String(playlist.id), title: playlist.name, kind: 'global' },
+                      })}
+                    >
+                      {playlist.iconUrl ? (
+                        <Image source={{ uri: playlist.iconUrl }} style={styles.playlistCover} />
+                      ) : (
+                        <View style={styles.playlistCoverPlaceholder}><Ionicons name="albums" size={22} color="#1db954" /></View>
+                      )}
+                      <View style={styles.playlistMeta}>
+                        <Text style={styles.cardTitle} numberOfLines={1}>{playlist.name}</Text>
+                        <Text style={styles.cardArtist} numberOfLines={1}>{playlist.description || 'Playlist do NationMusics'}</Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={20} color="#777" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {query.trim() ? <Text style={styles.genreTitle}>Músicas</Text> : null}
+            </View>
+          }
           ListEmptyComponent={
             !searching ? (
-              <View style={styles.empty}>
+              <View style={[styles.empty, !query.trim() && styles.emptyCompact]}>
                 <Ionicons name="headset-outline" size={52} color="#444" />
                 <Text style={styles.emptyTitle}>Encontre e baixe suas músicas</Text>
                 <Text style={styles.emptyText}>Toque no resultado para ouvir ou use a seta para salvar offline.</Text>
@@ -327,6 +397,23 @@ const styles = StyleSheet.create({
   },
   catalogNoticeText: { color: '#d5bd83', fontSize: 12, flex: 1 },
   list: { paddingBottom: 175 },
+  genreTitle: { color: '#fff', fontSize: 17, fontWeight: '800', marginBottom: 11 },
+  genreGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 22 },
+  genreCard: {
+    width: '48.5%',
+    minHeight: 62,
+    borderRadius: 11,
+    padding: 11,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  genreName: { color: '#fff', fontSize: 14, fontWeight: '900' },
+  playlistSection: { marginBottom: 20 },
+  playlistCard: { minHeight: 66, flexDirection: 'row', alignItems: 'center', backgroundColor: '#1b1b1b', borderRadius: 12, padding: 8, marginBottom: 8 },
+  playlistCover: { width: 50, height: 50, borderRadius: 8, marginRight: 10 },
+  playlistCoverPlaceholder: { width: 50, height: 50, borderRadius: 8, marginRight: 10, backgroundColor: '#272727', alignItems: 'center', justifyContent: 'center' },
+  playlistMeta: { flex: 1, marginRight: 8 },
   card: {
     minHeight: 76,
     flexDirection: 'row',
@@ -369,6 +456,7 @@ const styles = StyleSheet.create({
   },
   downloadProgressFill: { height: 3, backgroundColor: '#1db954' },
   empty: { alignItems: 'center', paddingTop: 70, paddingHorizontal: 28 },
+  emptyCompact: { paddingTop: 24 },
   emptyTitle: { color: '#d8d8d8', fontSize: 17, fontWeight: '700', marginTop: 14 },
   emptyText: { color: '#777', fontSize: 13, textAlign: 'center', lineHeight: 18, marginTop: 7 },
 });

@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-09T18:45:00-03:00",
+  "generatedAt": "2026-08-31T11:58:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.19",
-    "versionCode": 21,
-    "minimumVersion": "1.1.19",
-    "minimumVersionCode": 21,
+    "version": "1.1.21",
+    "versionCode": 23,
+    "minimumVersion": "1.1.21",
+    "minimumVersionCode": 23,
     "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.19.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.21.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Nova notificacao diaria avisa quando o Top 100 personalizado esta pronto, com acesso direto ao app."
+    "releaseNotes": "Novos atalhos de generos na tela inicial e na pesquisa, com playlists relacionadas para funk, piseiro, sertanejo, gospel e outros estilos."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.22",
-    "minimumVersion": "1.2.22",
+    "version": "1.2.24",
+    "minimumVersion": "1.2.24",
     "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.22.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.24.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Interface desktop realinhada e responsiva, player sempre visivel, avisos amarelos removidos e icone correto do Discord."
+    "releaseNotes": "Playlists da pagina inicial agora aparecem em grade vertical, com atalhos de generos na tela inicial e na pesquisa."
   }
 }

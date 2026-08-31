@@ -7,6 +7,7 @@ import me.samulsz.musicapi.models.Song;
 import me.samulsz.musicapi.repositories.PlaylistRepository;
 import me.samulsz.musicapi.repositories.SongRepository;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -24,9 +25,22 @@ public class PlaylistAdminService {
         this.songRepository = songRepository;
     }
 
-    public Playlist createPlaylist(PlaylistRequest request) {
+    @Transactional
+    public synchronized Playlist createPlaylist(PlaylistRequest request) {
         if (request.getName() == null || request.getName().trim().isEmpty()) {
             throw new RuntimeException("Nome da playlist é obrigatório.");
+        }
+
+        String name = request.getName().trim();
+        boolean globalPlaylist = request.getGlobalPlaylist() == null || request.getGlobalPlaylist();
+        if (globalPlaylist) {
+            Playlist existing = playlistRepository
+                    .findFirstByGlobalPlaylistTrueAndName(name)
+                    .orElse(null);
+            if (existing != null) {
+                applyPlaylistPayload(existing, request);
+                return playlistRepository.save(existing);
+            }
         }
 
         Playlist playlist = new Playlist();

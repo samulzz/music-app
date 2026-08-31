@@ -133,4 +133,5 @@ downloads/
 __pycache__/
 *.pyc
 tools/local-vps-importer/automation.json
+desktop-app/src/runtime-config.cjs
 corrigir.md

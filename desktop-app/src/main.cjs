@@ -8,8 +8,15 @@ const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 const DiscordRPC = require('discord-rpc');
 
+let packagedConfig = {};
+try {
+  packagedConfig = require('./runtime-config.cjs');
+} catch {
+  // O arquivo e gerado localmente no build e nao faz parte do repositorio.
+}
+
 const API_BASE_URL = 'https://marlonbarbershop.com/nationmusics/api';
-const API_KEY = process.env.NATIONMUSICS_API_KEY || '';
+const API_KEY = process.env.NATIONMUSICS_API_KEY || packagedConfig.apiKey || '';
 const DOWNLOAD_BASE_URL = 'https://marlonbarbershop.com/nationmusics/download';
 const UPDATE_MANIFEST_URL = `${DOWNLOAD_BASE_URL}/update.json`;
 const PREPARATION_TIMEOUT_MS = 8 * 60 * 1000;

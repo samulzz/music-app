@@ -1116,7 +1116,21 @@ nav {
 .home-quick-card i { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; background: #1db954; color: #07120b; opacity: 0; transform: translateY(4px); transition: 140ms; }
 .home-quick-card:hover { background: #303030; }
 .home-quick-card:hover i { opacity: 1; transform: none; }
-.home-shelf { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(160px, 190px); gap: 14px; overflow-x: auto; padding-bottom: 10px; }
+.home-shelf { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 14px; padding-bottom: 10px; }
+.genre-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 1fr)); gap: 10px; }
+.genre-card { position: relative; min-height: 82px; display: flex; align-items: flex-end; justify-content: space-between; padding: 14px; border: 0; border-radius: 12px; overflow: hidden; color: #fff; cursor: pointer; text-align: left; transition: filter 140ms, transform 140ms; }
+.genre-card:hover { filter: brightness(1.12); transform: translateY(-2px); }
+.genre-card strong { font-size: 17px; }
+.genre-card span { position: absolute; right: 10px; top: 6px; font-size: 35px; transform: rotate(10deg); opacity: .88; }
+.genre-green { background: linear-gradient(135deg, #16783b, #163b28); }
+.genre-orange { background: linear-gradient(135deg, #c55b1c, #653118); }
+.genre-brown { background: linear-gradient(135deg, #8a5328, #472c19); }
+.genre-blue { background: linear-gradient(135deg, #2c65b6, #1b335e); }
+.genre-purple { background: linear-gradient(135deg, #7a45ae, #3e2459); }
+.genre-red { background: linear-gradient(135deg, #a83248, #551d2a); }
+.genre-yellow { background: linear-gradient(135deg, #9a7b13, #514312); }
+.genre-teal { background: linear-gradient(135deg, #147c75, #17433f); }
+.search-genres { margin-bottom: 24px; }
 .home-album-card { min-width: 0; padding: 12px; border-radius: 12px; background: #191919; cursor: pointer; transition: background 140ms, transform 140ms; }
 .home-album-card:hover { background: #242424; transform: translateY(-2px); }
 .home-album-card > div { position: relative; aspect-ratio: 1; display: grid; place-items: center; margin-bottom: 11px; border-radius: 9px; overflow: hidden; background: #282828; }

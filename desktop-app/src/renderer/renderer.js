@@ -52,6 +52,16 @@ const VIEW_CACHE_TTL_MS = 5 * 60 * 1000;
 const VOLUME_STORAGE_KEY = 'nationmusics.desktop.volumeSliderValue';
 const VOLUME_CURVE = 1.6;
 const SEARCH_DEBOUNCE_MS = 220;
+const MUSIC_GENRES = [
+  { name: 'Funk', query: 'funk', tone: 'green', icon: '🔥' },
+  { name: 'Piseiro', query: 'piseiro', tone: 'orange', icon: '🪗' },
+  { name: 'Sertanejo', query: 'sertanejo', tone: 'brown', icon: '🤠' },
+  { name: 'Gospel', query: 'gospel', tone: 'blue', icon: '✨' },
+  { name: 'Pagode', query: 'pagode', tone: 'purple', icon: '🥁' },
+  { name: 'Trap', query: 'trap', tone: 'red', icon: '💎' },
+  { name: 'Forró', query: 'forró', tone: 'yellow', icon: '🌵' },
+  { name: 'Rap', query: 'rap', tone: 'teal', icon: '🎤' },
+];
 const FRIEND_PRESENCE_INTERVAL_MS = 20_000;
 const FRIEND_LIST_REFRESH_MS = 20_000;
 const JAM_SYNC_INTERVAL_MS = 2500;
@@ -98,6 +108,27 @@ const ICONS = {
 function icon(name, className = '') {
   const body = ICONS[name] || ICONS.music;
   return `<svg class="app-icon${className ? ` ${className}` : ''}" viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
+}
+
+function genreGridMarkup() {
+  return `<div class="genre-grid">
+    ${MUSIC_GENRES.map((genre) => `<button class="genre-card genre-${genre.tone}" data-genre-query="${escapeHtml(genre.query)}" type="button"><span>${genre.icon}</span><strong>${escapeHtml(genre.name)}</strong></button>`).join('')}
+  </div>`;
+}
+
+function bindGenreActions() {
+  document.querySelectorAll('[data-genre-query]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const query = String(button.dataset.genreQuery || '');
+      $('#search-input').value = query;
+      activateNavigation('search');
+      void renderSearch(query);
+    });
+  });
+}
+
+function normalizeCatalogText(value) {
+  return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
 function renderIconSlots(root = document) {
@@ -1762,7 +1793,7 @@ function syncSongRows() {
 function renderHomeContent(playlists = state.playlists) {
   const featured = playlists[0];
   const quick = playlists.slice(0, 6);
-  const shelf = playlists.slice(0, 10);
+  const shelf = playlists;
   contentView.innerHTML = `
     ${featured ? `<section class="home-hero" data-home-index="0">
       <div class="home-hero-art">${featured.iconUrl ? `<img src="${escapeHtml(featured.iconUrl)}" alt="" />` : icon('music')}</div>
@@ -1775,6 +1806,10 @@ function renderHomeContent(playlists = state.playlists) {
       </div>
     </section>
     <section class="home-section">
+      <div class="section-heading"><h2>Explore por gênero</h2><span>Encontre seu ritmo</span></div>
+      ${genreGridMarkup()}
+    </section>
+    <section class="home-section">
       <div class="section-heading"><h2>Feito para o seu momento</h2><span>Atualizado recentemente</span></div>
       <div class="home-shelf">
         ${shelf.map((playlist, index) => `<article class="home-album-card" data-home-index="${index}"><div>${playlist.iconUrl ? `<img src="${escapeHtml(playlist.iconUrl)}" alt="" />` : icon('playlist')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(playlist.name)}</strong><p>${escapeHtml(playlist.description || 'Playlist do NationMusics')}</p></article>`).join('')}
@@ -1784,6 +1819,7 @@ function renderHomeContent(playlists = state.playlists) {
   document.querySelectorAll('[data-home-index]').forEach((card) => {
     card.addEventListener('click', () => openPlaylist(playlists[Number(card.dataset.homeIndex)]));
   });
+  bindGenreActions();
 }
 
 async function renderHome(force = false) {
@@ -2025,31 +2061,47 @@ async function renderSearch(query = '') {
   setPageHeader('ENCONTRE ALGO NOVO', query ? `Resultados para “${query}”` : 'O que vai ouvir hoje?');
   if (!query.trim()) {
     contentView.innerHTML = `
-      <div class="empty-state">
-        <b>Busque uma música ou artista</b>
-        <span>Ouça imediatamente e salve suas favoritas na conta.</span>
-      </div>
+      <section class="home-section search-genres">
+        <div class="section-heading"><h2>Navegue por gênero</h2><span>Escolha um estilo para começar</span></div>
+        ${genreGridMarkup()}
+      </section>
+      <div class="empty-state"><b>Busque uma música, artista ou playlist</b><span>Ouça imediatamente e salve suas favoritas na conta.</span></div>
     `;
+    bindGenreActions();
     return;
   }
   setLoading('Buscando músicas...');
   try {
-    const [songs, library] = await Promise.all([
+    const [songs, library, playlists] = await Promise.all([
       window.nation.search(query.trim()),
       window.nation.getLibrary(),
+      state.playlists.length ? Promise.resolve(state.playlists) : window.nation.getPlaylists(),
     ]);
     if (requestId !== state.searchRequestId) return;
     const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
     const merged = songs.map((song) => savedBySource.has(song.sourceId)
       ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
       : song);
+    state.playlists = playlists;
+    state.playlistsFetchedAt = Date.now();
+    const normalizedQuery = normalizeCatalogText(query.trim());
+    const matchingPlaylists = playlists.filter((playlist) => normalizeCatalogText(`${playlist.name} ${playlist.description || ''}`).includes(normalizedQuery));
     contentView.innerHTML = `
+      <section class="home-section search-genres">
+        <div class="section-heading"><h2>Gêneros</h2><span>Explore outros estilos</span></div>
+        ${genreGridMarkup()}
+      </section>
+      ${matchingPlaylists.length ? `<section class="home-section"><div class="section-heading"><h2>Playlists</h2><span>${matchingPlaylists.length} encontradas</span></div><div class="home-shelf search-playlist-grid">${matchingPlaylists.map((playlist, index) => `<article class="home-album-card" data-search-playlist-index="${index}"><div>${playlist.iconUrl ? `<img src="${escapeHtml(playlist.iconUrl)}" alt="" />` : icon('playlist')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(playlist.name)}</strong><p>${escapeHtml(playlist.description || 'Playlist do NationMusics')}</p></article>`).join('')}</div></section>` : ''}
       <div class="section-heading">
-        <h2>Resultados</h2>
+        <h2>Músicas</h2>
         <span>${merged.length} encontrados</span>
       </div>
       ${songRows(merged, `Nenhum resultado para “${query}”.`)}
     `;
+    bindGenreActions();
+    document.querySelectorAll('[data-search-playlist-index]').forEach((card) => {
+      card.addEventListener('click', () => openPlaylist(matchingPlaylists[Number(card.dataset.searchPlaylistIndex)]));
+    });
     bindSongActions();
   } catch (error) {
     if (requestId !== state.searchRequestId) return;

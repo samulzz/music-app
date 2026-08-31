@@ -13,7 +13,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { useNetInfo } from '@react-native-community/netinfo';
 import { type MediaItem } from '@rntp/player';
 
 import GlobalMiniPlayer from '../../components/global-mini-player';
@@ -161,7 +160,6 @@ const PlaylistSongCard = memo(function PlaylistSongCard({
 export default function PlaylistDetailsScreen() {
   const params = useLocalSearchParams<{ id?: string; title?: string; kind?: string }>();
   const router = useRouter();
-  const netInfo = useNetInfo();
   const insets = useSafeAreaInsets();
   const activeItem = useSyncedActiveMediaItem();
   const [songs, setSongs] = useState<MusicSong[]>([]);
@@ -277,7 +275,7 @@ export default function PlaylistDetailsScreen() {
       setSongs(sortSongsAlphabetically(await mergeWithOfflineLibrary(cached.songs)));
       lastRefreshAtRef.current = cached.savedAt;
       setLoading(false);
-      void loadSongs(false);
+      void loadSongs(false, true);
       return;
     }
 
@@ -324,7 +322,7 @@ export default function PlaylistDetailsScreen() {
   }, [songs]);
 
   const playAll = async () => {
-    const playable = netInfo.isConnected === false
+    const playable = offlineMode
       ? songs.map((song, index) => ({ song, index })).filter(({ song }) => song.localUri)
       : songs.map((song, index) => ({ song, index }));
     if (!playable.length) {
@@ -399,11 +397,6 @@ export default function PlaylistDetailsScreen() {
     const pending = targets.filter((song) => !song.localUri);
     if (!pending.length) {
       Alert.alert('Tudo pronto', 'Todas as musicas desta playlist ja estao disponiveis offline.');
-      return;
-    }
-
-    if (netInfo.isConnected === false) {
-      Alert.alert('Voce esta offline', 'Conecte-se a internet para baixar novas musicas.');
       return;
     }
 
@@ -589,7 +582,7 @@ export default function PlaylistDetailsScreen() {
     } else {
       Alert.alert('Downloads prontos', 'As musicas foram baixadas para este celular.');
     }
-  }, [loadSongs, netInfo.isConnected]);
+  }, [loadSongs]);
 
   const downloadAll = useCallback(() => {
     if (bulkDownload) return;
@@ -712,7 +705,7 @@ export default function PlaylistDetailsScreen() {
           </View>
         </View>
 
-        {(offlineMode || netInfo.isConnected === false) && (
+        {offlineMode && (
           <View style={styles.offlineBanner}>
             <Ionicons name="cloud-offline-outline" size={17} color="#f2b84b" />
             <Text style={styles.offlineText}>Offline: somente músicas já baixadas podem tocar.</Text>

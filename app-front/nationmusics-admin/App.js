@@ -14,11 +14,11 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const BASE_URL = 'https://pseudoprincely-plumular-nikolas.ngrok-free.dev/api';
-const API_KEY = 'REDACTED_API_KEY';
+const API_KEY = process.env.EXPO_PUBLIC_API_KEY || '';
 const NGROK_BYPASS = 'true';
 
-const DEFAULT_ADMIN_USERNAME = 'devsamuel';
-const DEFAULT_ADMIN_PASSWORD = 'REDACTED_ADMIN_PASSWORD';
+const DEFAULT_ADMIN_USERNAME = process.env.EXPO_PUBLIC_ADMIN_USERNAME || '';
+const DEFAULT_ADMIN_PASSWORD = process.env.EXPO_PUBLIC_ADMIN_PASSWORD || '';
 
 const EMPTY_FORM = {
   name: '',

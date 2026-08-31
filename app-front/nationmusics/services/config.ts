@@ -1,5 +1,5 @@
 const DEFAULT_API_URL = 'https://marlonbarbershop.com/nationmusics/api';
-const DEFAULT_API_KEY = 'REDACTED_API_KEY';
+const DEFAULT_API_KEY = '';
 const DEFAULT_DOWNLOAD_URL = 'https://marlonbarbershop.com/nationmusics/download';
 
 export const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL || DEFAULT_API_URL).replace(/\/$/, '');

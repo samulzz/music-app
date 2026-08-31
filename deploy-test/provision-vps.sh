@@ -23,7 +23,7 @@ if [[ ! -f .env ]]; then
   admin_password="$(openssl rand -hex 24)"
   cat > .env <<EOF
 DATABASE_PASSWORD=${database_password}
-API_SECURITY_KEY=REDACTED_API_KEY
+API_SECURITY_KEY=CHANGE_ME
 JWT_SECRET=${jwt_secret}
 ADMIN_USERNAME=devsamuel
 ADMIN_PASSWORD=${admin_password}

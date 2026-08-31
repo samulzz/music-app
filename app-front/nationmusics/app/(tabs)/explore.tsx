@@ -15,7 +15,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useNetInfo } from '@react-native-community/netinfo';
 import { type MediaItem } from '@rntp/player';
 
 import type { ApiLibrarySong, ApiPlaylist, MusicSong } from '../../types/music';
@@ -191,7 +190,6 @@ const SongCard = memo(function SongCard({
 
 export default function LibraryScreen() {
   const router = useRouter();
-  const netInfo = useNetInfo();
   const activeItem = useSyncedActiveMediaItem();
   const [songs, setSongs] = useState<MusicSong[]>([]);
   const [username, setUsername] = useState('');
@@ -272,7 +270,7 @@ export default function LibraryScreen() {
     }
 
     setLoading(false);
-    void loadLibrary(false);
+    void loadLibrary(false, true);
   }, [loadLibrary]);
 
   useFocusEffect(
@@ -297,7 +295,7 @@ export default function LibraryScreen() {
   }, [songs]);
 
   const playAll = useCallback(async () => {
-    const playable = netInfo.isConnected === false
+    const playable = offlineMode
       ? songs.filter((song) => song.localUri)
       : songs;
     if (!playable.length) {
@@ -311,7 +309,7 @@ export default function LibraryScreen() {
     } catch (error) {
       Alert.alert('Não foi possível reproduzir', error instanceof Error ? error.message : 'Tente novamente.');
     }
-  }, [netInfo.isConnected, shuffle, songs]);
+  }, [offlineMode, shuffle, songs]);
 
   const selectedSongs = useMemo(
     () => songs.filter((song) => selectedIds.has(identity(song))),
@@ -613,9 +611,6 @@ export default function LibraryScreen() {
 
   const addToPlaylist = useCallback(async (song: MusicSong) => {
     try {
-      if (netInfo.isConnected === false) {
-        throw new Error('Conecte-se à internet para alterar suas playlists.');
-      }
       const playlists = await apiRequest<ApiPlaylist[]>('/playlists/personal');
       if (!playlists.length) {
         Alert.alert('Nenhuma playlist pessoal', 'Crie uma playlist na aba Playlists e depois adicione músicas nela.');
@@ -641,13 +636,10 @@ export default function LibraryScreen() {
     } catch (error) {
       Alert.alert('Não foi possível carregar playlists', error instanceof Error ? error.message : 'Tente novamente.');
     }
-  }, [netInfo.isConnected]);
+  }, []);
 
   const addManyToPlaylist = useCallback(async (targets: MusicSong[]) => {
     try {
-      if (netInfo.isConnected === false) {
-        throw new Error('Conecte-se à internet para alterar suas playlists.');
-      }
       const playlists = await apiRequest<ApiPlaylist[]>('/playlists/personal');
       if (!playlists.length) {
         Alert.alert('Nenhuma playlist pessoal', 'Crie uma playlist na aba Playlists e depois adicione músicas nela.');
@@ -676,7 +668,7 @@ export default function LibraryScreen() {
     } catch (error) {
       Alert.alert('Não foi possível carregar playlists', error instanceof Error ? error.message : 'Tente novamente.');
     }
-  }, [clearSelection, netInfo.isConnected]);
+  }, [clearSelection]);
 
   const removeOfflineMany = useCallback(async (targets: MusicSong[]) => {
     for (const song of targets) {
@@ -699,9 +691,6 @@ export default function LibraryScreen() {
         style: 'destructive',
         onPress: async () => {
           try {
-            if (netInfo.isConnected === false) {
-              throw new Error('Conecte-se à internet para remover músicas da conta.');
-            }
             for (const song of targets) {
               await apiRequest<void>(`/songs/remove/${encodeURIComponent(song.id)}`, { method: 'DELETE' });
               await removeOfflineSong(song);
@@ -715,20 +704,17 @@ export default function LibraryScreen() {
         },
       },
     ]);
-  }, [clearSelection, netInfo.isConnected]);
+  }, [clearSelection]);
 
   const removeFromAccount = useCallback(async (song: MusicSong) => {
     try {
-      if (netInfo.isConnected === false) {
-        throw new Error('Conecte-se à internet para remover a música da conta.');
-      }
       await apiRequest<void>(`/songs/remove/${encodeURIComponent(song.id)}`, { method: 'DELETE' });
       await removeOfflineSong(song);
       setSongs((current) => current.filter((candidate) => identity(candidate) !== identity(song)));
     } catch (error) {
       Alert.alert('Não foi possível remover', error instanceof Error ? error.message : 'Tente novamente.');
     }
-  }, [netInfo.isConnected]);
+  }, []);
 
   const showSongActions = useCallback((song: MusicSong) => {
     setSelectedIds((current) => {
@@ -842,7 +828,7 @@ export default function LibraryScreen() {
           </View>
         </View>
 
-        {(offlineMode || netInfo.isConnected === false) && (
+        {offlineMode && (
           <View style={styles.offlineBanner}>
             <Ionicons name="cloud-offline-outline" size={18} color="#1db954" />
             <Text style={styles.offlineText}>Modo offline: reproduzindo arquivos salvos no celular.</Text>

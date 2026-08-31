@@ -1818,7 +1818,7 @@ function playlistDetailsCacheKey(playlist) {
 
 function renderPlaylistSongsContent(playlist, songs) {
   contentView.innerHTML = `
-    <div class="playlist-detail-hero">
+    <div class="playlist-detail-hero${playlist.personal ? ' personal' : ''}">
       <div class="playlist-detail-cover ${playlist.library ? 'library-gradient' : ''}">
         ${playlist.iconUrl ? `<img src="${escapeHtml(playlist.iconUrl)}" alt="" />` : icon(playlist.library ? 'music' : 'playlist')}
       </div>
@@ -1828,8 +1828,10 @@ function renderPlaylistSongsContent(playlist, songs) {
         <p>${escapeHtml(playlist.description || (playlist.library ? 'Todas as músicas salvas na sua conta.' : 'Uma seleção para ouvir agora.'))}</p>
         <small>${songs.length} ${songs.length === 1 ? 'música' : 'músicas'}</small>
       </div>
-      ${playlist.personal ? `<div class="playlist-edit-actions"><button id="edit-personal-playlist" class="secondary-button compact" type="button">Editar detalhes</button><button id="delete-personal-playlist" class="danger-button compact" type="button">Excluir playlist</button></div>` : ''}
-      ${queueControlsMarkup(songs.length, 'Tocar playlist')}
+      <div class="playlist-detail-tools">
+        ${playlist.personal ? `<div class="playlist-edit-actions"><button id="edit-personal-playlist" class="secondary-button compact" type="button">Editar detalhes</button><button id="delete-personal-playlist" class="danger-button compact" type="button">Excluir playlist</button></div>` : ''}
+        ${queueControlsMarkup(songs.length, 'Tocar playlist')}
+      </div>
     </div>
     ${songRows(songs, 'Esta playlist esta vazia.', { removalMode: playlist.personal ? 'personal' : playlist.library ? 'library' : '' })}
   `;

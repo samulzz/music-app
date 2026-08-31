@@ -14,7 +14,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useNetInfo } from '@react-native-community/netinfo';
 
 import type { ApiPlaylist } from '../../types/music';
 import { apiRequest, OfflineError } from '../../services/api';
@@ -68,7 +67,6 @@ const PlaylistCard = memo(function PlaylistCard({
 
 export default function HomePlaylistsScreen() {
   const router = useRouter();
-  const netInfo = useNetInfo();
   const [username, setUsername] = useState('');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -156,7 +154,7 @@ export default function HomePlaylistsScreen() {
         setPlaylists(cached.playlists);
         lastRefreshAtRef.current = cached.savedAt;
       }
-      setOffline(error instanceof OfflineError || netInfo.isConnected === false);
+      setOffline(error instanceof OfflineError);
       if (!cached.playlists.length && !(error instanceof OfflineError)) {
         Alert.alert('Erro', error instanceof Error ? error.message : 'Não foi possível carregar as playlists.');
       }
@@ -169,7 +167,7 @@ export default function HomePlaylistsScreen() {
 
     refreshInFlightRef.current = operation;
     return operation;
-  }, [netInfo.isConnected, readCache, writeCache]);
+  }, [readCache, writeCache]);
 
   const hydrateHome = useCallback(async () => {
     const cached = await readCache();
@@ -177,7 +175,7 @@ export default function HomePlaylistsScreen() {
       setPlaylists(cached.playlists);
       lastRefreshAtRef.current = cached.savedAt;
       setLoading(false);
-      void loadHome(false);
+      void loadHome(false, true);
       return;
     }
 

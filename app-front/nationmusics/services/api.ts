@@ -74,18 +74,28 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
         ...(json ? { 'Content-Type': 'application/json' } : {}),
       };
 
-  let response: Response;
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      ...request,
-      headers: {
-        ...headers,
-        ...requestHeaders,
-      },
-    });
-  } catch {
-    throw new OfflineError();
+  let response: Response | undefined;
+  const method = String(request.method || 'GET').toUpperCase();
+  const attempts = method === 'GET' || method === 'HEAD' ? 2 : 1;
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      response = await fetch(`${API_BASE_URL}${path}`, {
+        ...request,
+        headers: {
+          ...headers,
+          ...requestHeaders,
+        },
+      });
+      break;
+    } catch {
+      if (attempt + 1 < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, 650));
+      }
+    }
   }
+
+  if (!response) throw new OfflineError();
 
   const rawBody = response.status === 204 ? '' : await response.text();
   let parsedBody: unknown = rawBody;

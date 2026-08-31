@@ -655,6 +655,23 @@ nav {
 .playlist-detail-copy h2 { margin: 5px 0 7px; font-size: clamp(24px, 3vw, 40px); line-height: 1; }
 .playlist-detail-copy p { max-width: 58ch; margin: 0 0 8px; color: #aaa; font-size: 12px; }
 .playlist-detail-copy small { color: #777; }
+.playlist-detail-tools {
+  min-width: max-content;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 14px;
+}
+.playlist-detail-tools .playlist-edit-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  margin: 0;
+}
+.playlist-detail-tools .queue-controls {
+  flex-wrap: wrap;
+}
 
 .playlist-grid {
   display: grid;
@@ -1133,6 +1150,23 @@ nav {
   .top-brand strong, .top-profile strong { display: none; }
   .topbar .search-box { width: 240px; }
   .home-quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .playlist-detail-hero.personal {
+    grid-template-columns: 130px minmax(0, 1fr);
+    align-items: center;
+  }
+  .playlist-detail-hero.personal .playlist-detail-cover {
+    width: 130px;
+    height: 130px;
+  }
+  .playlist-detail-hero.personal .playlist-detail-tools {
+    grid-column: 2;
+    min-width: 0;
+    align-items: flex-start;
+  }
+  .playlist-detail-hero.personal .playlist-edit-actions,
+  .playlist-detail-hero.personal .queue-controls {
+    justify-content: flex-start;
+  }
 }
 
 .timeline span {

@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNetInfo } from '@react-native-community/netinfo';
 
 import type { ApiSearchSong, MusicSong } from '../../types/music';
 import { fromApiSearchSong } from '../../types/music';
@@ -79,7 +78,6 @@ const SearchCard = memo(function SearchCard({
 });
 
 export default function SearchScreen() {
-  const netInfo = useNetInfo();
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<MusicSong[]>([]);
   const [searching, setSearching] = useState(false);
@@ -105,13 +103,6 @@ export default function SearchScreen() {
       return;
     }
 
-    if (netInfo.isConnected === false) {
-      setResults([]);
-      setSearchError('Busca indisponivel offline. Abra a Biblioteca.');
-      setSearching(false);
-      return;
-    }
-
     setSearching(true);
     setSearchError('');
     try {
@@ -129,7 +120,7 @@ export default function SearchScreen() {
     } finally {
       if (requestId === searchRequestId.current) setSearching(false);
     }
-  }, [netInfo.isConnected, query]);
+  }, [query]);
 
   useEffect(() => {
     const value = query.trim();
@@ -211,13 +202,6 @@ export default function SearchScreen() {
             <Text style={styles.headerTitle}>O que vai ouvir hoje?</Text>
           </View>
         </View>
-
-        {netInfo.isConnected === false && (
-          <View style={styles.offlineBanner}>
-            <Ionicons name="cloud-offline-outline" size={17} color="#f2b84b" />
-            <Text style={styles.offlineText}>Busca indisponível offline. Abra a Biblioteca.</Text>
-          </View>
-        )}
 
         <View style={styles.searchRow}>
           <View style={styles.searchBox}>

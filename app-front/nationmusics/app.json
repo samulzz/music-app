@@ -2,7 +2,7 @@
   "expo": {
     "name": "nationmusics",
     "slug": "nationmusics",
-    "version": "1.1.19",
+    "version": "1.1.20",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "nationmusics",
@@ -28,7 +28,7 @@
       },
       "predictiveBackGestureEnabled": false,
       "package": "com.samulsz.nationmusics",
-      "versionCode": 21
+      "versionCode": 22
     },
     "web": {
       "output": "static",
@@ -62,7 +62,7 @@
     },
     "extra": {
       "router": {},
-      "androidVersionCode": 21,
+      "androidVersionCode": 22,
       "eas": {
         "projectId": "3b0bf4a3-cf91-4cbe-98b8-4cf71393a495"
       }

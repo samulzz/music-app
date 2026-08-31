@@ -13,6 +13,6 @@ docker exec barbershop-mysql-1 sh -lc '
 '
 
 curl -fsS \
-  -H "X-API-KEY: REDACTED_API_KEY" \
+  -H "X-API-KEY: ${API_SECURITY_KEY:?Defina API_SECURITY_KEY antes de verificar}" \
   http://127.0.0.1:8090/api/musicas/status
 echo

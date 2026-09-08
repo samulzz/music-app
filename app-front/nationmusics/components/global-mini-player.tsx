@@ -42,7 +42,7 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
   const [connectVisible, setConnectVisible] = useState(false);
   const [queueVisible, setQueueVisible] = useState(false);
   const [queue, setQueue] = useState<MediaItem[]>([]);
-  const [feedback, setFeedback] = useState<'LIKE' | 'DISLIKE' | ''>('');
+  const [liked, setLiked] = useState(false);
   const [connectState, setConnectState] = useState<ConnectState | null>(null);
   const [currentDeviceId, setCurrentDeviceId] = useState('');
 
@@ -56,6 +56,10 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
 
   const remote = Boolean(connectState?.song && !connectState.currentDeviceActive);
   const displayTrack = remote ? connectState?.song : activeTrack;
+  const displayTrackKey = displayTrack
+    ? String('mediaId' in displayTrack ? displayTrack.mediaId : ('id' in displayTrack ? displayTrack.id : ''))
+    : '';
+  useEffect(() => setLiked(false), [displayTrackKey]);
   const displayPlaying = remote ? Boolean(connectState?.playing) : Boolean(isPlaying);
   const displayPosition = remote
     ? Math.max(0, Number(connectState?.positionSeconds || 0) + (connectState?.playing ? Math.max(0, (Date.now() - Number(connectState.stateUpdatedAt || Date.now())) / 1000) : 0))
@@ -86,7 +90,7 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
     try { setQueue(getPlaybackQueue()); } catch { setQueue([]); }
     setQueueVisible(true);
   };
-  const sendFeedback = (action: 'LIKE' | 'DISLIKE') => {
+  const toggleLike = () => {
     if (!displayTrack) return;
     const extras = 'extras' in displayTrack && displayTrack.extras && typeof displayTrack.extras === 'object' ? displayTrack.extras : {};
     const mediaId = 'mediaId' in displayTrack ? displayTrack.mediaId : ('id' in displayTrack ? displayTrack.id : '');
@@ -95,8 +99,9 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
       id: String(extras.songId || mediaId || ''),
       sourceId: typeof extras.sourceId === 'string' ? extras.sourceId : String(directSourceId || mediaId || ''),
     };
-    setFeedback(action);
-    void sendRecommendationFeedback(song, action).catch(() => setFeedback(''));
+    const nextLiked = !liked;
+    setLiked(nextLiked);
+    void sendRecommendationFeedback(song, nextLiked ? 'LIKE' : 'CLEAR').catch(() => setLiked(!nextLiked));
   };
   return (
     <View style={[styles.player, { bottom: bottomOffset }]}>
@@ -116,32 +121,8 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
           </Text>
         </View>
 
-        <TouchableOpacity accessibilityLabel="Dispositivos conectados" onPress={() => setConnectVisible(true)} style={styles.control}>
-          <Ionicons name={remote ? 'desktop' : 'phone-portrait'} size={20} color={remote ? '#1db954' : '#d4d4d4'} />
-        </TouchableOpacity>
-        <TouchableOpacity accessibilityLabel="Abrir fila" onPress={openQueue} style={styles.control}>
-          <Ionicons name="list" size={20} color="#d4d4d4" />
-        </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityLabel="Abrir JAM"
-          onPress={() => setJamSheetVisible(true)}
-          style={styles.control}
-        >
-          <Ionicons name="radio-outline" size={20} color="#d4d4d4" />
-        </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityLabel="Alternar modo aleatório"
-          onPress={toggleShuffle}
-          style={[styles.control, shuffle && styles.controlActive]}
-        >
-          <Ionicons name="shuffle" size={20} color={shuffle ? '#1db954' : '#d4d4d4'} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityLabel="Música anterior"
-          onPress={() => control('PREVIOUS', playPrevious)}
-          style={styles.control}
-        >
-          <Ionicons name="play-skip-back" size={21} color="#d4d4d4" />
+        <TouchableOpacity accessibilityLabel={liked ? 'Descurtir música' : 'Curtir música'} onPress={toggleLike} style={[styles.primaryIcon, liked && styles.controlActive]}>
+          <Ionicons name={liked ? 'heart' : 'heart-outline'} size={21} color={liked ? '#1db954' : '#d4d4d4'} />
         </TouchableOpacity>
         <TouchableOpacity
           accessibilityLabel={displayPlaying ? 'Pausar' : 'Reproduzir'}
@@ -150,13 +131,15 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
         >
           <Ionicons name={displayPlaying ? 'pause' : 'play'} size={21} color="#121212" />
         </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityLabel="Próxima música"
-          onPress={() => control('NEXT', playNext)}
-          style={styles.control}
-        >
-          <Ionicons name="play-skip-forward" size={21} color="#d4d4d4" />
-        </TouchableOpacity>
+      </View>
+
+      <View style={styles.secondaryControls}>
+        <TouchableOpacity accessibilityLabel="Dispositivos conectados" onPress={() => setConnectVisible(true)} style={styles.control}><Ionicons name={remote ? 'desktop' : 'phone-portrait'} size={19} color={remote ? '#1db954' : '#bbb'} /></TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="Abrir JAM" onPress={() => setJamSheetVisible(true)} style={styles.control}><Ionicons name="radio-outline" size={19} color="#bbb" /></TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="Música anterior" onPress={() => control('PREVIOUS', playPrevious)} style={styles.control}><Ionicons name="play-skip-back" size={20} color="#bbb" /></TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="Alternar modo aleatório" onPress={toggleShuffle} style={[styles.control, shuffle && styles.controlActive]}><Ionicons name="shuffle" size={19} color={shuffle ? '#1db954' : '#bbb'} /></TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="Próxima música" onPress={() => control('NEXT', playNext)} style={styles.control}><Ionicons name="play-skip-forward" size={20} color="#bbb" /></TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="Abrir fila" onPress={openQueue} style={styles.control}><Ionicons name="list" size={20} color="#bbb" /></TouchableOpacity>
       </View>
 
       <View style={styles.progressTrack}>
@@ -166,17 +149,6 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
         <Text style={styles.progressText}>{formatTime(displayPosition)}</Text>
         <Text style={styles.progressText}>{remote ? 'remoto' : formatTime(progress.duration)}</Text>
       </View>
-      <View style={styles.feedbackRow}>
-        <TouchableOpacity onPress={() => sendFeedback('LIKE')} style={[styles.feedbackButton, feedback === 'LIKE' && styles.feedbackActive]}>
-          <Ionicons name={feedback === 'LIKE' ? 'heart' : 'heart-outline'} size={15} color={feedback === 'LIKE' ? '#1db954' : '#aaa'} />
-          <Text style={styles.feedbackText}>Gostei</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => sendFeedback('DISLIKE')} style={[styles.feedbackButton, feedback === 'DISLIKE' && styles.feedbackDanger]}>
-          <Ionicons name="remove-circle-outline" size={15} color={feedback === 'DISLIKE' ? '#ff7676' : '#aaa'} />
-          <Text style={styles.feedbackText}>Não recomendar</Text>
-        </TouchableOpacity>
-      </View>
-
       <Modal visible={queueVisible} transparent animationType="slide" onRequestClose={() => setQueueVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.queueSheet}>
@@ -289,7 +261,8 @@ const styles = StyleSheet.create({
   meta: { flex: 1, marginRight: 6 },
   title: { color: '#fff', fontSize: 13, fontWeight: '700' },
   artist: { color: '#999', fontSize: 11, marginTop: 2 },
-  control: { padding: 8 },
+  control: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 17 },
+  primaryIcon: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 19 },
   controlActive: {
     backgroundColor: '#1db95418',
     borderRadius: 16,
@@ -303,6 +276,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  secondaryControls: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', marginTop: 6, paddingHorizontal: 4 },
   progressTrack: {
     height: 3,
     marginTop: 7,
@@ -313,11 +287,6 @@ const styles = StyleSheet.create({
   progressFill: { height: 3, backgroundColor: '#1db954' },
   progressLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
   progressText: { color: '#777', fontSize: 9 },
-  feedbackRow: { flexDirection: 'row', gap: 7, marginTop: 5 },
-  feedbackButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 27, borderRadius: 14, backgroundColor: '#242424' },
-  feedbackActive: { backgroundColor: '#1db95418' },
-  feedbackDanger: { backgroundColor: '#ff676715' },
-  feedbackText: { color: '#aaa', fontSize: 10, fontWeight: '800' },
   modalBackdrop: { flex: 1, backgroundColor: '#000a', justifyContent: 'flex-end' },
   connectSheet: { backgroundColor: '#181818', borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, paddingBottom: 30, borderWidth: 1, borderColor: '#303030' },
   queueSheet: { maxHeight: '75%', backgroundColor: '#181818', borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, paddingBottom: 30, borderWidth: 1, borderColor: '#303030' },

@@ -818,12 +818,15 @@ async function renderCachePanel() {
   });
 }
 
-function sendCurrentFeedback(action) {
+function toggleCurrentLike() {
   const song = state.queue[state.queueIndex];
   if (!song) return;
+  const button = $('#like-button');
+  const active = button?.classList.contains('active');
+  const action = active ? 'CLEAR' : 'LIKE';
   void window.nation.sendRecommendationFeedback({ songId: song.serverId || song.id, sourceId: song.sourceId, action }).then(() => {
-    $('#like-button')?.classList.toggle('active', action === 'LIKE');
-    $('#dislike-button')?.classList.toggle('active', action === 'DISLIKE');
+    button?.classList.toggle('active', action === 'LIKE');
+    if (button) button.title = action === 'LIKE' ? 'Curtida — clique para desfazer' : 'Curtir';
   }).catch((error) => showBanner(error.message || 'Não foi possível salvar sua preferência.', true));
 }
 
@@ -2456,6 +2459,8 @@ function reportCurrentPlayback(completed = false) {
 async function loadCurrentTrack() {
   const song = state.queue[state.queueIndex];
   if (!song) return;
+  $('#like-button')?.classList.remove('active');
+  if ($('#like-button')) $('#like-button').title = 'Curtir';
   const requestId = ++state.trackLoadRequestId;
   let key = songIdentity(song);
   const alreadyPrepared = isPrepared(song);
@@ -2667,8 +2672,7 @@ $('#queue-button')?.addEventListener('click', () => {
   $('#cache-panel')?.classList.add('hidden');
   renderQueuePanel();
 });
-$('#like-button')?.addEventListener('click', () => sendCurrentFeedback('LIKE'));
-$('#dislike-button')?.addEventListener('click', () => sendCurrentFeedback('DISLIKE'));
+$('#like-button')?.addEventListener('click', toggleCurrentLike);
 $('#cache-button')?.addEventListener('click', () => {
   $('#cache-panel')?.classList.toggle('hidden');
   $('#queue-panel')?.classList.add('hidden');

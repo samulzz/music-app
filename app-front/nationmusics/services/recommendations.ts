@@ -31,3 +31,16 @@ export function reportPlayback(payload: {
     body: JSON.stringify(payload),
   });
 }
+
+export function sendRecommendationFeedback(song: Pick<MusicSong, 'id' | 'sourceId'>, action: 'LIKE' | 'DISLIKE' | 'CLEAR') {
+  const numericId = Number(song.id);
+  return apiRequest<void>('/recommendations/feedback', {
+    method: 'PUT',
+    json: true,
+    body: JSON.stringify({
+      songId: Number.isFinite(numericId) ? numericId : null,
+      sourceId: song.sourceId || null,
+      action,
+    }),
+  });
+}

@@ -479,6 +479,28 @@ export async function removeOfflineSong(song: MusicSong) {
   await writeIndex(library.filter((candidate) => songIdentity(candidate) !== identity));
 }
 
+export async function getDownloadStorageStats() {
+  const songs = await getOfflineLibrary();
+  return {
+    songs,
+    count: songs.length,
+    bytes: songs.reduce((total, song) => total + Math.max(0, Number(song.sizeBytes) || 0), 0),
+  };
+}
+
+export async function clearOfflineLibrary() {
+  const songs = await getOfflineLibrary({ validateFiles: false });
+  for (const song of songs) {
+    if (!song.localUri) continue;
+    try {
+      const file = new File(song.localUri);
+      if (file.exists) file.delete();
+    } catch {}
+  }
+  await writeIndex([]);
+  return songs.length;
+}
+
 function offlineLookupKeys(song: Pick<MusicSong, 'id' | 'sourceId'>) {
   return [
     songIdentity(song),

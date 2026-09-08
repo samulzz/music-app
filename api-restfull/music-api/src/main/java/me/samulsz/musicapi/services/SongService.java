@@ -43,6 +43,7 @@ public class SongService {
         if (request.getSourceId() != null && !request.getSourceId().isBlank()) {
             song.setSourceId(request.getSourceId());
         }
+        mergeGenres(song, request.getGenres());
 
         song = songRepository.save(song);
 
@@ -64,6 +65,30 @@ public class SongService {
                 .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
                 .limit(50)
                 .toList();
+    }
+
+    public java.util.List<Song> findByGenre(String genre) {
+        String normalized = normalizeGenre(genre);
+        if (normalized == null) return java.util.List.of();
+        return songRepository.findByExactGenre(normalized).stream()
+                .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
+                .limit(100)
+                .toList();
+    }
+
+    private void mergeGenres(Song song, java.util.Set<String> incoming) {
+        if (incoming == null) return;
+        java.util.Set<String> merged = new java.util.LinkedHashSet<>(song.getGenres());
+        incoming.stream().map(this::normalizeGenre).filter(java.util.Objects::nonNull).forEach(merged::add);
+        song.setGenres(merged);
+    }
+
+    private String normalizeGenre(String value) {
+        if (value == null) return null;
+        String normalized = java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "").toLowerCase(java.util.Locale.ROOT).trim();
+        return java.util.Set.of("funk", "rap", "trap", "sertanejo", "pagode", "samba", "forro", "piseiro", "gospel", "mpb", "pop", "rock", "phonk").contains(normalized)
+                ? normalized : null;
     }
 
     public void removeSongFromUser(String username, Long songId) {

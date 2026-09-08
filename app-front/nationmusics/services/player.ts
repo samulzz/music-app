@@ -26,6 +26,7 @@ const shuffleListeners = new Set<(enabled: boolean) => void>();
 let lastShuffleEnabled = false;
 let recommendationAppendInFlight: Promise<void> | null = null;
 let playbackQueueRevision = 0;
+let playbackQueueHistory: MediaItem[] = [];
 
 function offlineBrowseItem(song: MusicSong): BrowseItem | null {
   if (!song.localUri) return null;
@@ -152,7 +153,7 @@ export function setupMusicPlayer() {
   initialized = true;
 }
 
-function toMediaItem(song: MusicSong, headers?: Record<string, string>): MediaItem | null {
+function toMediaItem(song: MusicSong, headers?: Record<string, string>, origin: MusicSong['queueOrigin'] = 'manual'): MediaItem | null {
   const sourceId = song.sourceId?.trim();
   const remoteUrl = song.remoteUrl || (sourceId ? musicDownloadUrl(sourceId, song.title, song.artist) : '');
   const url = song.localUri || remoteUrl;
@@ -169,6 +170,7 @@ function toMediaItem(song: MusicSong, headers?: Record<string, string>): MediaIt
       sourceId: song.sourceId,
       songId: song.id,
       localUri: song.localUri,
+      queueOrigin: song.queueOrigin || origin,
     },
   };
 }
@@ -238,12 +240,13 @@ async function continueWithDailyRecommendations(expectedRevision: number) {
           existing.add(identity);
           return true;
         })
-        .map((song) => toMediaItem(song, headers))
+        .map((song) => toMediaItem(song, headers, 'recommendation'))
         .filter((item): item is MediaItem => item !== null);
       if (additions.length) {
         // A playlist original já terminou. Começamos outra fila para que músicas
         // recomendadas nunca sejam misturadas ao aleatório da seleção original.
         playbackQueueRevision += 1;
+        playbackQueueHistory = [...endedQueue, ...additions];
         TrackPlayer.setMediaItems(additions, 0);
         TrackPlayer.play();
         prefetchNextInQueue(0);
@@ -269,7 +272,7 @@ function emitShuffleEnabled(enabled: boolean) {
   });
 }
 
-export async function playSongQueue(songs: MusicSong[], requestedIndex: number) {
+export async function playSongQueue(songs: MusicSong[], requestedIndex: number, origin: MusicSong['queueOrigin'] = 'playlist') {
   setupMusicPlayer();
   if (getLatestConnectState() && !getLatestConnectState()?.currentDeviceActive) {
     try {
@@ -290,7 +293,7 @@ export async function playSongQueue(songs: MusicSong[], requestedIndex: number) 
 
   playableSongs.forEach((song, index) => {
     if (!song.localUri && !headers) return;
-    const item = toMediaItem(song, headers);
+    const item = toMediaItem(song, headers, origin);
     if (!item) return;
     if (index === requestedIndex) queueIndex = queue.length;
     queue.push(item);
@@ -302,9 +305,28 @@ export async function playSongQueue(songs: MusicSong[], requestedIndex: number) 
 
   playbackQueueRevision += 1;
   TrackPlayer.setMediaItems(queue, queueIndex);
+  playbackQueueHistory = [...queue];
   TrackPlayer.play();
   prefetchNextInQueue(queueIndex);
   return queueIndex;
+}
+
+export function getPlaybackQueue() {
+  setupMusicPlayer();
+  return playbackQueueHistory.length ? [...playbackQueueHistory] : TrackPlayer.getQueue();
+}
+
+export function playQueueIndex(index: number) {
+  setupMusicPlayer();
+  const selected = playbackQueueHistory[index];
+  const current = TrackPlayer.getQueue();
+  const actualIndex = selected
+    ? current.findIndex((item) => String(item.mediaId) === String(selected.mediaId))
+    : index;
+  if (actualIndex < 0) return;
+  TrackPlayer.skipToIndex(actualIndex);
+  TrackPlayer.play();
+  prefetchNextInQueue(index);
 }
 
 export function togglePlayback() {

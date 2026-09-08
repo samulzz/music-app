@@ -1,6 +1,7 @@
 package me.samulsz.musicapi.controllers;
 
 import me.samulsz.musicapi.dto.PlaybackReportRequest;
+import me.samulsz.musicapi.dto.RecommendationFeedbackRequest;
 import me.samulsz.musicapi.services.RecommendationService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -32,6 +33,16 @@ public class RecommendationController {
     ) {
         try {
             recommendationService.reportPlayback(authentication.getName(), request);
+            return ResponseEntity.noContent().build();
+        } catch (Exception error) {
+            return ResponseEntity.badRequest().body(error.getMessage());
+        }
+    }
+
+    @PutMapping("/feedback")
+    public ResponseEntity<?> feedback(Authentication authentication, @RequestBody RecommendationFeedbackRequest request) {
+        try {
+            recommendationService.setFeedback(authentication.getName(), request);
             return ResponseEntity.noContent().build();
         } catch (Exception error) {
             return ResponseEntity.badRequest().body(error.getMessage());

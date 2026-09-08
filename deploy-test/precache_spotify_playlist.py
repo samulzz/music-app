@@ -54,6 +54,19 @@ def token_coverage(expected_tokens, actual_tokens):
     return matched / len(expected_tokens)
 
 
+def contains_marker(text, marker):
+    return re.search(r"(?:^|\s)" + re.escape(marker) + r"(?:$|\s)", text) is not None
+
+
+def mismatched_version(target_title, candidate_title):
+    blocked_markers = (
+        "ao vivo", "live", "show", "concert", "festival", "performance",
+        "karaoke", "instrumental", "playback", "type beat", "beat",
+        "cover", "remix", "slowed", "sped up", "nightcore", "acoustic", "acustico",
+    )
+    return any(contains_marker(candidate_title, marker) and not contains_marker(target_title, marker) for marker in blocked_markers)
+
+
 def candidate_score(track, candidate):
     target_title = normalize(track["title"])
     candidate_title = normalize(candidate["title"])
@@ -61,6 +74,8 @@ def candidate_score(track, candidate):
     candidate_tokens = set(candidate_title.split())
     coverage = token_coverage(target_tokens, candidate_tokens)
     if coverage < 0.75:
+        return -1
+    if mismatched_version(target_title, candidate_title):
         return -1
 
     primary_artist = normalize(track["artist"].split(", ")[0])
@@ -74,7 +89,8 @@ def candidate_score(track, candidate):
         abs(expected_duration - candidate_duration)
         if expected_duration and candidate_duration else 0
     )
-    if duration_difference > 75:
+    max_duration_difference = max(18, expected_duration * 0.12) if expected_duration else 35
+    if duration_difference > max_duration_difference:
         return -1
 
     score = coverage * 100 + artist_coverage * 45
@@ -87,18 +103,11 @@ def candidate_score(track, candidate):
     elif duration_difference <= 45:
         score += 15
 
-    unwanted = (
-        "type beat",
-        "react",
-        "review",
-        "karaoke",
-        "instrumental",
-        "slowed",
-        "sped up",
-        "remix",
-    )
-    if any(term in candidate_title and term not in target_title for term in unwanted):
-        score -= 100
+    if any(term in candidate_title for term in ("react", "review", "tutorial")):
+        return -1
+    official_text = normalize(candidate["title"] + " " + candidate["uploader"])
+    if any(term in official_text for term in ("official audio", "official video", "topic", "vevo")):
+        score += 25
     return score
 
 

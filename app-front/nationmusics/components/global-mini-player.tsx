@@ -1,11 +1,13 @@
 import { memo, useEffect, useState } from 'react';
-import { Image, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useIsPlaying, useProgress } from '@rntp/player';
+import { useIsPlaying, useProgress, type MediaItem } from '@rntp/player';
 
 import { JamControlSheet } from './jam-control-sheet';
 import {
   playNext,
+  getPlaybackQueue,
+  playQueueIndex,
   playPrevious,
   subscribeShuffleEnabled,
   togglePlayback,
@@ -19,6 +21,7 @@ import {
   takeOverConnectPlayback,
   type ConnectState,
 } from '../services/connect';
+import { sendRecommendationFeedback } from '../services/recommendations';
 
 function formatTime(value: number) {
   if (!Number.isFinite(value) || value < 0) return '0:00';
@@ -37,6 +40,9 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
   const [shuffle, setShuffle] = useState(false);
   const [jamSheetVisible, setJamSheetVisible] = useState(false);
   const [connectVisible, setConnectVisible] = useState(false);
+  const [queueVisible, setQueueVisible] = useState(false);
+  const [queue, setQueue] = useState<MediaItem[]>([]);
+  const [feedback, setFeedback] = useState<'LIKE' | 'DISLIKE' | ''>('');
   const [connectState, setConnectState] = useState<ConnectState | null>(null);
   const [currentDeviceId, setCurrentDeviceId] = useState('');
 
@@ -76,6 +82,22 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
       setShuffle(toggleShuffleEnabled());
     } catch {}
   };
+  const openQueue = () => {
+    try { setQueue(getPlaybackQueue()); } catch { setQueue([]); }
+    setQueueVisible(true);
+  };
+  const sendFeedback = (action: 'LIKE' | 'DISLIKE') => {
+    if (!displayTrack) return;
+    const extras = 'extras' in displayTrack && displayTrack.extras && typeof displayTrack.extras === 'object' ? displayTrack.extras : {};
+    const mediaId = 'mediaId' in displayTrack ? displayTrack.mediaId : ('id' in displayTrack ? displayTrack.id : '');
+    const directSourceId = 'sourceId' in displayTrack ? displayTrack.sourceId : '';
+    const song = {
+      id: String(extras.songId || mediaId || ''),
+      sourceId: typeof extras.sourceId === 'string' ? extras.sourceId : String(directSourceId || mediaId || ''),
+    };
+    setFeedback(action);
+    void sendRecommendationFeedback(song, action).catch(() => setFeedback(''));
+  };
   return (
     <View style={[styles.player, { bottom: bottomOffset }]}>
       <View style={styles.mainRow}>
@@ -96,6 +118,9 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
 
         <TouchableOpacity accessibilityLabel="Dispositivos conectados" onPress={() => setConnectVisible(true)} style={styles.control}>
           <Ionicons name={remote ? 'desktop' : 'phone-portrait'} size={20} color={remote ? '#1db954' : '#d4d4d4'} />
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityLabel="Abrir fila" onPress={openQueue} style={styles.control}>
+          <Ionicons name="list" size={20} color="#d4d4d4" />
         </TouchableOpacity>
         <TouchableOpacity
           accessibilityLabel="Abrir JAM"
@@ -141,6 +166,38 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
         <Text style={styles.progressText}>{formatTime(displayPosition)}</Text>
         <Text style={styles.progressText}>{remote ? 'remoto' : formatTime(progress.duration)}</Text>
       </View>
+      <View style={styles.feedbackRow}>
+        <TouchableOpacity onPress={() => sendFeedback('LIKE')} style={[styles.feedbackButton, feedback === 'LIKE' && styles.feedbackActive]}>
+          <Ionicons name={feedback === 'LIKE' ? 'heart' : 'heart-outline'} size={15} color={feedback === 'LIKE' ? '#1db954' : '#aaa'} />
+          <Text style={styles.feedbackText}>Gostei</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => sendFeedback('DISLIKE')} style={[styles.feedbackButton, feedback === 'DISLIKE' && styles.feedbackDanger]}>
+          <Ionicons name="remove-circle-outline" size={15} color={feedback === 'DISLIKE' ? '#ff7676' : '#aaa'} />
+          <Text style={styles.feedbackText}>Não recomendar</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Modal visible={queueVisible} transparent animationType="slide" onRequestClose={() => setQueueVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <View style={styles.queueSheet}>
+            <View style={styles.connectHeader}>
+              <View><Text style={styles.connectTitle}>Fila de reprodução</Text><Text style={styles.connectSubtitle}>Veja de onde veio cada música.</Text></View>
+              <TouchableOpacity onPress={() => setQueueVisible(false)} style={styles.closeButton}><Ionicons name="close" size={22} color="#fff" /></TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>{queue.map((item, index) => {
+              const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
+              const origin = extras.queueOrigin === 'recommendation' ? 'Recomendação' : extras.queueOrigin === 'playlist' ? 'Da playlist' : 'Escolhida por você';
+              return (
+                <TouchableOpacity key={`${item.mediaId}:${index}`} style={styles.queueRow} onPress={() => { playQueueIndex(index); setQueueVisible(false); }}>
+                  <Text style={styles.queueIndex}>{index + 1}</Text>
+                  <View style={styles.queueMeta}><Text style={styles.queueTitle} numberOfLines={1}>{item.title}</Text><Text style={styles.queueArtist} numberOfLines={1}>{item.artist}</Text></View>
+                  <Text style={[styles.originBadge, origin === 'Recomendação' && styles.recommendationBadge]}>{origin}</Text>
+                </TouchableOpacity>
+              );
+            })}</ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={connectVisible} transparent animationType="fade" onRequestClose={() => setConnectVisible(false)}>
         <View style={styles.modalBackdrop}>
@@ -256,8 +313,21 @@ const styles = StyleSheet.create({
   progressFill: { height: 3, backgroundColor: '#1db954' },
   progressLabels: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 },
   progressText: { color: '#777', fontSize: 9 },
+  feedbackRow: { flexDirection: 'row', gap: 7, marginTop: 5 },
+  feedbackButton: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, height: 27, borderRadius: 14, backgroundColor: '#242424' },
+  feedbackActive: { backgroundColor: '#1db95418' },
+  feedbackDanger: { backgroundColor: '#ff676715' },
+  feedbackText: { color: '#aaa', fontSize: 10, fontWeight: '800' },
   modalBackdrop: { flex: 1, backgroundColor: '#000a', justifyContent: 'flex-end' },
   connectSheet: { backgroundColor: '#181818', borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, paddingBottom: 30, borderWidth: 1, borderColor: '#303030' },
+  queueSheet: { maxHeight: '75%', backgroundColor: '#181818', borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 18, paddingBottom: 30, borderWidth: 1, borderColor: '#303030' },
+  queueRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, borderBottomColor: '#292929' },
+  queueIndex: { width: 24, color: '#777', textAlign: 'center', fontWeight: '800' },
+  queueMeta: { flex: 1, minWidth: 0 },
+  queueTitle: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  queueArtist: { color: '#888', fontSize: 11, marginTop: 2 },
+  originBadge: { color: '#aaa', backgroundColor: '#292929', paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, fontSize: 9, fontWeight: '800' },
+  recommendationBadge: { color: '#1db954', backgroundColor: '#1db95418' },
   connectHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
   connectTitle: { color: '#fff', fontSize: 19, fontWeight: '800' },
   connectSubtitle: { color: '#999', fontSize: 12, marginTop: 3 },

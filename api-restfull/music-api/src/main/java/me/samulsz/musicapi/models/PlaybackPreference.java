@@ -35,6 +35,12 @@ public class PlaybackPreference {
     @Column(nullable = false)
     private LocalDateTime lastListenedAt;
 
+    @Column(nullable = false)
+    private boolean liked;
+
+    @Column(nullable = false)
+    private boolean doNotRecommend;
+
     public Long getId() { return id; }
     public User getUser() { return user; }
     public void setUser(User user) { this.user = user; }
@@ -48,4 +54,8 @@ public class PlaybackPreference {
     public void setListenedSeconds(long listenedSeconds) { this.listenedSeconds = listenedSeconds; }
     public LocalDateTime getLastListenedAt() { return lastListenedAt; }
     public void setLastListenedAt(LocalDateTime lastListenedAt) { this.lastListenedAt = lastListenedAt; }
+    public boolean isLiked() { return liked; }
+    public void setLiked(boolean liked) { this.liked = liked; }
+    public boolean isDoNotRecommend() { return doNotRecommend; }
+    public void setDoNotRecommend(boolean doNotRecommend) { this.doNotRecommend = doNotRecommend; }
 }

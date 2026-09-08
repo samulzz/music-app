@@ -47,6 +47,15 @@ public class SongController {
         }
     }
 
+    @GetMapping("/genre")
+    public ResponseEntity<?> byGenre(@RequestParam String genre) {
+        try {
+            return ResponseEntity.ok(songService.findByGenre(genre));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Erro ao carregar genero: " + e.getMessage());
+        }
+    }
+
     @DeleteMapping("/remove/{songId}")
     public ResponseEntity<?> removeSong(Authentication authentication, @PathVariable Long songId) {
         try {

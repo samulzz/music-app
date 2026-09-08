@@ -958,6 +958,10 @@ ipcMain.handle('music:search', async (_event, query) => {
   const songs = await apiRequest(`/songs/search?q=${encodeURIComponent(query)}`);
   return songs.map((song) => normalizeSong(song, false));
 });
+ipcMain.handle('music:genre', async (_event, genre) => {
+  const songs = await apiRequest(`/songs/genre?genre=${encodeURIComponent(String(genre || '').trim())}`);
+  return songs.map((song) => normalizeSong(song, false));
+});
 ipcMain.handle('music:prepare-stream', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) throw new Error('Esta música não possui uma origem válida.');
@@ -978,6 +982,23 @@ ipcMain.handle('music:is-downloaded', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) return false;
   return hasUsableCachedAudio(cachedAudioFilePath(song.sourceId));
+});
+ipcMain.handle('music:cache-stats', async () => {
+  let entries = [];
+  try { entries = await fsp.readdir(audioCacheDirectory(), { withFileTypes: true }); } catch { return { count: 0, bytes: 0 }; }
+  let count = 0;
+  let bytes = 0;
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith('.mp3')) continue;
+    try { const stat = await fsp.stat(path.join(audioCacheDirectory(), entry.name)); count += 1; bytes += stat.size; } catch {}
+  }
+  return { count, bytes };
+});
+ipcMain.handle('music:clear-cache', async () => {
+  let entries = [];
+  try { entries = await fsp.readdir(audioCacheDirectory(), { withFileTypes: true }); } catch { return true; }
+  await Promise.all(entries.filter((entry) => entry.isFile()).map((entry) => fsp.rm(path.join(audioCacheDirectory(), entry.name), { force: true })));
+  return true;
 });
 ipcMain.handle('spotify:preview', async (_event, url) => {
   return apiRequest('/spotify/import/preview', {
@@ -1051,6 +1072,17 @@ ipcMain.handle('recommendations:listen', async (_event, payload) => {
       sourceId: String(payload?.sourceId || '').trim() || null,
       listenedSeconds: Math.max(0, Math.round(Number(payload?.listenedSeconds) || 0)),
       completed: Boolean(payload?.completed),
+    },
+  });
+  return true;
+});
+ipcMain.handle('recommendations:feedback', async (_event, payload) => {
+  await apiRequest('/recommendations/feedback', {
+    method: 'PUT',
+    body: {
+      songId: Number(payload?.songId) || null,
+      sourceId: String(payload?.sourceId || '').trim() || null,
+      action: String(payload?.action || ''),
     },
   });
   return true;

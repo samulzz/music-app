@@ -8,6 +8,8 @@ export type MusicSong = {
   remoteUrl?: string;
   downloadedAt?: number;
   sizeBytes?: number;
+  genres?: string[];
+  queueOrigin?: 'playlist' | 'recommendation' | 'manual';
 };
 
 export type ApiLibrarySong = {
@@ -17,6 +19,7 @@ export type ApiLibrarySong = {
   coverUrl?: string;
   sourceId?: string;
   uri?: string;
+  genres?: string[];
 };
 
 export type ApiSearchSong = {
@@ -29,6 +32,7 @@ export type ApiSearchSong = {
   titulo?: string;
   artista?: string;
   capa?: string;
+  genres?: string[];
 };
 
 export type ApiPlaylist = {
@@ -64,6 +68,7 @@ export function fromApiLibrarySong(song: ApiLibrarySong): MusicSong {
     artist: song.artist,
     artworkUrl: song.coverUrl,
     sourceId: song.sourceId,
+    genres: song.genres,
   };
 }
 
@@ -75,5 +80,6 @@ export function fromApiSearchSong(song: ApiSearchSong): MusicSong {
     title: song.title || song.titulo || 'Musica',
     artist: song.artist || song.artista || 'Artista desconhecido',
     artworkUrl: song.coverUrl || song.capa,
+    genres: song.genres,
   };
 }

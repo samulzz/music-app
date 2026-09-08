@@ -147,6 +147,12 @@ public class PlaylistAdminService {
 
         if (sourceId != null) song.setSourceId(sourceId);
 
+        if (request.getGenres() != null) {
+            Set<String> genres = new LinkedHashSet<>(song.getGenres());
+            request.getGenres().stream().map(this::normalizeGenre).filter(java.util.Objects::nonNull).forEach(genres::add);
+            song.setGenres(genres);
+        }
+
         return songRepository.save(song);
     }
 
@@ -165,5 +171,13 @@ public class PlaylistAdminService {
         if (value == null) return null;
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String normalizeGenre(String value) {
+        if (value == null) return null;
+        String normalized = java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "").toLowerCase(java.util.Locale.ROOT).trim();
+        return Set.of("funk", "rap", "trap", "sertanejo", "pagode", "samba", "forro", "piseiro", "gospel", "mpb", "pop", "rock", "phonk").contains(normalized)
+                ? normalized : null;
     }
 }

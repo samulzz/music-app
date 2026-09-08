@@ -1029,6 +1029,39 @@ nav {
 .connect-device > .app-icon:last-child { color: var(--green); }
 .connect-panel .primary-button { width: 100%; }
 
+.queue-panel,
+.cache-panel {
+  position: absolute;
+  right: 18px;
+  bottom: 82px;
+  width: min(440px, calc(100vw - 36px));
+  max-height: min(560px, 70vh);
+  overflow: auto;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid #383838;
+  background: #181818;
+  box-shadow: 0 18px 55px #000b;
+  z-index: 85;
+}
+
+.floating-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.floating-panel-head > div { display: grid; gap: 3px; }
+.floating-panel-head strong { font-size: 15px; }
+.floating-panel-head small { color: #888; font-size: 11px; }
+.floating-panel-head > button { border: 0; background: transparent; color: #aaa; font-size: 26px; cursor: pointer; }
+.player-queue-row { width: 100%; min-height: 58px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 7px; border: 0; border-bottom: 1px solid #292929; background: transparent; color: #888; text-align: left; cursor: pointer; }
+.player-queue-row.active { background: #1db95410; }
+.player-queue-row div { min-width: 0; display: grid; gap: 3px; }
+.player-queue-row strong, .player-queue-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-queue-row strong { color: #eee; font-size: 12px; }
+.player-queue-row small { color: #888; font-size: 10px; }
+.player-queue-row em { padding: 4px 7px; border-radius: 8px; background: #292929; color: #aaa; font-size: 9px; font-style: normal; font-weight: 800; }
+.player-queue-row em.recommendation { color: var(--green); background: #1db95418; }
+.cache-clear-button { width: 100%; height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid #663333; border-radius: 12px; background: #2b1c1c; color: #ff9292; font-weight: 800; cursor: pointer; }
+.cache-clear-button .app-icon { width: 18px; }
+.cache-clear-button:disabled { opacity: .45; cursor: default; }
+
 /* Desktop shell: navegação horizontal e conteúdo amplo */
 .app-shell {
   grid-template-columns: minmax(0, 1fr);

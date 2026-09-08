@@ -45,6 +45,9 @@ public interface SongRepository extends JpaRepository<Song, Long> {
             """, nativeQuery = true)
     List<Song> searchCatalogSongs(@Param("query") String query);
 
+    @Query("select distinct s from Song s join s.genres g where lower(g) = lower(:genre) order by lower(s.title), lower(s.artist)")
+    List<Song> findByExactGenre(@Param("genre") String genre);
+
     @Query(value = """
             SELECT s.*
             FROM songs s

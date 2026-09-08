@@ -653,6 +653,7 @@ def save_to_user_library(
             "uri": stream_url(config.api_base, entry),
             "coverUrl": entry.get("coverUrl") or "",
             "sourceId": entry["sourceId"],
+            "genres": entry.get("genres") or [],
         }
         request_json(config.api_base, "/songs/save", method="POST", payload=payload, api_key=api_key, token=token)
         log(f"[{index}/{len(entries)}] biblioteca: {payload['title']}")
@@ -684,6 +685,7 @@ def import_songs_to_catalog(
             "uri": stream_url(config.api_base, entry),
             "coverUrl": entry.get("coverUrl") or "",
             "sourceId": entry["sourceId"],
+            "genres": entry.get("genres") or [],
         }
         song = request_json(
             config.api_base,
@@ -790,6 +792,18 @@ def normalize_playlist_name(value: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", normalized.lower()))
 
 
+def infer_playlist_genres(playlist: dict[str, Any]) -> list[str]:
+    text = normalize_playlist_name(" ".join((str(playlist.get("name") or ""), str(playlist.get("description") or ""))))
+    aliases = {
+        "funk": ("funk",), "rap": ("rap", "hip hop", "hiphop"), "trap": ("trap",),
+        "sertanejo": ("sertanejo",), "pagode": ("pagode",), "samba": ("samba",),
+        "forro": ("forro",), "piseiro": ("piseiro",), "gospel": ("gospel", "louvor"),
+        "mpb": ("mpb",), "pop": ("pop",), "rock": ("rock",), "phonk": ("phonk",),
+    }
+    padded = f" {text} "
+    return [genre for genre, terms in aliases.items() if any(f" {term} " in padded for term in terms)]
+
+
 def upsert_global_playlist(
     config: ImportConfig,
     playlist: dict[str, Any],
@@ -862,9 +876,12 @@ def run_import(
         DEPLOY_DIR / "spotify_playlist.py", [config.spotify_url, str(config.limit)], log
     )
     log(f"Spotify: {playlist.get('name')} ({len(playlist.get('tracks', []))} faixa(s))")
+    inferred_genres = infer_playlist_genres(playlist)
     with PotTunnel(config, log) as tunnel:
         pot_url = f"http://127.0.0.1:{tunnel.local_port}"
         output_dir, entries = precache_playlist(config, playlist, pot_url, log)
+    for entry in entries:
+        entry["genres"] = sorted(set(entry.get("genres") or []) | set(inferred_genres))
     api_key = upload_entries(config, output_dir, entries, log)
     user_song_ids: list[int] = []
     personal_playlist_id = None

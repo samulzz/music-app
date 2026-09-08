@@ -11,6 +11,7 @@ const state = {
   spotifyPreview: null,
   spotifyUrl: '',
   queue: [],
+  queueHistory: [],
   queueIndex: -1,
   queueRevision: 0,
   queueMode: 'idle',
@@ -97,6 +98,8 @@ const ICONS = {
   close: '<path d="m7 7 10 10" /><path d="m17 7-10 10" />',
   check: '<path d="m5 12 4 4 10-10" />',
   download: '<path d="M12 4v10" /><path d="m8 10 4 4 4-4" /><path d="M5 19h14" />',
+  heart: '<path d="M20.8 8.5c0 5-8.8 10-8.8 10s-8.8-5-8.8-10A4.5 4.5 0 0 1 12 5.9a4.5 4.5 0 0 1 8.8 2.6z" />',
+  ban: '<circle cx="12" cy="12" r="8" /><path d="m6.5 6.5 11 11" />',
   'arrow-right': '<path d="M5 12h14" /><path d="m13 6 6 6-6 6" />',
   link: '<path d="M10 7.5 11.5 6a4 4 0 0 1 5.7 5.7L15.5 13" /><path d="m14 16.5-1.5 1.5a4 4 0 0 1-5.7-5.7L8.5 11" /><path d="m9 15 6-6" />',
   clock: '<circle cx="12" cy="12" r="8" /><path d="M12 8v5l3 2" />',
@@ -122,7 +125,7 @@ function bindGenreActions() {
       const query = String(button.dataset.genreQuery || '');
       $('#search-input').value = query;
       activateNavigation('search');
-      void renderSearch(query);
+      void renderSearch(query, true);
     });
   });
 }
@@ -163,9 +166,12 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     register: async ({ username }) => ({ token: 'preview', username }),
     logout: async () => true,
     search: async () => demoSongs,
+    searchGenre: async () => demoSongs,
     prepareStream: async () => '',
     downloadSong: async () => true,
     isSongDownloaded: async (song) => Boolean(song.downloaded),
+    getCacheStats: async () => ({ count: 2, bytes: 12582912 }),
+    clearCache: async () => true,
     previewSpotify: async () => ({
       spotifyId: 'demo-spotify',
       type: 'playlist',
@@ -190,6 +196,9 @@ if (!window.nation && location.hostname === '127.0.0.1') {
       { id: '3', name: 'Fim de noite', description: 'Música baixa, luz apagada.' },
     ],
     getPlaylistSongs: async () => demoSongs,
+    getDailyMix: async () => ({ songs: demoSongs }),
+    reportPlayback: async () => true,
+    sendRecommendationFeedback: async () => true,
     getPersonalPlaylists: async () => [{ id: 10, name: 'Minha playlist', description: 'Criada por você.' }],
     getPersonalPlaylistSongs: async () => demoSongs.filter((song) => song.saved),
     createPersonalPlaylist: async (playlist) => ({ id: Date.now(), ...playlist, songs: [] }),
@@ -766,6 +775,56 @@ function renderConnectState() {
     updateVolumeUi();
   }
   if (panel && panel.classList.contains('hidden')) return;
+}
+
+function renderQueuePanel() {
+  const panel = $('#queue-panel');
+  if (!panel) return;
+  const visibleQueue = state.queueHistory.length ? state.queueHistory : state.queue;
+  const rows = visibleQueue.map((song, index) => {
+    const origin = song.queueOrigin === 'recommendation'
+      ? 'Recomendação'
+      : song.queueOrigin === 'playlist' ? 'Da playlist' : 'Escolhida por você';
+    const active = songIdentity(song) === songIdentity(state.queue[state.queueIndex]);
+    return `<button class="player-queue-row${active ? ' active' : ''}" data-player-queue-index="${index}" type="button">
+      <span>${index + 1}</span><div><strong>${escapeHtml(song.title)}</strong><small>${escapeHtml(song.artist)}</small></div>
+      <em class="${song.queueOrigin === 'recommendation' ? 'recommendation' : ''}">${origin}</em>
+    </button>`;
+  }).join('');
+  panel.innerHTML = `<div class="floating-panel-head"><div><strong>Fila de reprodução</strong><small>Playlist e recomendações ficam identificadas</small></div><button id="queue-close" type="button">&times;</button></div>${rows || '<p class="connect-empty">A fila está vazia.</p>'}`;
+  $('#queue-close')?.addEventListener('click', () => panel.classList.add('hidden'));
+  panel.querySelectorAll('[data-player-queue-index]').forEach((button) => button.addEventListener('click', () => {
+    const selected = visibleQueue[Number(button.dataset.playerQueueIndex)];
+    const actualIndex = state.queue.findIndex((song) => songIdentity(song) === songIdentity(selected));
+    if (actualIndex < 0) return;
+    state.queueIndex = actualIndex;
+    panel.classList.add('hidden');
+    void loadCurrentTrack();
+  }));
+}
+
+async function renderCachePanel() {
+  const panel = $('#cache-panel');
+  if (!panel) return;
+  panel.innerHTML = '<div class="loading-state compact"><span>Calculando armazenamento...</span></div>';
+  const stats = await window.nation.getCacheStats();
+  const megabytes = (Number(stats.bytes) || 0) / 1024 / 1024;
+  panel.innerHTML = `<div class="floating-panel-head"><div><strong>Downloads e cache</strong><small>${Number(stats.count) || 0} música(s) · ${megabytes.toFixed(megabytes >= 10 ? 0 : 1)} MB usados</small></div><button id="cache-close" type="button">&times;</button></div><button id="clear-cache" class="cache-clear-button" type="button" ${stats.count ? '' : 'disabled'}>${icon('ban')} Limpar cache de músicas</button>`;
+  $('#cache-close')?.addEventListener('click', () => panel.classList.add('hidden'));
+  $('#clear-cache')?.addEventListener('click', async () => {
+    if (!confirm('Apagar todas as músicas armazenadas neste computador?')) return;
+    await window.nation.clearCache();
+    await renderCachePanel();
+  });
+}
+
+function sendCurrentFeedback(action) {
+  const song = state.queue[state.queueIndex];
+  if (!song) return;
+  void window.nation.sendRecommendationFeedback({ songId: song.serverId || song.id, sourceId: song.sourceId, action }).then(() => {
+    $('#like-button')?.classList.toggle('active', action === 'LIKE');
+    $('#dislike-button')?.classList.toggle('active', action === 'DISLIKE');
+  }).catch((error) => showBanner(error.message || 'Não foi possível salvar sua preferência.', true));
 }
 
 async function executeConnectCommand(connect) {
@@ -2054,7 +2113,7 @@ async function addSongToPlaylist(song) {
   }
 }
 
-async function renderSearch(query = '') {
+async function renderSearch(query = '', exactGenre = false) {
   state.view = 'search';
   const requestId = state.searchRequestId + 1;
   state.searchRequestId = requestId;
@@ -2073,7 +2132,7 @@ async function renderSearch(query = '') {
   setLoading('Buscando músicas...');
   try {
     const [songs, library, playlists] = await Promise.all([
-      window.nation.search(query.trim()),
+      exactGenre ? window.nation.searchGenre(query.trim()) : window.nation.search(query.trim()),
       window.nation.getLibrary(),
       state.playlists.length ? Promise.resolve(state.playlists) : window.nation.getPlaylists(),
     ]);
@@ -2323,7 +2382,8 @@ function playQueue(songs, index) {
     showBanner('Esta música não possui uma fonte de reprodução.', true);
     return;
   }
-  state.queue = playable;
+  state.queue = playable.map((song) => ({ ...song, queueOrigin: song.queueOrigin || 'playlist' }));
+  state.queueHistory = [...state.queue];
   state.queueIndex = actualIndex;
   state.queueRevision += 1;
   state.queueMode = 'selection';
@@ -2362,7 +2422,8 @@ async function continueWithDailyRecommendations() {
       await loadCurrentTrack();
       return;
     }
-    state.queue = additions;
+    state.queue = additions.map((song) => ({ ...song, queueOrigin: 'recommendation' }));
+    state.queueHistory = [...originalQueue, ...state.queue];
     state.queueIndex = state.shuffle ? Math.floor(Math.random() * additions.length) : 0;
     state.queueRevision += 1;
     state.queueMode = 'recommendations';
@@ -2600,6 +2661,18 @@ $('#play-button').addEventListener('click', () => {
 });
 $('#shuffle-button')?.addEventListener('click', () => {
   toggleShuffleMode();
+});
+$('#queue-button')?.addEventListener('click', () => {
+  $('#queue-panel')?.classList.toggle('hidden');
+  $('#cache-panel')?.classList.add('hidden');
+  renderQueuePanel();
+});
+$('#like-button')?.addEventListener('click', () => sendCurrentFeedback('LIKE'));
+$('#dislike-button')?.addEventListener('click', () => sendCurrentFeedback('DISLIKE'));
+$('#cache-button')?.addEventListener('click', () => {
+  $('#cache-panel')?.classList.toggle('hidden');
+  $('#queue-panel')?.classList.add('hidden');
+  if (!$('#cache-panel')?.classList.contains('hidden')) void renderCachePanel();
 });
 $('#previous-button').addEventListener('click', () => {
   if (state.connectState && !state.connectState.currentDeviceActive) { void controlConnectPlayback('PREVIOUS'); return; }

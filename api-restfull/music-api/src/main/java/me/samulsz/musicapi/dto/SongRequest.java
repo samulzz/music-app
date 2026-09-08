@@ -1,11 +1,14 @@
 package me.samulsz.musicapi.dto;
 
+import java.util.Set;
+
 public class SongRequest {
     private String title;
     private String artist;
     private String uri;
     private String coverUrl;
     private String sourceId;
+    private Set<String> genres;
 
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
@@ -17,4 +20,6 @@ public class SongRequest {
     public void setCoverUrl(String coverUrl) { this.coverUrl = coverUrl; }
     public String getSourceId() { return sourceId; }
     public void setSourceId(String sourceId) { this.sourceId = sourceId; }
+    public Set<String> getGenres() { return genres; }
+    public void setGenres(Set<String> genres) { this.genres = genres; }
 }

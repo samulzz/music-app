@@ -83,6 +83,7 @@ export default function SearchScreen() {
   const router = useRouter();
   const { genre } = useLocalSearchParams<{ genre?: string }>();
   const [query, setQuery] = useState('');
+  const [selectedGenre, setSelectedGenre] = useState('');
   const [results, setResults] = useState<MusicSong[]>([]);
   const [playlistResults, setPlaylistResults] = useState<ApiPlaylist[]>([]);
   const [searching, setSearching] = useState(false);
@@ -98,7 +99,10 @@ export default function SearchScreen() {
 
   useEffect(() => {
     if (typeof genre !== 'string' || !genre.trim()) return;
-    const timer = setTimeout(() => setQuery(genre.trim()), 0);
+    const timer = setTimeout(() => {
+      setSelectedGenre(genre.trim());
+      setQuery(genre.trim());
+    }, 0);
     return () => clearTimeout(timer);
   }, [genre]);
 
@@ -118,8 +122,11 @@ export default function SearchScreen() {
     setSearching(true);
     setSearchError('');
     try {
+      const genreValue = selectedGenre && value === selectedGenre ? selectedGenre : '';
       const [data, playlists] = await Promise.all([
-        apiRequest<ApiSearchSong[]>(`/songs/search?q=${encodeURIComponent(value)}`),
+        apiRequest<ApiSearchSong[]>(genreValue
+          ? `/songs/genre?genre=${encodeURIComponent(genreValue)}`
+          : `/songs/search?q=${encodeURIComponent(value)}`),
         apiRequest<ApiPlaylist[]>('/playlists/global', { authenticated: false }),
       ]);
       if (requestId !== searchRequestId.current) return;
@@ -143,7 +150,7 @@ export default function SearchScreen() {
     } finally {
       if (requestId === searchRequestId.current) setSearching(false);
     }
-  }, [query]);
+  }, [query, selectedGenre]);
 
   useEffect(() => {
     const value = query.trim();
@@ -156,6 +163,7 @@ export default function SearchScreen() {
   }, [query, searchCatalog]);
 
   const changeQuery = useCallback((value: string) => {
+    setSelectedGenre('');
     setQuery(value);
     if (!value.trim()) {
       searchRequestId.current += 1;
@@ -166,9 +174,14 @@ export default function SearchScreen() {
     }
   }, []);
 
+  const chooseGenre = useCallback((value: string) => {
+    setSelectedGenre(value);
+    setQuery(value);
+  }, []);
+
   const play = useCallback(async (song: MusicSong) => {
     try {
-      await playSongQueue([song], 0);
+      await playSongQueue([song], 0, 'manual');
     } catch (error) {
       Alert.alert('Não foi possível reproduzir', error instanceof Error ? error.message : 'Tente novamente.');
     }
@@ -286,7 +299,7 @@ export default function SearchScreen() {
                   <TouchableOpacity
                     key={item.query}
                     style={[styles.genreCard, { backgroundColor: item.color }]}
-                    onPress={() => changeQuery(item.query)}
+                    onPress={() => chooseGenre(item.query)}
                     activeOpacity={0.82}
                   >
                     <Text style={styles.genreName}>{item.name}</Text>

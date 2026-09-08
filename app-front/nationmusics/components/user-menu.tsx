@@ -18,9 +18,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { clearSession, getSession } from '../services/auth';
 import { stopMusicPlayer } from '../services/player';
 import { getUserProfile, updateUserProfile, type UserProfile, type UserProfileUpdate } from '../services/user-profile';
+import { clearOfflineLibrary, formatBytes, getDownloadStorageStats } from '../services/offline-library';
 
 type IoniconName = ComponentProps<typeof Ionicons>['name'];
-type SettingsTab = 'account' | 'privacy';
+type SettingsTab = 'account' | 'privacy' | 'downloads';
 
 const AVATAR_OPTIONS: { icon: IoniconName; label: string }[] = [
   { icon: 'person', label: 'Padrao' },
@@ -65,6 +66,7 @@ export function UserMenu() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loadingProfile, setLoadingProfile] = useState(false);
   const [savingField, setSavingField] = useState('');
+  const [downloadStats, setDownloadStats] = useState({ count: 0, bytes: 0 });
 
   const activeTab = String(segments[1] || 'index');
   const buttonPlacement = useMemo(() => {
@@ -149,6 +151,21 @@ export function UserMenu() {
     void saveProfile({ [key]: value }, key);
   }, [saveProfile]);
 
+  const openDownloads = useCallback(() => {
+    setSettingsTab('downloads');
+    void getDownloadStorageStats().then(({ count, bytes }) => setDownloadStats({ count, bytes })).catch(() => {});
+  }, []);
+
+  const clearDownloads = useCallback(() => {
+    Alert.alert('Limpar downloads', 'Os arquivos offline deste celular serão apagados.', [
+      { text: 'Cancelar', style: 'cancel' },
+      { text: 'Limpar', style: 'destructive', onPress: async () => {
+        await clearOfflineLibrary();
+        setDownloadStats({ count: 0, bytes: 0 });
+      } },
+    ]);
+  }, []);
+
   return (
     <>
       <TouchableOpacity
@@ -227,6 +244,12 @@ export function UserMenu() {
                   >
                     <Text style={[styles.tabText, settingsTab === 'privacy' && styles.tabTextActive]}>Privacidade</Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.tabButton, settingsTab === 'downloads' && styles.tabButtonActive]}
+                    onPress={openDownloads}
+                  >
+                    <Text style={[styles.tabText, settingsTab === 'downloads' && styles.tabTextActive]}>Downloads</Text>
+                  </TouchableOpacity>
                 </View>
 
                 {settingsTab === 'account' ? (
@@ -253,7 +276,7 @@ export function UserMenu() {
                       </View>
                     </View>
                   </>
-                ) : (
+                ) : settingsTab === 'privacy' ? (
                   <>
                     <PrivacySwitch
                       icon="radio-outline"
@@ -288,6 +311,16 @@ export function UserMenu() {
                       onValueChange={(value) => togglePrivacy('showActiveJam', value)}
                     />
                   </>
+                ) : (
+                  <View style={styles.downloadManager}>
+                    <Ionicons name="cloud-download-outline" size={34} color="#1db954" />
+                    <Text style={styles.downloadTotal}>{downloadStats.count} música{downloadStats.count === 1 ? '' : 's'}</Text>
+                    <Text style={styles.settingValue}>{formatBytes(downloadStats.bytes) || '0 MB'} usados neste celular</Text>
+                    <TouchableOpacity style={styles.clearDownloadsButton} onPress={clearDownloads} disabled={!downloadStats.count}>
+                      <Ionicons name="trash-outline" size={19} color={downloadStats.count ? '#ff8989' : '#666'} />
+                      <Text style={[styles.clearDownloadsText, !downloadStats.count && { color: '#666' }]}>Limpar cache e downloads</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
             ) : (
@@ -502,6 +535,10 @@ const styles = StyleSheet.create({
   settingText: { flex: 1, minWidth: 0 },
   settingLabel: { color: '#eee', fontSize: 14, fontWeight: '900' },
   settingValue: { color: '#969696', fontSize: 12, marginTop: 2 },
+  downloadManager: { alignItems: 'center', gap: 7, padding: 18, borderRadius: 14, backgroundColor: '#202020' },
+  downloadTotal: { color: '#fff', fontSize: 19, fontWeight: '900' },
+  clearDownloadsButton: { marginTop: 12, minHeight: 44, paddingHorizontal: 16, borderRadius: 22, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2b2020' },
+  clearDownloadsText: { color: '#ff8989', fontSize: 13, fontWeight: '900' },
   closeButton: {
     height: 46,
     alignItems: 'center',

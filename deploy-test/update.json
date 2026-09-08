@@ -4,22 +4,22 @@
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.21",
-    "versionCode": 23,
-    "minimumVersion": "1.1.21",
+    "version": "1.1.22",
+    "versionCode": 24,
+    "minimumVersion": "1.1.22",
     "minimumVersionCode": 23,
     "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.21.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.22.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
     "releaseNotes": "Novos atalhos de generos na tela inicial e na pesquisa, com playlists relacionadas para funk, piseiro, sertanejo, gospel e outros estilos."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.24",
-    "minimumVersion": "1.2.24",
+    "version": "1.2.25",
+    "minimumVersion": "1.2.25",
     "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.24.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.25.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
     "releaseNotes": "Playlists da pagina inicial agora aparecem em grade vertical, com atalhos de generos na tela inicial e na pesquisa."
   }

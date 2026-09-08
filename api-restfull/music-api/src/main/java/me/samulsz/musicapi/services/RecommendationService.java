@@ -2,6 +2,7 @@ package me.samulsz.musicapi.services;
 
 import me.samulsz.musicapi.dto.DailyMixResponse;
 import me.samulsz.musicapi.dto.PlaybackReportRequest;
+import me.samulsz.musicapi.dto.RecommendationFeedbackRequest;
 import me.samulsz.musicapi.models.DailyMix;
 import me.samulsz.musicapi.models.PlaybackPreference;
 import me.samulsz.musicapi.models.Playlist;
@@ -84,6 +85,34 @@ public class RecommendationService {
     }
 
     @Transactional
+    public void setFeedback(String username, RecommendationFeedbackRequest request) {
+        if (request == null) throw new IllegalArgumentException("Feedback inválido.");
+        User user = getUser(username);
+        Song song = resolveSong(request.songId(), request.sourceId())
+                .orElseThrow(() -> new IllegalArgumentException("Música não encontrada."));
+        PlaybackPreference preference = preferenceRepository.findByUserIdAndSongId(user.getId(), song.getId())
+                .orElseGet(PlaybackPreference::new);
+        preference.setUser(user);
+        preference.setSong(song);
+        String action = Objects.toString(request.action(), "").trim().toUpperCase(Locale.ROOT);
+        if ("LIKE".equals(action)) {
+            preference.setLiked(true);
+            preference.setDoNotRecommend(false);
+        } else if ("DISLIKE".equals(action)) {
+            preference.setLiked(false);
+            preference.setDoNotRecommend(true);
+        } else if ("CLEAR".equals(action)) {
+            preference.setLiked(false);
+            preference.setDoNotRecommend(false);
+        } else {
+            throw new IllegalArgumentException("Ação de feedback inválida.");
+        }
+        if (preference.getLastListenedAt() == null) preference.setLastListenedAt(LocalDateTime.now(APP_ZONE));
+        preferenceRepository.save(preference);
+        dailyMixRepository.findByUserIdAndMixDate(user.getId(), LocalDate.now(APP_ZONE)).ifPresent(dailyMixRepository::delete);
+    }
+
+    @Transactional
     public synchronized DailyMixResponse getDailyMix(String username) {
         User user = getUser(username);
         LocalDate today = LocalDate.now(APP_ZONE);
@@ -99,6 +128,9 @@ public class RecommendationService {
                 .toList();
         List<PlaybackPreference> preferences =
                 preferenceRepository.findByUserIdOrderByLastListenedAtDesc(user.getId());
+        Set<Long> blockedIds = preferences.stream().filter(PlaybackPreference::isDoNotRecommend)
+                .map(item -> item.getSong().getId()).collect(Collectors.toSet());
+        catalog = catalog.stream().filter(song -> !blockedIds.contains(song.getId())).toList();
         Set<Long> libraryIds = user.getDownloadedSongs().stream()
                 .map(Song::getId)
                 .filter(Objects::nonNull)
@@ -116,6 +148,7 @@ public class RecommendationService {
             double strength = Math.log1p(preference.getPlayCount()) * 4.0
                     + Math.log1p(preference.getCompletedCount()) * 5.0
                     + Math.min(4.0, preference.getListenedSeconds() / 1800.0);
+            if (preference.isLiked()) strength += 24.0;
             score.merge(song.getId(), strength * 1.5, Double::sum);
             artistAffinity.merge(normalizeArtist(song.getArtist()), strength, Double::sum);
         });
@@ -196,11 +229,15 @@ public class RecommendationService {
     }
 
     private Optional<Song> resolveSong(PlaybackReportRequest request) {
-        if (request.songId() != null) {
-            Optional<Song> byId = songRepository.findById(request.songId());
+        return resolveSong(request.songId(), request.sourceId());
+    }
+
+    private Optional<Song> resolveSong(Long songId, String rawSourceId) {
+        if (songId != null) {
+            Optional<Song> byId = songRepository.findById(songId);
             if (byId.isPresent()) return byId;
         }
-        String sourceId = request.sourceId() == null ? "" : request.sourceId().trim();
+        String sourceId = rawSourceId == null ? "" : rawSourceId.trim();
         return sourceId.isEmpty() ? Optional.empty() : songRepository.findBySourceId(sourceId);
     }
 

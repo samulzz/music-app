@@ -338,6 +338,27 @@ export function togglePlayback() {
   }
 }
 
+export function seekToPosition(positionSeconds: number) {
+  setupMusicPlayer();
+  TrackPlayer.seekTo(Math.max(0, positionSeconds));
+}
+
+export function setPlaybackSleepTimer(minutes: number) {
+  setupMusicPlayer();
+  TrackPlayer.sleepAfterTime(Math.max(1, Math.round(minutes * 60)), { fadeOutSeconds: 5 });
+}
+
+export function getPlaybackSleepTimerRemaining() {
+  setupMusicPlayer();
+  const timer = TrackPlayer.getSleepTimer();
+  return timer?.type === 'time' ? Math.max(0, Math.ceil(timer.remainingSeconds)) : null;
+}
+
+export function clearPlaybackSleepTimer() {
+  setupMusicPlayer();
+  TrackPlayer.cancelSleepTimer();
+}
+
 export function playNext() {
   setupMusicPlayer();
   TrackPlayer.skipToNext();

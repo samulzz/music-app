@@ -4,11 +4,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useIsPlaying, useProgress, type MediaItem } from '@rntp/player';
 
 import { JamControlSheet } from './jam-control-sheet';
+import { FullPlayerModal } from './full-player-modal';
 import {
   playNext,
   getPlaybackQueue,
   playQueueIndex,
   playPrevious,
+  seekToPosition,
   subscribeShuffleEnabled,
   togglePlayback,
   toggleShuffleEnabled,
@@ -40,11 +42,13 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
   const [shuffle, setShuffle] = useState(false);
   const [jamSheetVisible, setJamSheetVisible] = useState(false);
   const [connectVisible, setConnectVisible] = useState(false);
+  const [fullPlayerVisible, setFullPlayerVisible] = useState(false);
   const [queueVisible, setQueueVisible] = useState(false);
   const [queue, setQueue] = useState<MediaItem[]>([]);
-  const [liked, setLiked] = useState(false);
+  const [likedTrackKey, setLikedTrackKey] = useState('');
   const [connectState, setConnectState] = useState<ConnectState | null>(null);
   const [currentDeviceId, setCurrentDeviceId] = useState('');
+  const [clockNow, setClockNow] = useState(() => Date.now());
 
   useEffect(() => {
     return subscribeShuffleEnabled(setShuffle);
@@ -53,16 +57,20 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
   useEffect(() => {
     void getConnectDeviceId().then(setCurrentDeviceId).catch(() => {});
   }, []);
+  useEffect(() => {
+    const interval = setInterval(() => setClockNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   const remote = Boolean(connectState?.song && !connectState.currentDeviceActive);
   const displayTrack = remote ? connectState?.song : activeTrack;
   const displayTrackKey = displayTrack
     ? String('mediaId' in displayTrack ? displayTrack.mediaId : ('id' in displayTrack ? displayTrack.id : ''))
     : '';
-  useEffect(() => setLiked(false), [displayTrackKey]);
+  const liked = Boolean(displayTrackKey && likedTrackKey === displayTrackKey);
   const displayPlaying = remote ? Boolean(connectState?.playing) : Boolean(isPlaying);
   const displayPosition = remote
-    ? Math.max(0, Number(connectState?.positionSeconds || 0) + (connectState?.playing ? Math.max(0, (Date.now() - Number(connectState.stateUpdatedAt || Date.now())) / 1000) : 0))
+    ? Math.max(0, Number(connectState?.positionSeconds || 0) + (connectState?.playing ? Math.max(0, (clockNow - Number(connectState.stateUpdatedAt || clockNow)) / 1000) : 0))
     : progress.position;
   if (!displayTrack) return null;
 
@@ -77,6 +85,8 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
   };
 
   const artwork = typeof displayTrack.artworkUrl === 'string' ? displayTrack.artworkUrl : '';
+  const displayDuration = remote ? Number(connectState?.durationSeconds || 0) : progress.duration;
+  const remoteDeviceName = connectState?.devices.find((device) => device.active)?.deviceName;
   const control = (remoteAction: string, localAction: () => void) => {
     if (remote) void sendConnectControl(remoteAction).catch(() => {});
     else run(localAction);
@@ -100,26 +110,28 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
       sourceId: typeof extras.sourceId === 'string' ? extras.sourceId : String(directSourceId || mediaId || ''),
     };
     const nextLiked = !liked;
-    setLiked(nextLiked);
-    void sendRecommendationFeedback(song, nextLiked ? 'LIKE' : 'CLEAR').catch(() => setLiked(!nextLiked));
+    setLikedTrackKey(nextLiked ? displayTrackKey : '');
+    void sendRecommendationFeedback(song, nextLiked ? 'LIKE' : 'CLEAR').catch(() => setLikedTrackKey(nextLiked ? '' : displayTrackKey));
   };
   return (
     <View style={[styles.player, { bottom: bottomOffset }]}>
       <View style={styles.mainRow}>
-        {artwork ? (
-          <Image source={{ uri: artwork }} style={styles.cover} />
-        ) : (
-          <View style={[styles.cover, styles.coverPlaceholder]}>
-            <Ionicons name="musical-notes" size={18} color="#1db954" />
-          </View>
-        )}
+        <TouchableOpacity accessibilityLabel="Abrir player" onPress={() => setFullPlayerVisible(true)} style={styles.trackSummary}>
+          {artwork ? (
+            <Image source={{ uri: artwork }} style={styles.cover} />
+          ) : (
+            <View style={[styles.cover, styles.coverPlaceholder]}>
+              <Ionicons name="musical-notes" size={18} color="#1db954" />
+            </View>
+          )}
 
-        <View style={styles.meta}>
-          <Text style={styles.title} numberOfLines={1}>{displayTrack.title || 'Reproduzindo'}</Text>
-          <Text style={styles.artist} numberOfLines={1}>
-            {displayTrack.artist || ''}{remote ? ` · em ${connectState?.devices.find((device) => device.active)?.deviceName || 'outro dispositivo'}` : ''}
-          </Text>
-        </View>
+          <View style={styles.meta}>
+            <Text style={styles.title} numberOfLines={1}>{displayTrack.title || 'Reproduzindo'}</Text>
+            <Text style={styles.artist} numberOfLines={1}>
+              {displayTrack.artist || ''}{remote ? ` · em ${remoteDeviceName || 'outro dispositivo'}` : ''}
+            </Text>
+          </View>
+        </TouchableOpacity>
 
         <TouchableOpacity accessibilityLabel={liked ? 'Descurtir música' : 'Curtir música'} onPress={toggleLike} style={[styles.primaryIcon, liked && styles.controlActive]}>
           <Ionicons name={liked ? 'heart' : 'heart-outline'} size={21} color={liked ? '#1db954' : '#d4d4d4'} />
@@ -234,6 +246,29 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
         positionSeconds={progress.position}
         playing={Boolean(isPlaying)}
       />
+      <FullPlayerModal
+        visible={fullPlayerVisible}
+        onClose={() => setFullPlayerVisible(false)}
+        title={String(displayTrack.title || 'Reproduzindo')}
+        artist={String(displayTrack.artist || '')}
+        artworkUrl={artwork}
+        playing={displayPlaying}
+        position={displayPosition}
+        duration={displayDuration}
+        remote={remote}
+        remoteDeviceName={remoteDeviceName}
+        liked={liked}
+        shuffle={shuffle}
+        onTogglePlayback={() => control(displayPlaying ? 'PAUSE' : 'PLAY', togglePlayback)}
+        onPrevious={() => control('PREVIOUS', playPrevious)}
+        onNext={() => control('NEXT', playNext)}
+        onToggleLike={toggleLike}
+        onToggleShuffle={toggleShuffle}
+        onSeek={(position) => remote ? void sendConnectControl('SEEK', position).catch(() => {}) : seekToPosition(position)}
+        onOpenQueue={openQueue}
+        onOpenDevices={() => setConnectVisible(true)}
+        onOpenJam={() => setJamSheetVisible(true)}
+      />
     </View>
   );
 }
@@ -256,9 +291,10 @@ const styles = StyleSheet.create({
     paddingBottom: 7,
   },
   mainRow: { flexDirection: 'row', alignItems: 'center' },
+  trackSummary: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center' },
   cover: { width: 42, height: 42, borderRadius: 8, marginRight: 10 },
   coverPlaceholder: { backgroundColor: '#242424', alignItems: 'center', justifyContent: 'center' },
-  meta: { flex: 1, marginRight: 6 },
+  meta: { flex: 1, minWidth: 0, marginRight: 6 },
   title: { color: '#fff', fontSize: 13, fontWeight: '700' },
   artist: { color: '#999', fontSize: 11, marginTop: 2 },
   control: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 17 },

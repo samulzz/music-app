@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-10T00:17:00-03:00",
+  "generatedAt": "2026-09-10T00:30:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.24",
-    "versionCode": 26,
-    "minimumVersion": "1.1.24",
-    "minimumVersionCode": 26,
+    "version": "1.1.25",
+    "versionCode": 27,
+    "minimumVersion": "1.1.25",
+    "minimumVersionCode": 27,
     "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.24.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.25.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Novo player em tela cheia com capa, controles, fila, menu de opcoes e temporizador de 5 minutos a 2 horas."
+    "releaseNotes": "Correcao urgente da autenticacao no Android e novo player em tela cheia com temporizador."
   },
   "desktop": {
     "enabled": true,

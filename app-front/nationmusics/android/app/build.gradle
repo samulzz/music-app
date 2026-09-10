@@ -3,6 +3,18 @@ apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def releaseRequested = gradle.startParameter.taskNames.any { it.toLowerCase().contains("release") }
+if (releaseRequested && !(System.getenv("EXPO_PUBLIC_API_KEY") ?: "").trim()) {
+    throw new GradleException("EXPO_PUBLIC_API_KEY precisa estar definida para gerar um APK release.")
+}
+
+// As variáveis EXPO_PUBLIC_* são incorporadas no bundle JavaScript. O Gradle não
+// acompanha mudanças nessas variáveis e pode reutilizar um bundle release antigo.
+tasks.configureEach { task ->
+    if (task.name == "createBundleReleaseJsAndAssets") {
+        task.outputs.upToDateWhen { false }
+    }
+}
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -92,8 +104,8 @@ android {
         applicationId 'com.samulsz.nationmusics'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 26
-        versionName "1.1.24"
+        versionCode 27
+        versionName "1.1.25"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

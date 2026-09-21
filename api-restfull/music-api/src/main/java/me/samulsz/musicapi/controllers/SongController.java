@@ -56,6 +56,15 @@ public class SongController {
         }
     }
 
+    @GetMapping("/artist")
+    public ResponseEntity<?> byArtist(@RequestParam String name) {
+        try {
+            return ResponseEntity.ok(songService.findByArtist(name));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body("Erro ao carregar artista: " + e.getMessage());
+        }
+    }
+
     @DeleteMapping("/remove/{songId}")
     public ResponseEntity<?> removeSong(Authentication authentication, @PathVariable Long songId) {
         try {

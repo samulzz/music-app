@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-10T00:30:00-03:00",
+  "generatedAt": "2026-09-21T07:40:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.25",
-    "versionCode": 27,
-    "minimumVersion": "1.1.25",
-    "minimumVersionCode": 27,
+    "version": "1.1.26",
+    "versionCode": 28,
+    "minimumVersion": "1.1.26",
+    "minimumVersionCode": 28,
     "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.25.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.26.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Correcao urgente da autenticacao no Android e novo player em tela cheia com temporizador."
+    "releaseNotes": "Paginas de artistas na busca, com todas as musicas disponiveis e reproducao em sequencia."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.26",
-    "minimumVersion": "1.2.26",
+    "version": "1.2.27",
+    "minimumVersion": "1.2.27",
     "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.26.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.27.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Player reorganizado com controles circulares apenas por icones, sem sobreposicoes e com somente o botao de curtir para orientar as recomendacoes."
+    "releaseNotes": "Paginas de artistas na busca, com todas as musicas disponiveis e reproducao em sequencia."
   }
 }

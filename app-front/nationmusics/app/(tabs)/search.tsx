@@ -21,6 +21,7 @@ import { getSession } from '../../services/auth';
 import { downloadSong } from '../../services/offline-library';
 import { playSongQueue } from '../../services/player';
 import { MUSIC_GENRES } from '../../constants/music-genres';
+import { artistsFromSongs } from '../../services/artists';
 
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -92,6 +93,7 @@ export default function SearchScreen() {
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
   const searchRequestId = useRef(0);
+  const artistResults = selectedGenre ? [] : artistsFromSongs(results, query);
 
   useEffect(() => {
     getSession().then((session) => setUsername(session?.username || '')).catch(() => {});
@@ -141,7 +143,7 @@ export default function SearchScreen() {
       ));
       setResults(songs);
       setPlaylistResults(matchingPlaylists);
-      setSearchError(songs.length || matchingPlaylists.length ? '' : 'Nenhuma música ou playlist encontrada.');
+      setSearchError(songs.length || matchingPlaylists.length ? '' : 'Nenhuma música, artista ou playlist encontrada.');
     } catch (error) {
       if (requestId !== searchRequestId.current) return;
       setResults([]);
@@ -307,6 +309,18 @@ export default function SearchScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
+              {artistResults.length > 0 && (
+                <View style={styles.playlistSection}>
+                  <Text style={styles.genreTitle}>Artistas</Text>
+                  {artistResults.map((artist) => (
+                    <TouchableOpacity key={artist.name} style={styles.playlistCard} onPress={() => router.push({ pathname: '/artist/[name]' as never, params: { name: artist.name } })}>
+                      {artist.artworkUrl ? <Image source={{ uri: artist.artworkUrl }} style={styles.artistCover} /> : <View style={[styles.playlistCoverPlaceholder, styles.artistCover]}><Ionicons name="person" size={23} color="#1db954" /></View>}
+                      <View style={styles.playlistMeta}><Text style={styles.cardTitle} numberOfLines={1}>{artist.name}</Text><Text style={styles.cardArtist}>Ver músicas do artista</Text></View>
+                      <Ionicons name="chevron-forward" size={20} color="#777" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
               {playlistResults.length > 0 && (
                 <View style={styles.playlistSection}>
                   <Text style={styles.genreTitle}>Playlists</Text>
@@ -425,6 +439,7 @@ const styles = StyleSheet.create({
   playlistSection: { marginBottom: 20 },
   playlistCard: { minHeight: 66, flexDirection: 'row', alignItems: 'center', backgroundColor: '#1b1b1b', borderRadius: 12, padding: 8, marginBottom: 8 },
   playlistCover: { width: 50, height: 50, borderRadius: 8, marginRight: 10 },
+  artistCover: { width: 50, height: 50, borderRadius: 25, marginRight: 10 },
   playlistCoverPlaceholder: { width: 50, height: 50, borderRadius: 8, marginRight: 10, backgroundColor: '#272727', alignItems: 'center', justifyContent: 'center' },
   playlistMeta: { flex: 1, marginRight: 8 },
   card: {

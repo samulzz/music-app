@@ -15,6 +15,8 @@ RUN apt-get update \
 WORKDIR /app
 COPY music-api.jar /app/music-api.jar
 COPY spotify_playlist.py /app/spotify_playlist.py
+COPY catalog_curator.py /app/catalog_curator.py
+COPY catalog_curator_sources.json /app/catalog_curator_sources.json
 COPY import_spotify_global_playlist.py /app/import_spotify_global_playlist.py
 COPY precache_spotify_playlist.py /app/precache_spotify_playlist.py
 COPY hydrate_spotify_playlist_via_api.py /app/hydrate_spotify_playlist_via_api.py

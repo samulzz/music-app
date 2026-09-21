@@ -134,6 +134,23 @@ function normalizeCatalogText(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 }
 
+function artistsFromSongs(songs, query) {
+  const normalizedQuery = normalizeCatalogText(query.trim());
+  if (!normalizedQuery) return [];
+  const artists = new Map();
+  songs.forEach((song) => {
+    String(song.artist || '').split(/\s*(?:,|\bfeat\.?\b|\bft\.?\b|\s+&\s+)\s*/i).forEach((rawName) => {
+      const name = rawName.trim();
+      const key = normalizeCatalogText(name);
+      if (!name || !key.includes(normalizedQuery) || key === 'artista desconhecido') return;
+      const existing = artists.get(key);
+      if (existing) existing.songCount += 1;
+      else artists.set(key, { name, artworkUrl: song.artworkUrl, songCount: 1 });
+    });
+  });
+  return [...artists.values()].sort((a, b) => b.songCount - a.songCount || a.name.localeCompare(b.name, 'pt-BR')).slice(0, 12);
+}
+
 function renderIconSlots(root = document) {
   root.querySelectorAll('[data-icon]').forEach((slot) => {
     slot.innerHTML = icon(slot.dataset.icon || 'music');
@@ -167,6 +184,7 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     logout: async () => true,
     search: async () => demoSongs,
     searchGenre: async () => demoSongs,
+    getArtistSongs: async (artist) => demoSongs.filter((song) => song.artist.toLowerCase().includes(String(artist).toLowerCase())),
     prepareStream: async () => '',
     downloadSong: async () => true,
     isSongDownloaded: async (song) => Boolean(song.downloaded),
@@ -2148,11 +2166,13 @@ async function renderSearch(query = '', exactGenre = false) {
     state.playlistsFetchedAt = Date.now();
     const normalizedQuery = normalizeCatalogText(query.trim());
     const matchingPlaylists = playlists.filter((playlist) => normalizeCatalogText(`${playlist.name} ${playlist.description || ''}`).includes(normalizedQuery));
+    const artists = exactGenre ? [] : artistsFromSongs(merged, query);
     contentView.innerHTML = `
       <section class="home-section search-genres">
         <div class="section-heading"><h2>Gêneros</h2><span>Explore outros estilos</span></div>
         ${genreGridMarkup()}
       </section>
+      ${artists.length ? `<section class="home-section"><div class="section-heading"><h2>Artistas</h2><span>${artists.length} encontrados</span></div><div class="artist-results">${artists.map((artist, index) => `<button class="artist-result" data-artist-index="${index}" type="button">${artist.artworkUrl ? `<img src="${escapeHtml(artist.artworkUrl)}" alt="" />` : `<span class="artist-result-placeholder">${icon('users')}</span>`}<strong>${escapeHtml(artist.name)}</strong><small>Ver músicas</small></button>`).join('')}</div></section>` : ''}
       ${matchingPlaylists.length ? `<section class="home-section"><div class="section-heading"><h2>Playlists</h2><span>${matchingPlaylists.length} encontradas</span></div><div class="home-shelf search-playlist-grid">${matchingPlaylists.map((playlist, index) => `<article class="home-album-card" data-search-playlist-index="${index}"><div>${playlist.iconUrl ? `<img src="${escapeHtml(playlist.iconUrl)}" alt="" />` : icon('playlist')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(playlist.name)}</strong><p>${escapeHtml(playlist.description || 'Playlist do NationMusics')}</p></article>`).join('')}</div></section>` : ''}
       <div class="section-heading">
         <h2>Músicas</h2>
@@ -2161,6 +2181,9 @@ async function renderSearch(query = '', exactGenre = false) {
       ${songRows(merged, `Nenhum resultado para “${query}”.`)}
     `;
     bindGenreActions();
+    document.querySelectorAll('[data-artist-index]').forEach((card) => {
+      card.addEventListener('click', () => void renderArtist(artists[Number(card.dataset.artistIndex)].name));
+    });
     document.querySelectorAll('[data-search-playlist-index]').forEach((card) => {
       card.addEventListener('click', () => openPlaylist(matchingPlaylists[Number(card.dataset.searchPlaylistIndex)]));
     });
@@ -2169,6 +2192,29 @@ async function renderSearch(query = '', exactGenre = false) {
     if (requestId !== state.searchRequestId) return;
     if (await handleAuthenticationError(error)) return;
     contentView.innerHTML = `<div class="empty-state"><b>Erro na busca</b><span>${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
+async function renderArtist(artistName) {
+  const name = String(artistName || '').trim();
+  if (!name) return;
+  state.view = 'artist';
+  state.artistName = name;
+  state.searchRequestId += 1;
+  setPageHeader('ARTISTA', name);
+  setLoading('Carregando músicas do artista...');
+  try {
+    const [songs, library] = await Promise.all([window.nation.getArtistSongs(name), window.nation.getLibrary()]);
+    if (state.view !== 'artist' || state.artistName !== name) return;
+    const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
+    const merged = songs.map((song) => savedBySource.has(song.sourceId) ? { ...song, ...savedBySource.get(song.sourceId), saved: true } : song);
+    const artwork = merged.find((song) => song.artworkUrl)?.artworkUrl;
+    contentView.innerHTML = `<section class="artist-hero"><div class="artist-hero-cover">${artwork ? `<img src="${escapeHtml(artwork)}" alt="" />` : icon('users')}</div><div><span>ARTISTA</span><h2>${escapeHtml(name)}</h2><p>${merged.length} ${merged.length === 1 ? 'música' : 'músicas'} no catálogo</p></div></section>${merged.length ? queueControlsMarkup(merged.length, 'Tocar músicas do artista', false) : ''}<div class="section-heading"><h2>Músicas</h2></div>${songRows(merged, 'Nenhuma música disponível deste artista.')}`;
+    if (merged.length) bindQueueControls(merged);
+    bindSongActions();
+  } catch (error) {
+    if (await handleAuthenticationError(error)) return;
+    contentView.innerHTML = `<div class="empty-state"><b>Não foi possível carregar o artista</b><span>${escapeHtml(error.message)}</span></div>`;
   }
 }
 
@@ -2534,6 +2580,7 @@ async function nextTrack(direction) {
 async function refreshCurrentView() {
   if (state.view === 'library') await renderLibrary();
   else if (state.view === 'search') await renderSearch($('#search-input').value);
+  else if (state.view === 'artist') await renderArtist(state.artistName);
   else if (state.view === 'spotify') renderSpotifyImport(state.spotifyUrl);
   else if (state.view === 'friends') await refreshFriendsPanel(false);
 }

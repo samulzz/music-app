@@ -76,6 +76,14 @@ public class SongService {
                 .toList();
     }
 
+    public java.util.List<Song> findByArtist(String artist) {
+        String name = artist == null ? "" : artist.trim();
+        if (name.isBlank() || name.length() > 120) return java.util.List.of();
+        return songRepository.findCatalogSongsByArtist(name).stream()
+                .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
+                .toList();
+    }
+
     private void mergeGenres(Song song, java.util.Set<String> incoming) {
         if (incoming == null) return;
         java.util.Set<String> merged = new java.util.LinkedHashSet<>(song.getGenres());

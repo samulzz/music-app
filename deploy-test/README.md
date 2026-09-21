@@ -51,6 +51,29 @@ no Google Drive. Ele guarda snapshots do banco/configuracao e sincroniza o
 acervo de forma incremental, sem reenviar os MP3 ja preservados. Consulte
 `backup/README.md` para a primeira autorizacao OAuth e ativacao do timer.
 
+## Curadoria automática do catálogo
+
+`catalog-curator.timer` executa `catalog_curator.py` a cada 15 minutos na VPS.
+Cada ciclo consulta até duas playlists de referência do Spotify que estejam
+desatualizadas há 6 horas, reconcilia as faixas já conhecidas com os MP3 locais
+e classifica até 25 músicas por gênero. A correspondência exige título e artista
+compatíveis; músicas ausentes ficam registradas no volume persistente em
+`/app/downloads/.catalog-curator-state.json` para entrar na playlist quando o
+áudio for importado. A curadoria não baixa músicas e não cria uma fila de download.
+Faixas sem evidência confiável continuam sem gênero, em vez de receber uma
+classificação inventada. Edite `catalog_curator_sources.json` para mudar as
+playlists de referência.
+
+Após instalar os dois arquivos `catalog-curator.service` e
+`catalog-curator.timer` em `/etc/systemd/system/`:
+
+```bash
+systemctl daemon-reload
+systemctl enable --now catalog-curator.timer
+systemctl list-timers catalog-curator.timer
+journalctl -u catalog-curator.service -n 50 --no-pager
+```
+
 ## Acesso ao YouTube
 
 O deploy usa o `yt-dlp` nightly com o provedor `bgutil` recomendado pela documentação do projeto. O container `pot-provider` gera PO Tokens automaticamente para cada vídeo, então não há arquivo de cookies para renovar no funcionamento normal.

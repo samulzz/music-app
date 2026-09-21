@@ -962,6 +962,10 @@ ipcMain.handle('music:genre', async (_event, genre) => {
   const songs = await apiRequest(`/songs/genre?genre=${encodeURIComponent(String(genre || '').trim())}`);
   return songs.map((song) => normalizeSong(song, false));
 });
+ipcMain.handle('music:artist', async (_event, artist) => {
+  const songs = await apiRequest(`/songs/artist?name=${encodeURIComponent(String(artist || '').trim())}`);
+  return songs.map((song) => normalizeSong(song, false));
+});
 ipcMain.handle('music:prepare-stream', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) throw new Error('Esta música não possui uma origem válida.');

@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('nation', {
   openUpdateDownload: (url) => ipcRenderer.invoke('updates:open-download', url),
   search: (query) => ipcRenderer.invoke('music:search', query),
   searchGenre: (genre) => ipcRenderer.invoke('music:genre', genre),
+  getArtistSongs: (artist) => ipcRenderer.invoke('music:artist', artist),
   prepareStream: (song) => ipcRenderer.invoke('music:prepare-stream', song),
   downloadSong: (song) => ipcRenderer.invoke('music:download', song),
   isSongDownloaded: (song) => ipcRenderer.invoke('music:is-downloaded', song),

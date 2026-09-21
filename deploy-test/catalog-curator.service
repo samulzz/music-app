@@ -1,0 +1,9 @@
+[Unit]
+Description=NationMusics catalog curation cycle
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec nationmusics-test-api python3 /app/catalog_curator.py
+TimeoutStartSec=600

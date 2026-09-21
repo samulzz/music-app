@@ -1,6 +1,6 @@
 import unittest
 
-from catalog_curator import matching_song, merge_tracks, normalized, primary_artist
+from catalog_curator import find_playlist, matching_song, merge_tracks, normalized, primary_artist
 
 
 class CatalogCuratorTests(unittest.TestCase):
@@ -27,6 +27,11 @@ class CatalogCuratorTests(unittest.TestCase):
         old = [{"spotifyId": "old", "title": "Antiga", "artist": "Ana"}]
         current = [{"spotifyId": "new", "title": "Nova", "artist": "Ana"}]
         self.assertEqual([track["spotifyId"] for track in merge_tracks(old, current)], ["new", "old"])
+
+    def test_new_mix_does_not_merge_into_another_genre_playlist(self):
+        playlists = [{"id": 1, "name": "Sertanejo - Mais Tocadas", "globalPlaylist": True}]
+        source = {"id": "new", "name": "Sertanejo Universitário Mix", "genre": "sertanejo"}
+        self.assertIsNone(find_playlist(playlists, source))
 
 
 if __name__ == "__main__":

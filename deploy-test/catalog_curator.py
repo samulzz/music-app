@@ -103,6 +103,8 @@ def find_playlist(playlists, source):
          and normalized(item.get("name")) == normalized(source["name"])), None)
     if direct:
         return direct
+    if not source.get("reuseCategoryPlaylist"):
+        return None
     category = normalized(source.get("genre") or ("forro" if "Forró" in source["name"] else ""))
     if not category:
         return None

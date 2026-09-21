@@ -104,8 +104,8 @@ android {
         applicationId 'com.samulsz.nationmusics'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 28
-        versionName "1.1.26"
+        versionCode 29
+        versionName "1.1.27"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }

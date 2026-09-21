@@ -81,6 +81,7 @@ const ICONS = {
   spotify: '<circle cx="12" cy="12" r="9" /><path d="M7.8 9.5c3.3-1 6.5-.7 9.4.9" /><path d="M8.4 12.5c2.7-.8 5.2-.5 7.5.7" /><path d="M9 15.2c1.9-.5 3.8-.3 5.5.5" />',
   library: '<path d="M5 5v14" /><path d="M9 5v14" /><path d="M13 6.5v12" /><path d="m17 6 2.5 12" />',
   playlist: '<path d="M5 7h9" /><path d="M5 12h9" /><path d="M5 17h6" /><path d="M17 15.5v4l3-2z" />',
+  more: '<circle cx="5" cy="12" r="1.4" /><circle cx="12" cy="12" r="1.4" /><circle cx="19" cy="12" r="1.4" />',
   users: '<circle cx="9" cy="8" r="3" /><path d="M3.5 19c.7-3 2.8-5 5.5-5s4.8 2 5.5 5" /><circle cx="17" cy="9" r="2.5" /><path d="M15.5 14.2c2.4.4 4.1 2.1 4.8 4.8" />',
   radio: '<circle cx="12" cy="12" r="2.5" /><path d="M7.8 16.2a6 6 0 0 1 0-8.4" /><path d="M16.2 7.8a6 6 0 0 1 0 8.4" /><path d="M4.9 19.1a10 10 0 0 1 0-14.2" /><path d="M19.1 4.9a10 10 0 0 1 0 14.2" />',
   discord: '<path d="M7.2 7.2c3.2-1.5 6.4-1.5 9.6 0 1.1 1.6 1.8 3.6 2.1 5.8-1.3 1.8-2.8 3-4.6 3.7l-1.1-1.5" /><path d="M16.8 7.2c-3.2-1.5-6.4-1.5-9.6 0-1.1 1.6-1.8 3.6-2.1 5.8 1.3 1.8 2.8 3 4.6 3.7l1.1-1.5" /><circle cx="9.3" cy="12.3" r="1" class="icon-fill" /><circle cx="14.7" cy="12.3" r="1" class="icon-fill" /><path d="M9.2 15c1.8.8 3.8.8 5.6 0" />',
@@ -502,28 +503,44 @@ function resetShuffleRemainingIndexes() {
 
 function plannedNextQueueIndex() {
   if (!state.queue.length) return -1;
-  if (!state.shuffle) {
-    if (state.queueMode === 'selection' && state.queueIndex >= state.queue.length - 1) return -1;
-    return (state.queueIndex + 1 + state.queue.length) % state.queue.length;
+  return state.queueIndex + 1 < state.queue.length ? state.queueIndex + 1 : -1;
+}
+
+function shuffleSongs(songs) {
+  const result = [...songs];
+  for (let i = result.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
   }
+  return result;
+}
 
-  if (state.queueMode === 'selection' && !state.shuffleRemainingIndexes.length) return -1;
+function reorderUpcomingQueue() {
+  if (state.queueIndex < 0) return;
+  const prefix = state.queue.slice(0, state.queueIndex + 1);
+  const upcoming = state.queue.slice(state.queueIndex + 1);
+  const manual = upcoming.filter((song) => song.queueOrigin === 'manual');
+  const automatic = upcoming.filter((song) => song.queueOrigin !== 'manual');
+  const arranged = state.shuffle
+    ? shuffleSongs(automatic)
+    : automatic.sort((a, b) => (a.queueSequence ?? 0) - (b.queueSequence ?? 0));
+  state.queue = [...prefix, ...manual, ...arranged];
+  state.queueRevision += 1;
+  if (!$('#queue-panel')?.classList.contains('hidden')) renderQueuePanel();
+}
 
-  const planned = state.shuffleNextIndex;
-  if (
-    Number.isInteger(planned)
-    && planned >= 0
-    && planned < state.queue.length
-    && planned !== state.queueIndex
-    && (state.queueMode !== 'selection' || state.shuffleRemainingIndexes.includes(planned))
-  ) {
-    return planned;
+function addSongToPlaybackQueue(song) {
+  if (!song) return;
+  if (!state.queue.length || state.queueIndex < 0) {
+    playQueue([song], 0);
+    return;
   }
-
-  state.shuffleNextIndex = state.queueMode === 'selection'
-    ? state.shuffleRemainingIndexes[Math.floor(Math.random() * state.shuffleRemainingIndexes.length)]
-    : randomQueueIndex();
-  return state.shuffleNextIndex;
+  let insertAt = state.queueIndex + 1;
+  while (state.queue[insertAt]?.queueOrigin === 'manual') insertAt += 1;
+  state.queue.splice(insertAt, 0, { ...song, queueOrigin: 'manual' });
+  state.queueRevision += 1;
+  if (!$('#queue-panel')?.classList.contains('hidden')) renderQueuePanel();
+  prefetchNextTrack();
 }
 
 function prefetchNextTrack() {
@@ -568,8 +585,7 @@ function setPlayButtonIcon(playing) {
 function setShuffleMode(enabled, _notify = true) {
   state.shuffle = Boolean(enabled);
   state.shuffleNextIndex = -1;
-  if (state.shuffle && state.queueMode === 'selection') resetShuffleRemainingIndexes();
-  else state.shuffleRemainingIndexes = [];
+  reorderUpcomingQueue();
   updateShuffleButton();
   prefetchNextTrack();
 }
@@ -798,12 +814,12 @@ function renderConnectState() {
 function renderQueuePanel() {
   const panel = $('#queue-panel');
   if (!panel) return;
-  const visibleQueue = state.queueHistory.length ? state.queueHistory : state.queue;
+  const visibleQueue = state.queue;
   const rows = visibleQueue.map((song, index) => {
-    const origin = song.queueOrigin === 'recommendation'
+    const origin = song.queueOrigin === 'manual' ? 'Adicionada à fila' : song.queueOrigin === 'recommendation'
       ? 'Recomendação'
       : song.queueOrigin === 'playlist' ? 'Da playlist' : 'Escolhida por você';
-    const active = songIdentity(song) === songIdentity(state.queue[state.queueIndex]);
+    const active = index === state.queueIndex;
     return `<button class="player-queue-row${active ? ' active' : ''}" data-player-queue-index="${index}" type="button">
       <span>${index + 1}</span><div><strong>${escapeHtml(song.title)}</strong><small>${escapeHtml(song.artist)}</small></div>
       <em class="${song.queueOrigin === 'recommendation' ? 'recommendation' : ''}">${origin}</em>
@@ -812,8 +828,7 @@ function renderQueuePanel() {
   panel.innerHTML = `<div class="floating-panel-head"><div><strong>Fila de reprodução</strong><small>Playlist e recomendações ficam identificadas</small></div><button id="queue-close" type="button">&times;</button></div>${rows || '<p class="connect-empty">A fila está vazia.</p>'}`;
   $('#queue-close')?.addEventListener('click', () => panel.classList.add('hidden'));
   panel.querySelectorAll('[data-player-queue-index]').forEach((button) => button.addEventListener('click', () => {
-    const selected = visibleQueue[Number(button.dataset.playerQueueIndex)];
-    const actualIndex = state.queue.findIndex((song) => songIdentity(song) === songIdentity(selected));
+    const actualIndex = Number(button.dataset.playerQueueIndex);
     if (actualIndex < 0) return;
     state.queueIndex = actualIndex;
     panel.classList.add('hidden');
@@ -1726,6 +1741,7 @@ function songRows(songs, emptyText = 'Nada por aqui ainda.', options = {}) {
                      ? `<button class="icon-button remove-playlist-song" title="Remover desta playlist" data-index="${index}">${icon('close')}</button>`
                      : `<button class="icon-button remove-song" title="Remover de Minhas Musicas" data-index="${index}">${icon('close')}</button>`}`
                 : `<button class="icon-button save-song" title="Salvar na conta" data-index="${index}">${icon('plus')}</button>`}
+              <button class="icon-button song-more" type="button" title="Mais opções" aria-label="Mais opções para ${escapeHtml(song.title)}" data-index="${index}">${icon('more')}</button>
             </div>
           </article>
         `;
@@ -1792,6 +1808,31 @@ function bindQueueControls(songs = state.visibleSongs) {
 }
 
 function bindSongActions(playlist = null) {
+  document.querySelectorAll('.song-more').forEach((button) => {
+    button.addEventListener('click', () => {
+      const song = state.visibleSongs[Number(button.dataset.index)];
+      if (!song) return;
+      const menu = document.createElement('div');
+      menu.className = 'song-context-menu';
+      menu.innerHTML = `<strong>${escapeHtml(song.title)}</strong><button type="button" data-song-menu="queue">${icon('playlist')} Adicionar à fila</button><button type="button" data-song-menu="play">${icon('play')} Reproduzir agora</button>`;
+      document.querySelector('.song-context-menu')?.remove();
+      document.body.appendChild(menu);
+      const bounds = button.getBoundingClientRect();
+      menu.style.left = `${Math.max(8, Math.min(bounds.right - menu.offsetWidth, innerWidth - menu.offsetWidth - 8))}px`;
+      menu.style.top = `${Math.max(8, Math.min(bounds.bottom + 4, innerHeight - menu.offsetHeight - 8))}px`;
+      menu.addEventListener('click', (event) => {
+        const action = event.target.closest('[data-song-menu]')?.dataset.songMenu;
+        if (action === 'queue') addSongToPlaybackQueue(song);
+        if (action === 'play') playQueue(state.visibleSongs, Number(button.dataset.index));
+        menu.remove();
+      });
+      const dismiss = (event) => {
+        if (!menu.contains(event.target) && event.target !== button) menu.remove();
+        document.removeEventListener('pointerdown', dismiss);
+      };
+      setTimeout(() => document.addEventListener('pointerdown', dismiss), 0);
+    });
+  });
   document.querySelectorAll('.play-song').forEach((button) => {
     button.addEventListener('click', () => playQueue(state.visibleSongs, Number(button.dataset.index)));
   });
@@ -2431,9 +2472,12 @@ function playQueue(songs, index) {
     showBanner('Esta música não possui uma fonte de reprodução.', true);
     return;
   }
-  state.queue = playable.map((song) => ({ ...song, queueOrigin: song.queueOrigin || 'playlist' }));
+  const ordered = playable.map((song, queueSequence) => ({ ...song, queueOrigin: song.queueOrigin || 'playlist', queueSequence }));
+  state.queue = state.shuffle
+    ? [ordered[actualIndex], ...shuffleSongs(ordered.filter((_song, position) => position !== actualIndex))]
+    : ordered;
   state.queueHistory = [...state.queue];
-  state.queueIndex = actualIndex;
+  state.queueIndex = state.shuffle ? 0 : actualIndex;
   state.queueRevision += 1;
   state.queueMode = 'selection';
   state.recommendationContinuationInFlight = false;
@@ -2471,9 +2515,10 @@ async function continueWithDailyRecommendations() {
       await loadCurrentTrack();
       return;
     }
-    state.queue = additions.map((song) => ({ ...song, queueOrigin: 'recommendation' }));
+    state.queue = additions.map((song, queueSequence) => ({ ...song, queueOrigin: 'recommendation', queueSequence }));
+    if (state.shuffle) state.queue = shuffleSongs(state.queue);
     state.queueHistory = [...originalQueue, ...state.queue];
-    state.queueIndex = state.shuffle ? Math.floor(Math.random() * additions.length) : 0;
+    state.queueIndex = 0;
     state.queueRevision += 1;
     state.queueMode = 'recommendations';
     state.shuffleNextIndex = -1;
@@ -2555,23 +2600,13 @@ async function loadCurrentTrack() {
 
 async function nextTrack(direction) {
   if (!state.queue.length) return;
-  if (direction > 0 && state.shuffle && state.queue.length > 1) {
-    const nextIndex = plannedNextQueueIndex();
-    if (nextIndex < 0) {
-      await continueWithDailyRecommendations();
-      return;
-    }
-    state.queueIndex = nextIndex;
-    if (state.queueMode === 'selection') {
-      state.shuffleRemainingIndexes = state.shuffleRemainingIndexes.filter((index) => index !== nextIndex);
-    }
-    state.shuffleNextIndex = -1;
-  } else if (direction > 0 && state.queueMode === 'selection' && state.queueIndex >= state.queue.length - 1) {
+  if (direction > 0 && state.queueMode === 'selection' && state.queueIndex >= state.queue.length - 1) {
     await continueWithDailyRecommendations();
     return;
   } else {
-    state.queueIndex = (state.queueIndex + direction + state.queue.length) % state.queue.length;
-    if (direction < 0) state.shuffleNextIndex = -1;
+    state.queueIndex = direction > 0 && state.queueIndex >= state.queue.length - 1
+      ? 0
+      : Math.max(0, state.queueIndex + direction);
   }
   await loadCurrentTrack();
   window.setTimeout(prefetchNextTrack, 1000);

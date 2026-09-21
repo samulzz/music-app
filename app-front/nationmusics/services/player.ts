@@ -26,7 +26,40 @@ const shuffleListeners = new Set<(enabled: boolean) => void>();
 let lastShuffleEnabled = false;
 let recommendationAppendInFlight: Promise<void> | null = null;
 let playbackQueueRevision = 0;
-let playbackQueueHistory: MediaItem[] = [];
+
+function queueOrigin(item: MediaItem) {
+  return item.extras && typeof item.extras === 'object' ? item.extras.queueOrigin : undefined;
+}
+
+function queueSequence(item: MediaItem) {
+  const value = item.extras && typeof item.extras === 'object' ? item.extras.queueSequence : undefined;
+  return typeof value === 'number' ? value : Number.MAX_SAFE_INTEGER;
+}
+
+function shuffled<T>(items: T[]) {
+  const result = [...items];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(Math.random() * (index + 1));
+    [result[index], result[other]] = [result[other], result[index]];
+  }
+  return result;
+}
+
+function reorderUpcomingQueue() {
+  const activeIndex = TrackPlayer.getActiveMediaItemIndex();
+  const queue = TrackPlayer.getQueue();
+  if (activeIndex === null || activeIndex < 0 || activeIndex >= queue.length - 1) return;
+  const start = activeIndex + 1;
+  let manualEnd = start;
+  while (manualEnd < queue.length && queueOrigin(queue[manualEnd]) === 'manual') manualEnd += 1;
+  const future = queue.slice(manualEnd);
+  if (future.length < 2) return;
+  const reordered = lastShuffleEnabled
+    ? shuffled(future)
+    : [...future].sort((left, right) => queueSequence(left) - queueSequence(right));
+  TrackPlayer.removeMediaItems(manualEnd, queue.length);
+  TrackPlayer.insertMediaItems(manualEnd, reordered);
+}
 
 function offlineBrowseItem(song: MusicSong): BrowseItem | null {
   if (!song.localUri) return null;
@@ -142,6 +175,7 @@ export function setupMusicPlayer() {
   // A fila precisa terminar para só então iniciar as recomendações. Com RepeatMode.All,
   // as sugestões precisavam ser anexadas antes e acabavam entrando no aleatório.
   TrackPlayer.setRepeatMode(RepeatMode.Off);
+  TrackPlayer.setShuffleEnabled(false);
   TrackPlayer.addEventListener(Event.MediaItemTransition, () => {
     prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
   });
@@ -205,13 +239,7 @@ function prefetchMediaItem(item: MediaItem | null | undefined) {
 
 function nextPrefetchIndex(currentIndex: number | null, queueLength: number) {
   if (currentIndex === null || currentIndex < 0 || queueLength <= 1) return -1;
-  if (!TrackPlayer.isShuffleEnabled()) return (currentIndex + 1) % queueLength;
-
-  let next = currentIndex;
-  while (next === currentIndex) {
-    next = Math.floor(Math.random() * queueLength);
-  }
-  return next;
+  return currentIndex + 1 < queueLength ? currentIndex + 1 : -1;
 }
 
 function prefetchNextInQueue(currentIndex = TrackPlayer.getActiveMediaItemIndex()) {
@@ -246,8 +274,7 @@ async function continueWithDailyRecommendations(expectedRevision: number) {
         // A playlist original já terminou. Começamos outra fila para que músicas
         // recomendadas nunca sejam misturadas ao aleatório da seleção original.
         playbackQueueRevision += 1;
-        playbackQueueHistory = [...endedQueue, ...additions];
-        TrackPlayer.setMediaItems(additions, 0);
+        TrackPlayer.setMediaItems(lastShuffleEnabled ? shuffled(additions) : additions, 0);
         TrackPlayer.play();
         prefetchNextInQueue(0);
       }
@@ -255,9 +282,6 @@ async function continueWithDailyRecommendations(expectedRevision: number) {
       // A fila original continua funcionando quando o usuário estiver offline.
     } finally {
       recommendationAppendInFlight = null;
-      if (expectedRevision !== playbackQueueRevision && TrackPlayer.getPlaybackState() === PlaybackState.Ended) {
-        queueMicrotask(() => { void continueWithDailyRecommendations(playbackQueueRevision); });
-      }
     }
   })();
   return recommendationAppendInFlight;
@@ -296,6 +320,7 @@ export async function playSongQueue(songs: MusicSong[], requestedIndex: number, 
     const item = toMediaItem(song, headers, origin);
     if (!item) return;
     if (index === requestedIndex) queueIndex = queue.length;
+    item.extras = { ...item.extras, queueSequence: index };
     queue.push(item);
   });
 
@@ -304,27 +329,55 @@ export async function playSongQueue(songs: MusicSong[], requestedIndex: number, 
   }
 
   playbackQueueRevision += 1;
-  TrackPlayer.setMediaItems(queue, queueIndex);
-  playbackQueueHistory = [...queue];
+  const ordered = lastShuffleEnabled
+    ? [queue[queueIndex], ...shuffled(queue.filter((_item, index) => index !== queueIndex))]
+    : queue;
+  const startIndex = lastShuffleEnabled ? 0 : queueIndex;
+  TrackPlayer.setMediaItems(ordered, startIndex);
   TrackPlayer.play();
-  prefetchNextInQueue(queueIndex);
-  return queueIndex;
+  prefetchNextInQueue(startIndex);
+  return startIndex;
+}
+
+export async function addSongsToPlaybackQueue(songs: MusicSong[]) {
+  setupMusicPlayer();
+  const prepared = await mergeWithOfflineLibrary(songs);
+  const needsNetwork = prepared.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
+  const headers = needsNetwork ? await getMediaHeaders() : undefined;
+  const items = prepared
+    .map((song) => toMediaItem(song, headers, 'manual'))
+    .filter((item): item is MediaItem => item !== null)
+    .map((item) => ({ ...item, extras: { ...item.extras, queueOrigin: 'manual' } }));
+  if (!items.length) throw new Error('Nenhuma música disponível para adicionar à fila.');
+  playbackQueueRevision += 1;
+  const activeIndex = TrackPlayer.getActiveMediaItemIndex();
+  if (activeIndex === null || activeIndex < 0) {
+    TrackPlayer.setMediaItems(items, 0);
+    TrackPlayer.play();
+    return items.length;
+  }
+  const queue = TrackPlayer.getQueue();
+  let insertAt = activeIndex + 1;
+  while (insertAt < queue.length && queueOrigin(queue[insertAt]) === 'manual') insertAt += 1;
+  TrackPlayer.insertMediaItems(insertAt, items);
+  if (TrackPlayer.getPlaybackState() === PlaybackState.Ended) {
+    TrackPlayer.skipToIndex(insertAt);
+    TrackPlayer.play();
+  }
+  prefetchNextInQueue(activeIndex);
+  return items.length;
 }
 
 export function getPlaybackQueue() {
   setupMusicPlayer();
-  return playbackQueueHistory.length ? [...playbackQueueHistory] : TrackPlayer.getQueue();
+  return TrackPlayer.getQueue();
 }
 
 export function playQueueIndex(index: number) {
   setupMusicPlayer();
-  const selected = playbackQueueHistory[index];
   const current = TrackPlayer.getQueue();
-  const actualIndex = selected
-    ? current.findIndex((item) => String(item.mediaId) === String(selected.mediaId))
-    : index;
-  if (actualIndex < 0) return;
-  TrackPlayer.skipToIndex(actualIndex);
+  if (index < 0 || index >= current.length) return;
+  TrackPlayer.skipToIndex(index);
   TrackPlayer.play();
   prefetchNextInQueue(index);
 }
@@ -384,15 +437,16 @@ export function stopMusicPlayer(clearQueue = false) {
 
 export function setShuffleEnabled(enabled: boolean) {
   setupMusicPlayer();
-  TrackPlayer.setShuffleEnabled(enabled);
+  // A ordem fisica da fila e a mesma exibida ao usuario, inclusive no aleatorio.
+  TrackPlayer.setShuffleEnabled(false);
   emitShuffleEnabled(enabled);
+  reorderUpcomingQueue();
   prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
   return enabled;
 }
 
 export function getShuffleEnabled() {
   setupMusicPlayer();
-  lastShuffleEnabled = TrackPlayer.isShuffleEnabled();
   return lastShuffleEnabled;
 }
 

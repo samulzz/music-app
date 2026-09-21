@@ -3,12 +3,14 @@ package me.samulsz.musicapi.controllers;
 import me.samulsz.musicapi.dto.SongRequest;
 import me.samulsz.musicapi.models.Song;
 import me.samulsz.musicapi.services.SongService;
+import me.samulsz.musicapi.repositories.SongRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/songs")
@@ -16,6 +18,13 @@ public class SongController {
 
     @Autowired
     private SongService songService;
+    @Autowired
+    private SongRepository songRepository;
+
+    @GetMapping("/stats")
+    public ResponseEntity<?> getCatalogStats() {
+        return ResponseEntity.ok(Map.of("totalSongs", songRepository.count()));
+    }
 
     @PostMapping("/save")
     public ResponseEntity<?> saveSong(Authentication authentication, @RequestBody SongRequest request) {

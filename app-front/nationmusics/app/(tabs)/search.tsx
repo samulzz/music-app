@@ -19,7 +19,7 @@ import { fromApiSearchSong } from '../../types/music';
 import { apiRequest } from '../../services/api';
 import { getSession } from '../../services/auth';
 import { downloadSong } from '../../services/offline-library';
-import { playSongQueue } from '../../services/player';
+import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
 import { MUSIC_GENRES } from '../../constants/music-genres';
 import { artistsFromSongs } from '../../services/artists';
 
@@ -31,16 +31,18 @@ const SearchCard = memo(function SearchCard({
   downloaded,
   onPlay,
   onDownload,
+  onOptions,
 }: {
   song: MusicSong;
   progress?: number;
   downloaded: boolean;
   onPlay: (song: MusicSong) => void;
   onDownload: (song: MusicSong) => void;
+  onOptions: (song: MusicSong) => void;
 }) {
   const downloading = progress !== undefined;
   return (
-    <TouchableOpacity style={styles.card} onPress={() => onPlay(song)} activeOpacity={0.82}>
+    <TouchableOpacity style={styles.card} onPress={() => onPlay(song)} onLongPress={() => onOptions(song)} activeOpacity={0.82}>
       {song.artworkUrl ? (
         <Image source={{ uri: song.artworkUrl }} style={styles.cover} />
       ) : (
@@ -284,6 +286,11 @@ export default function SearchScreen() {
                 downloaded={downloadedIds.has(identity)}
                 onPlay={play}
                 onDownload={download}
+                onOptions={(song) => Alert.alert(song.title, 'O que deseja fazer?', [
+                  { text: 'Adicionar à fila', onPress: () => { void addSongsToPlaybackQueue([song]); } },
+                  { text: 'Baixar offline', onPress: () => { void download(song); } },
+                  { text: 'Cancelar', style: 'cancel' },
+                ])}
               />
             );
           }}

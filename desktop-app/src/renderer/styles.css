@@ -804,6 +804,44 @@ nav {
   gap: 7px;
 }
 
+.song-context-menu {
+  position: fixed;
+  z-index: 1000;
+  width: min(240px, calc(100vw - 16px));
+  padding: 8px;
+  border: 1px solid #3b3b3b;
+  border-radius: 12px;
+  background: #252525;
+  box-shadow: 0 12px 36px #000a;
+}
+
+.song-context-menu strong {
+  display: block;
+  overflow: hidden;
+  padding: 8px 10px;
+  color: #bbb;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.song-context-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.song-context-menu button:hover { background: #393939; }
+.song-context-menu .app-icon { width: 18px; height: 18px; }
+
 .icon-button {
   width: 34px;
   height: 34px;

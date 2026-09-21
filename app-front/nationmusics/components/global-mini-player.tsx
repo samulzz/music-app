@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useIsPlaying, useProgress, type MediaItem } from '@rntp/player';
+import TrackPlayer, { Event, useIsPlaying, useProgress, type MediaItem } from '@rntp/player';
 
 import { JamControlSheet } from './jam-control-sheet';
 import { FullPlayerModal } from './full-player-modal';
@@ -54,6 +54,14 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
     return subscribeShuffleEnabled(setShuffle);
   }, []);
   useEffect(() => subscribeConnectState(setConnectState), []);
+  useEffect(() => {
+    if (!queueVisible) return;
+    const refresh = () => { try { setQueue(getPlaybackQueue()); } catch {} };
+    const changed = TrackPlayer.addEventListener(Event.QueueChanged, refresh);
+    const transitioned = TrackPlayer.addEventListener(Event.MediaItemTransition, refresh);
+    refresh();
+    return () => { changed.remove(); transitioned.remove(); };
+  }, [queueVisible]);
   useEffect(() => {
     void getConnectDeviceId().then(setCurrentDeviceId).catch(() => {});
   }, []);
@@ -170,7 +178,7 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
             </View>
             <ScrollView showsVerticalScrollIndicator={false}>{queue.map((item, index) => {
               const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
-              const origin = extras.queueOrigin === 'recommendation' ? 'Recomendação' : extras.queueOrigin === 'playlist' ? 'Da playlist' : 'Escolhida por você';
+              const origin = extras.queueOrigin === 'manual' ? 'Adicionada à fila' : extras.queueOrigin === 'recommendation' ? 'Recomendação' : extras.queueOrigin === 'playlist' ? 'Da playlist' : 'Escolhida por você';
               return (
                 <TouchableOpacity key={`${item.mediaId}:${index}`} style={styles.queueRow} onPress={() => { playQueueIndex(index); setQueueVisible(false); }}>
                   <Text style={styles.queueIndex}>{index + 1}</Text>

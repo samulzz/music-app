@@ -26,7 +26,7 @@ import {
   mergeWithOfflineLibrary,
 } from '../../services/offline-library';
 import { ensureSourceId } from '../../services/music-resolver';
-import { playSongQueue, setShuffleEnabled, subscribeShuffleEnabled } from '../../services/player';
+import { addSongsToPlaybackQueue, playSongQueue, setShuffleEnabled, subscribeShuffleEnabled } from '../../services/player';
 import { getDailyMix } from '../../services/recommendations';
 import { useSyncedActiveMediaItem } from '../../services/player-state';
 import { sortSongsAlphabetically } from '../../services/song-order';
@@ -233,7 +233,7 @@ export default function PlaylistDetailsScreen() {
     const operation = (async () => {
 
     const cached = await readCache();
-    if (cached.songs.length) {
+    if (!isDaily && cached.songs.length) {
       setSongs(sortSongsAlphabetically(await mergeWithOfflineLibrary(cached.songs)));
       lastRefreshAtRef.current = cached.savedAt;
     }
@@ -258,6 +258,7 @@ export default function PlaylistDetailsScreen() {
     } catch {
       setOfflineMode(true);
       if (!cached.songs.length) setSongs([]);
+      else if (isDaily) setSongs(await mergeWithOfflineLibrary(cached.songs));
     } finally {
       setLoading(false);
       refreshInFlightRef.current = null;
@@ -271,7 +272,7 @@ export default function PlaylistDetailsScreen() {
   const hydrateSongs = useCallback(async () => {
     if (!playlistId) return;
     const cached = await readCache();
-    if (cached.songs.length) {
+    if (!isDaily && cached.songs.length) {
       setSongs(sortSongsAlphabetically(await mergeWithOfflineLibrary(cached.songs)));
       lastRefreshAtRef.current = cached.savedAt;
       setLoading(false);
@@ -280,7 +281,7 @@ export default function PlaylistDetailsScreen() {
     }
 
     void loadSongs(true, true);
-  }, [loadSongs, playlistId, readCache]);
+  }, [isDaily, loadSongs, playlistId, readCache]);
 
   useEffect(() => {
     hydratedRef.current = false;
@@ -618,6 +619,15 @@ export default function PlaylistDetailsScreen() {
     [selectedIds, songs]
   );
 
+  const enqueueSelected = useCallback(async () => {
+    try {
+      await addSongsToPlaybackQueue(selectedSongs);
+      setSelectedIds(new Set());
+    } catch (error) {
+      Alert.alert('Não foi possível adicionar à fila', error instanceof Error ? error.message : 'Tente novamente.');
+    }
+  }, [selectedSongs]);
+
   const removeSelected = useCallback(() => {
     if ((!isPersonal && !isLibrary) || !selectedSongs.length || removingSelection) return;
     const count = selectedSongs.length;
@@ -760,6 +770,10 @@ export default function PlaylistDetailsScreen() {
             <TouchableOpacity style={styles.selectionAction} onPress={() => { setSelectedIds(new Set()); void downloadMany(selectedSongs); }}>
               <Ionicons name="cloud-download-outline" size={20} color="#ddd" />
               <Text style={styles.selectionActionText}>Baixar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.selectionAction} onPress={() => { void enqueueSelected(); }}>
+              <Ionicons name="list" size={20} color="#1db954" />
+              <Text style={styles.selectionActionText}>Fila</Text>
             </TouchableOpacity>
             {(isPersonal || isLibrary) && (
               <TouchableOpacity style={styles.selectionAction} onPress={removeSelected} disabled={removingSelection}>

@@ -37,6 +37,7 @@ import {
   notifyDownloadStarted,
 } from '../../services/download-notifications';
 import {
+  addSongsToPlaybackQueue,
   playSongQueue,
   setShuffleEnabled,
   subscribeShuffleEnabled,
@@ -926,6 +927,10 @@ export default function LibraryScreen() {
               <TouchableOpacity style={styles.sheetAction} onPress={() => { setActionsVisible(false); void downloadMany(selectedSongs); }}>
                 <Ionicons name="cloud-download-outline" size={21} color="#1db954" />
                 <Text style={styles.sheetActionText}>Baixar offline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.sheetAction} onPress={() => { setActionsVisible(false); void addSongsToPlaybackQueue(selectedSongs); clearSelection(); }}>
+                <Ionicons name="list-outline" size={21} color="#1db954" />
+                <Text style={styles.sheetActionText}>Adicionar à fila</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.sheetAction} onPress={() => { setActionsVisible(false); void addManyToPlaylist(selectedSongs); }}>
                 <Ionicons name="add-circle-outline" size={21} color="#1db954" />

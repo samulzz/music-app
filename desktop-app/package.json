@@ -1,6 +1,6 @@
 {
   "name": "nationmusics-desktop",
-  "version": "1.2.27",
+  "version": "1.2.28",
   "description": "NationMusics para Windows",
   "main": "src/main.cjs",
   "author": "NationMusics",

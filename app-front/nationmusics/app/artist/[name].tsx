@@ -6,7 +6,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import GlobalMiniPlayer from '../../components/global-mini-player';
 import { apiRequest } from '../../services/api';
-import { playSongQueue } from '../../services/player';
+import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
 import { fromApiSearchSong, type ApiSearchSong, type MusicSong } from '../../types/music';
 
 export default function ArtistScreen() {
@@ -51,7 +51,11 @@ export default function ArtistScreen() {
           {Boolean(error) && <Text style={styles.notice}>{error}</Text>}
           {!loading && !error && !songs.length && <Text style={styles.notice}>Nenhuma música disponível deste artista.</Text>}
         </>}
-        renderItem={({ item, index }) => <TouchableOpacity style={styles.songRow} onPress={() => play(index)}>
+        renderItem={({ item, index }) => <TouchableOpacity style={styles.songRow} onPress={() => play(index)} onLongPress={() => Alert.alert(item.title, 'O que deseja fazer?', [
+          { text: 'Adicionar à fila', onPress: () => { void addSongsToPlaybackQueue([item]); } },
+          { text: 'Reproduzir agora', onPress: () => { void play(index); } },
+          { text: 'Cancelar', style: 'cancel' },
+        ])}>
           {item.artworkUrl ? <Image source={{ uri: item.artworkUrl }} style={styles.cover} /> : <View style={[styles.cover, styles.placeholder]}><Ionicons name="musical-note" size={21} color="#777" /></View>}
           <View style={styles.songMeta}><Text style={styles.songTitle} numberOfLines={1}>{item.title}</Text><Text style={styles.songArtist} numberOfLines={1}>{item.artist}</Text></View><Ionicons name="play" size={19} color="#1db954" />
         </TouchableOpacity>}

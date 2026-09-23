@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-23T12:33:00-03:00",
+  "generatedAt": "2026-09-23T12:48:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
@@ -16,11 +16,11 @@
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.29",
-    "minimumVersion": "1.2.29",
+    "version": "1.2.30",
+    "minimumVersion": "1.2.30",
     "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.29.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.30.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Reproducao desktop estabilizada com cache local completo, validacao de downloads e carregamento sem streaming concorrente."
+    "releaseNotes": "Player desktop migrado para entrega local de audio via HTTP nativo, eliminando travamentos do protocolo interno do Electron."
   }
 }

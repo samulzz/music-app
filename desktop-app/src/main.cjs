@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const http = require('node:http');
 const { spawn } = require('node:child_process');
 const { Readable } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
@@ -31,6 +32,9 @@ const DISCORD_CLIENT_ID_ENV = 'NATIONMUSICS_DISCORD_CLIENT_ID';
 const DISCORD_DEFAULT_CLIENT_ID = '1519319956796473544';
 
 let mainWindow;
+let audioCacheServer = null;
+let audioCacheServerPort = 0;
+const audioCacheServerToken = randomUUID();
 const activePreparations = new Map();
 const activeAudioCacheDownloads = new Map();
 let discordClient = null;
@@ -879,7 +883,89 @@ async function cachedAudioResponse(filePath, request) {
 
 function streamUrl(song) {
   const sourceId = song.sourceId || song.id;
+  if (audioCacheServerPort) {
+    return `http://127.0.0.1:${audioCacheServerPort}/${audioCacheServerToken}/${encodeURIComponent(sourceId)}`;
+  }
   return `nationmusic://stream/${encodeURIComponent(sourceId)}?title=${encodeURIComponent(song.title)}&artist=${encodeURIComponent(song.artist || '')}`;
+}
+
+async function serveCachedAudio(request, response) {
+  try {
+    const requestedUrl = new URL(request.url || '/', 'http://127.0.0.1');
+    const parts = requestedUrl.pathname.split('/').filter(Boolean);
+    if (parts.length !== 2 || parts[0] !== audioCacheServerToken) {
+      response.writeHead(404).end();
+      return;
+    }
+
+    const sourceId = decodeURIComponent(parts[1]);
+    const filePath = cachedAudioFilePath(sourceId);
+    if (!(await hasUsableCachedAudio(filePath))) {
+      response.writeHead(404).end();
+      return;
+    }
+
+    const stat = await fsp.stat(filePath);
+    let start = 0;
+    let end = stat.size - 1;
+    let status = 200;
+    const match = String(request.headers.range || '').match(/^bytes=(\d*)-(\d*)$/);
+    if (match) {
+      status = 206;
+      if (match[1]) {
+        start = Number.parseInt(match[1], 10);
+        if (match[2]) end = Number.parseInt(match[2], 10);
+      } else if (match[2]) {
+        start = Math.max(stat.size - Number.parseInt(match[2], 10), 0);
+      }
+      end = Math.min(end, stat.size - 1);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= stat.size) {
+        response.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }).end();
+        return;
+      }
+    }
+
+    const headers = {
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'private, max-age=31536000, immutable',
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': String(end - start + 1),
+      ...(status === 206 ? { 'Content-Range': `bytes ${start}-${end}/${stat.size}` } : {}),
+    };
+    response.writeHead(status, headers);
+    if (request.method === 'HEAD') {
+      response.end();
+      return;
+    }
+    const stream = fs.createReadStream(filePath, { start, end });
+    response.once('close', () => {
+      if (!response.writableEnded) stream.destroy();
+    });
+    stream.once('error', () => {
+      if (!response.headersSent) response.writeHead(500);
+      response.end();
+    });
+    stream.pipe(response);
+  } catch {
+    if (!response.headersSent) response.writeHead(500);
+    response.end();
+  }
+}
+
+async function startAudioCacheServer() {
+  if (audioCacheServer) return;
+  audioCacheServer = http.createServer((request, response) => {
+    void serveCachedAudio(request, response);
+  });
+  await new Promise((resolve, reject) => {
+    audioCacheServer.once('error', reject);
+    audioCacheServer.listen(0, '127.0.0.1', () => {
+      audioCacheServer.off('error', reject);
+      const address = audioCacheServer.address();
+      audioCacheServerPort = address && typeof address === 'object' ? address.port : 0;
+      resolve();
+    });
+  });
 }
 
 async function handleAudioStream(request) {
@@ -940,6 +1026,9 @@ async function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // O desktop e um player de audio e precisa continuar estável quando a
+      // janela perde foco ou fica minimizada.
+      backgroundThrottling: false,
     },
   });
 
@@ -1277,10 +1366,14 @@ ipcMain.handle('discord:clear-activity', async () => clearDiscordActivity());
 
 app.whenReady().then(async () => {
   protocol.handle('nationmusic', handleAudioStream);
+  await startAudioCacheServer();
   await createWindow();
 });
 app.on('before-quit', () => {
   destroyDiscordClient();
+  audioCacheServer?.close();
+  audioCacheServer = null;
+  audioCacheServerPort = 0;
 });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();

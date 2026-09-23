@@ -717,7 +717,17 @@ function cachedAudioFilePath(sourceId) {
 async function hasUsableCachedAudio(filePath) {
   try {
     const stat = await fsp.stat(filePath);
-    return stat.isFile() && stat.size >= MIN_DESKTOP_AUDIO_BYTES;
+    if (!stat.isFile() || stat.size < MIN_DESKTOP_AUDIO_BYTES) return false;
+    const handle = await fsp.open(filePath, 'r');
+    try {
+      const header = Buffer.alloc(3);
+      await handle.read(header, 0, header.length, 0);
+      const hasId3Header = header.toString('ascii') === 'ID3';
+      const hasMpegFrame = header[0] === 0xff && (header[1] & 0xe0) === 0xe0;
+      return hasId3Header || hasMpegFrame;
+    } finally {
+      await handle.close();
+    }
   } catch {
     return false;
   }
@@ -792,6 +802,10 @@ async function ensureDesktopAudioCached(song) {
       if (!stat.isFile() || stat.size < MIN_DESKTOP_AUDIO_BYTES) {
         throw new Error('Arquivo de audio incompleto.');
       }
+      const expectedBytes = Number(response.headers.get('content-length'));
+      if (Number.isFinite(expectedBytes) && expectedBytes > 0 && stat.size !== expectedBytes) {
+        throw new Error(`Arquivo de audio incompleto (${stat.size}/${expectedBytes} bytes).`);
+      }
 
       await fsp.rm(filePath, { force: true });
       await fsp.rename(temporary, filePath);
@@ -843,7 +857,21 @@ async function cachedAudioResponse(filePath, request) {
   }
 
   headers.set('Content-Length', String(end - start + 1));
-  return new Response(Readable.toWeb(fs.createReadStream(filePath, { start, end })), {
+  // As faixas costumam ter poucos MB. Entregar o trecho como Buffer evita
+  // interrupcoes observadas na ponte Readable.toWeb do protocolo do Electron.
+  const handle = await fsp.open(filePath, 'r');
+  let body;
+  try {
+    const length = end - start + 1;
+    body = Buffer.allocUnsafe(length);
+    const { bytesRead } = await handle.read(body, 0, length, start);
+    if (bytesRead !== length) {
+      return new Response('Arquivo de audio incompleto.', { status: 500 });
+    }
+  } finally {
+    await handle.close();
+  }
+  return new Response(body, {
     status,
     headers,
   });
@@ -970,9 +998,10 @@ ipcMain.handle('music:prepare-stream', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) throw new Error('Esta música não possui uma origem válida.');
   await waitUntilPrepared(song);
-  void ensureDesktopAudioCached(song).catch((error) => {
-    console.warn('Cache local de audio indisponivel:', error instanceof Error ? error.message : error);
-  });
+  // O player sempre recebe uma faixa local completa. Antes, ele iniciava o
+  // streaming e baixava a mesma musica em paralelo, causando engasgos e cache
+  // incompleto mesmo em conexoes rapidas.
+  await ensureDesktopAudioCached(song);
   return streamUrl(song);
 });
 ipcMain.handle('music:download', async (_event, rawSong) => {

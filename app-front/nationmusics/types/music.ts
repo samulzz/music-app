@@ -100,6 +100,7 @@ export type AlbumSummary = {
   coverUrl?: string;
   songCount: number;
   playlistId?: number;
+  expectedSongCount?: number;
 };
 
 export type SmartSearchResponse = {
@@ -108,4 +109,5 @@ export type SmartSearchResponse = {
   artists: Array<{ name: string; artworkUrl?: string; songCount: number }>;
   albums: AlbumSummary[];
   playlists: ApiPlaylist[];
+  genres: Array<{ name: string; query: string; icon?: string; color?: string; tone?: string }>;
 };

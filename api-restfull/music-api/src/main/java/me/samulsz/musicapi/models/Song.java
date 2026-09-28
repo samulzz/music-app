@@ -17,6 +17,7 @@ public class Song {
     private String album;
     private String albumArtist;
     private Boolean albumMetadataChecked = false;
+    private Boolean genreMetadataChecked = false;
     private String uri;
     private String coverUrl;
     private String sourceId;
@@ -56,6 +57,8 @@ public class Song {
     public void setAlbumArtist(String albumArtist) { this.albumArtist = albumArtist; }
     public Boolean getAlbumMetadataChecked() { return albumMetadataChecked; }
     public void setAlbumMetadataChecked(Boolean albumMetadataChecked) { this.albumMetadataChecked = albumMetadataChecked; }
+    public Boolean getGenreMetadataChecked() { return genreMetadataChecked; }
+    public void setGenreMetadataChecked(Boolean genreMetadataChecked) { this.genreMetadataChecked = genreMetadataChecked; }
 
     public String getUri() {
         return uri;

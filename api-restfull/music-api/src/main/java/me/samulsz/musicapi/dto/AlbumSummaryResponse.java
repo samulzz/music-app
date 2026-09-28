@@ -5,5 +5,6 @@ public record AlbumSummaryResponse(
         String artist,
         String coverUrl,
         int songCount,
-        Long playlistId
+        Long playlistId,
+        Integer expectedSongCount
 ) {}

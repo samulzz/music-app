@@ -10,7 +10,9 @@ public record SmartSearchResponse(
         List<Song> songs,
         List<ArtistResult> artists,
         List<AlbumSummaryResponse> albums,
-        List<Playlist> playlists
+        List<Playlist> playlists,
+        List<GenreResult> genres
 ) {
     public record ArtistResult(String name, String artworkUrl, int songCount) {}
+    public record GenreResult(String name, String query, String icon, String color, String tone) {}
 }

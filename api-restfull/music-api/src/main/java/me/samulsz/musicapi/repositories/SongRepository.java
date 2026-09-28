@@ -81,6 +81,15 @@ public interface SongRepository extends JpaRepository<Song, Long> {
             """, nativeQuery = true)
     List<Song> findAlbumMetadataCandidates();
 
+    @Query(value = """
+            SELECT s.* FROM songs s
+            WHERE s.source_id IS NOT NULL AND TRIM(s.source_id) <> ''
+              AND (s.genre_metadata_checked IS NULL OR s.genre_metadata_checked = FALSE)
+            ORDER BY s.id
+            LIMIT 6
+            """, nativeQuery = true)
+    List<Song> findGenreMetadataCandidates();
+
     @Modifying
     @Query("update Song s set s.albumMetadataChecked = false where s.album is null or trim(s.album) = ''")
     int resetMissingAlbumMetadataChecks();

@@ -6,6 +6,7 @@ import me.samulsz.musicapi.models.Playlist;
 import me.samulsz.musicapi.models.Song;
 import me.samulsz.musicapi.repositories.PlaylistRepository;
 import me.samulsz.musicapi.repositories.SongRepository;
+import me.samulsz.musicapi.repositories.CatalogAlbumRepository;
 import org.springframework.stereotype.Service;
 
 import java.text.Normalizer;
@@ -20,19 +21,31 @@ import java.util.stream.Stream;
 
 @Service
 public class CatalogDiscoveryService {
+    private static final List<SmartSearchResponse.GenreResult> GENRES = List.of(
+            new SmartSearchResponse.GenreResult("Funk", "funk", "🔥", "#176b39", "green"),
+            new SmartSearchResponse.GenreResult("Piseiro", "piseiro", "🪗", "#8a4b19", "orange"),
+            new SmartSearchResponse.GenreResult("Sertanejo", "sertanejo", "🤠", "#70472b", "brown"),
+            new SmartSearchResponse.GenreResult("Gospel", "gospel", "✨", "#265a80", "blue"),
+            new SmartSearchResponse.GenreResult("Pagode", "pagode", "🥁", "#61447b", "purple"),
+            new SmartSearchResponse.GenreResult("Trap", "trap", "💎", "#742e3c", "red"),
+            new SmartSearchResponse.GenreResult("Forró", "forro", "🌵", "#7b651e", "yellow"),
+            new SmartSearchResponse.GenreResult("Rap", "rap", "🎤", "#1f6663", "teal")
+    );
     private final SongRepository songs;
     private final PlaylistRepository playlists;
     private final MusicService music;
+    private final CatalogAlbumRepository curatedAlbums;
 
-    public CatalogDiscoveryService(SongRepository songs, PlaylistRepository playlists, MusicService music) {
+    public CatalogDiscoveryService(SongRepository songs, PlaylistRepository playlists, MusicService music, CatalogAlbumRepository curatedAlbums) {
         this.songs = songs;
         this.playlists = playlists;
         this.music = music;
+        this.curatedAlbums = curatedAlbums;
     }
 
     public SmartSearchResponse search(String rawQuery) {
         String query = normalize(rawQuery);
-        if (query.isBlank()) return new SmartSearchResponse("", List.of(), List.of(), List.of(), List.of());
+        if (query.isBlank()) return new SmartSearchResponse("", List.of(), List.of(), List.of(), List.of(), List.of());
 
         List<ScoredSong> rankedSongs = songs.findAllCatalogSongs().stream()
                 .map(song -> new ScoredSong(song, songScore(song, query)))
@@ -77,9 +90,12 @@ public class CatalogDiscoveryService {
                 .map(Map.Entry::getKey)
                 .toList();
 
-        String correction = songResults.isEmpty() && artistResults.isEmpty() && albumResults.isEmpty() && playlistResults.isEmpty()
-                ? closestSuggestion(query) : "";
-        return new SmartSearchResponse(correction, songResults, artistResults, albumResults, playlistResults);
+        List<SmartSearchResponse.GenreResult> genreResults = GENRES.stream()
+                .filter(genre -> matches(normalize(genre.name()), query) || matches(normalize(genre.query()), query))
+                .toList();
+        String correction = songResults.isEmpty() && artistResults.isEmpty() && albumResults.isEmpty()
+                && playlistResults.isEmpty() && genreResults.isEmpty() ? closestSuggestion(query) : "";
+        return new SmartSearchResponse(correction, songResults, artistResults, albumResults, playlistResults, genreResults);
     }
 
     public List<AlbumSummaryResponse> listAlbums() {
@@ -107,11 +123,19 @@ public class CatalogDiscoveryService {
                     album.songCount = Math.max(album.songCount, playlist.getSongs().size());
                     if (album.coverUrl == null || album.coverUrl.isBlank()) album.coverUrl = playlist.getIconUrl();
                 });
+        curatedAlbums.findByAvailableTrackCountGreaterThanEqualOrderByUpdatedAtDesc(2).forEach(curated -> {
+            String key = normalize(curated.getName()) + "|" + normalize(curated.getArtist());
+            AlbumAccumulator album = grouped.computeIfAbsent(key,
+                    ignored -> new AlbumAccumulator(curated.getName(), curated.getArtist(), curated.getCoverUrl(), null));
+            album.songCount = Math.max(album.songCount, curated.getAvailableTrackCount());
+            album.expectedSongCount = curated.getExpectedTrackCount();
+            if (album.coverUrl == null || album.coverUrl.isBlank()) album.coverUrl = curated.getCoverUrl();
+        });
         return grouped.values().stream()
-                .filter(album -> album.songCount > 0)
+                .filter(album -> album.songCount >= 2)
                 .sorted(Comparator.comparing((AlbumAccumulator value) -> normalize(value.artist))
                         .thenComparing(value -> normalize(value.name)))
-                .map(album -> new AlbumSummaryResponse(album.name, album.artist, album.coverUrl, album.songCount, album.playlistId))
+                .map(album -> new AlbumSummaryResponse(album.name, album.artist, album.coverUrl, album.songCount, album.playlistId, album.expectedSongCount))
                 .toList();
     }
 
@@ -225,7 +249,7 @@ public class CatalogDiscoveryService {
         private int count() { return count; }
     }
     private static final class AlbumAccumulator {
-        private final String name; private final String artist; private String coverUrl; private int songCount; private Long playlistId;
+        private final String name; private final String artist; private String coverUrl; private int songCount; private Long playlistId; private Integer expectedSongCount;
         private AlbumAccumulator(String name, String artist, String coverUrl, Long playlistId) {
             this.name = name; this.artist = artist; this.coverUrl = coverUrl; this.playlistId = playlistId;
         }

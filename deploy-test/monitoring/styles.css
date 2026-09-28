@@ -25,6 +25,13 @@ header { display:flex; align-items:center; justify-content:space-between; gap:24
 .card { min-height:126px; padding:20px; border-radius:17px; }
 .card strong { display:block; margin:12px 0 5px; font-size:30px; letter-spacing:-1px; }
 .card small { color:var(--muted); }
+.catalog-cards { display:grid; grid-template-columns:repeat(5,minmax(120px,1fr)); gap:10px; margin-bottom:14px; }
+.catalog-cards .card { min-height:104px; padding:16px; }
+.catalog-cards .card strong { font-size:25px; }
+.job-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.job-card { padding:16px; border:1px solid #252d27; border-radius:14px; background:#0d100e; }
+.job-card header { display:flex; margin:0 0 9px; align-items:center; flex-direction:row; }
+.job-card strong { font-size:14px; }.job-card p { margin:0; color:var(--muted); font-size:13px; line-height:1.45; }.job-card time { color:#6e786f; font-size:11px; }
 .card[data-tone="danger"] strong { color:var(--red); } .card[data-tone="warning"] strong { color:var(--yellow); } .card[data-tone="good"] strong { color:var(--green); }
 .panel { min-width:0; padding:22px; border-radius:18px; }
 .panel.wide { margin-bottom:14px; }
@@ -37,5 +44,5 @@ table { width:100%; border-collapse:collapse; font-size:13px; } th { position:st
 .badge { display:inline-flex; padding:5px 8px; border-radius:999px; background:#262b27; font-size:10px; font-weight:900; letter-spacing:.5px; }.badge.error{background:#4a1e23;color:#ff9098}.badge.waiting{background:#40361d;color:#f6d67f}.badge.stalled{background:#472b1e;color:#f4aa7a}
 .notice { margin-bottom:14px; padding:13px 16px; border:1px solid #5b4820; border-radius:12px; background:#2a2416; color:#f1d385; }
 footer { padding:25px 0 5px; color:#68716b; font-size:12px; text-align:center; }
-@media(max-width:1050px){.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}
-@media(max-width:700px){.dashboard{padding:18px}header{align-items:flex-start;flex-direction:column}.toolbar{width:100%;flex-wrap:wrap}.toolbar select{flex:1}.cards{grid-template-columns:1fr}.login-card{padding:26px}.panel{padding:16px}}
+@media(max-width:1050px){.cards,.catalog-cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}}
+@media(max-width:700px){.dashboard{padding:18px}header{align-items:flex-start;flex-direction:column}.toolbar{width:100%;flex-wrap:wrap}.toolbar select{flex:1}.cards,.catalog-cards,.job-grid{grid-template-columns:1fr}.login-card{padding:26px}.panel{padding:16px}}

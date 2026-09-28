@@ -20,7 +20,6 @@ import { apiRequest } from '../../services/api';
 import { getSession } from '../../services/auth';
 import { downloadSong } from '../../services/offline-library';
 import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
-import { MUSIC_GENRES } from '../../constants/music-genres';
 
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -91,6 +90,7 @@ export default function SearchScreen() {
   const [albumResults, setAlbumResults] = useState<AlbumSummary[]>([]);
   const [featuredAlbums, setFeaturedAlbums] = useState<AlbumSummary[]>([]);
   const [artistResults, setArtistResults] = useState<SmartSearchResponse['artists']>([]);
+  const [genreResults, setGenreResults] = useState<SmartSearchResponse['genres']>([]);
   const [correctedQuery, setCorrectedQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
@@ -124,6 +124,7 @@ export default function SearchScreen() {
       setPlaylistResults([]);
       setAlbumResults([]);
       setArtistResults([]);
+      setGenreResults([]);
       setCorrectedQuery('');
       setSearchError('');
       setSearching(false);
@@ -144,6 +145,7 @@ export default function SearchScreen() {
       setPlaylistResults(smart?.playlists || []);
       setAlbumResults(smart?.albums || []);
       setArtistResults(smart?.artists || []);
+      setGenreResults(smart?.genres || []);
       setCorrectedQuery(smart?.correctedQuery || '');
       setSearchError(songs.length || smart?.playlists?.length || smart?.albums?.length || smart?.artists?.length ? '' : 'Nenhuma música, artista, álbum ou playlist encontrada.');
     } catch (error) {
@@ -152,6 +154,7 @@ export default function SearchScreen() {
       setPlaylistResults([]);
       setAlbumResults([]);
       setArtistResults([]);
+      setGenreResults([]);
       setCorrectedQuery('');
       setSearchError(error instanceof Error ? error.message : 'Tente novamente.');
     } finally {
@@ -178,6 +181,7 @@ export default function SearchScreen() {
       setPlaylistResults([]);
       setAlbumResults([]);
       setArtistResults([]);
+      setGenreResults([]);
       setCorrectedQuery('');
       setSearchError('');
       setSearching(false);
@@ -316,20 +320,20 @@ export default function SearchScreen() {
           removeClippedSubviews
           ListHeaderComponent={
             <View>
-              <Text style={styles.genreTitle}>Navegue por gênero</Text>
+              {genreResults.length > 0 && <><Text style={styles.genreTitle}>Gêneros</Text>
               <View style={styles.genreGrid}>
-                {MUSIC_GENRES.map((item) => (
+                {genreResults.map((item) => (
                   <TouchableOpacity
                     key={item.query}
-                    style={[styles.genreCard, { backgroundColor: item.color }]}
+                    style={[styles.genreCard, { backgroundColor: item.color || '#176b39' }]}
                     onPress={() => chooseGenre(item.query)}
                     activeOpacity={0.82}
                   >
                     <Text style={styles.genreName}>{item.name}</Text>
-                    <Ionicons name={item.icon} size={22} color="#ffffffcc" />
+                    <Ionicons name="musical-notes" size={22} color="#ffffffcc" />
                   </TouchableOpacity>
                 ))}
-              </View>
+              </View></>}
               {artistResults.length > 0 && (
                 <View style={styles.playlistSection}>
                   <Text style={styles.genreTitle}>Artistas</Text>

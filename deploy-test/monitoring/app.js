@@ -45,6 +45,21 @@ function renderSummary(summary) {
   const root=document.querySelector('#summary');root.replaceChildren(...cards.map(([label,value,caption,tone])=>{const el=document.createElement('article');el.className='card';el.dataset.tone=tone;const p=document.createElement('p');p.className='eyebrow';p.textContent=label;const strong=document.createElement('strong');strong.textContent=value;const small=document.createElement('small');small.textContent=caption;el.append(p,strong,small);return el}));
 }
 
+function renderCatalog(data) {
+  const percent=(value,total)=>total?`${Math.round(value*100/total)}%`:'0%';
+  const cards=[
+    ['Músicas no catálogo',data.songs,'Total analisável'],
+    ['Com álbum',percent(data.songsWithAlbum,data.songs),`${data.songsWithAlbum} identificadas`],
+    ['Com gênero',percent(data.songsWithGenre,data.songs),`${data.songsWithGenre} classificadas`],
+    ['Álbuns úteis',data.visibleAlbums,`${data.albums} descobertos`],
+    ['Fila prioritária',data.pendingImports,`${data.importedPriorities} já importadas`],
+  ];
+  document.querySelector('#catalog-summary').replaceChildren(...cards.map(([label,value,caption])=>{const el=document.createElement('article');el.className='card';const p=document.createElement('p');p.className='eyebrow';p.textContent=label;const strong=document.createElement('strong');strong.textContent=value;const small=document.createElement('small');small.textContent=caption;el.append(p,strong,small);return el}));
+  const job=(selector,title,item)=>{const root=document.querySelector(selector);const updated=item.updatedAt?formatDate(item.updatedAt):'Ainda não executado';root.innerHTML='';const header=document.createElement('header');const strong=document.createElement('strong');strong.textContent=title;const time=document.createElement('time');time.textContent=`${item.state} · ${updated}`;header.append(strong,time);const p=document.createElement('p');p.textContent=item.message||'Sem informações';root.append(header,p)};
+  job('#album-job','Montagem de álbuns',data.albumJob);job('#genre-job','Classificação de gêneros',data.genreJob);
+  document.querySelector('#catalog-updated').textContent=`Atualizado em ${formatDate(data.generatedAt)}`;
+}
+
 function renderProblems(rows) {
   const body=document.querySelector('#problem-songs');body.replaceChildren();
   if(!rows.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=4;td.className='muted';td.textContent='Nenhuma música problemática neste período.';tr.append(td);body.append(tr);return}
@@ -65,7 +80,7 @@ function renderTimeline(points) {
 
 async function loadDashboard(showLoading) {
   const button=document.querySelector('#refresh');if(showLoading)button.disabled=true;
-  try { const data=await request(`/admin/monitoring/dashboard?hours=${period.value}`);renderSummary(data.summary);renderProblems(data.problematicSongs);renderRecent(data.recentIncidents);renderTimeline(data.timeline);document.querySelector('#updated-at').textContent=`Atualizado em ${formatDate(data.generatedAt)}`;notice.classList.toggle('hidden',!data.summary.truncated);notice.textContent=data.summary.truncated?'A janela atingiu 20 mil eventos. Os indicadores consideram os eventos mais recentes.':''; }
+  try { const [data,catalog]=await Promise.all([request(`/admin/monitoring/dashboard?hours=${period.value}`),request('/admin/monitoring/catalog')]);renderSummary(data.summary);renderCatalog(catalog);renderProblems(data.problematicSongs);renderRecent(data.recentIncidents);renderTimeline(data.timeline);document.querySelector('#updated-at').textContent=`Atualizado em ${formatDate(data.generatedAt)}`;notice.classList.toggle('hidden',!data.summary.truncated);notice.textContent=data.summary.truncated?'A janela atingiu 20 mil eventos. Os indicadores consideram os eventos mais recentes.':''; }
   catch(error){if(error.status===401){sessionStorage.removeItem(tokenKey);showLogin('Sua sessão administrativa expirou.');return}notice.textContent=error.message||'Falha ao atualizar o painel.';notice.classList.remove('hidden')}finally{button.disabled=false}
 }
 

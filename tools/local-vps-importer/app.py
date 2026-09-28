@@ -477,6 +477,14 @@ def remote_env_value(client: paramiko.SSHClient, key: str, default: str = "") ->
     return value or default
 
 
+def get_remote_api_key(config: ImportConfig) -> str:
+    client = connect_ssh(config)
+    try:
+        return remote_env_value(client, "API_SECURITY_KEY", DEFAULT_API_KEY)
+    finally:
+        client.close()
+
+
 def upload_entries(config: ImportConfig, output_dir: Path, entries: list[dict[str, Any]], log) -> str:
     client = connect_ssh(config)
     sftp = None

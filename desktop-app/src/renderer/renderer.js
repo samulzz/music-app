@@ -2031,10 +2031,12 @@ async function restoreHomePlaybackPaused(resume) {
 
 async function renderHome(force = false) {
   state.view = 'home';
+  state.searchRequestId += 1;
   setPageHeader('BEM-VINDO DE VOLTA', 'Sua música, do seu jeito.');
   const cacheIsFresh = state.playlists.length && state.homeData
     && Date.now() - Math.min(state.playlistsFetchedAt, state.homeDataFetchedAt) < VIEW_CACHE_TTL_MS;
   if (!force && cacheIsFresh) {
+    if (state.view !== 'home') return;
     renderHomeContent();
     return;
   }
@@ -2276,18 +2278,9 @@ async function renderSearch(query = '', exactGenre = false) {
   state.searchRequestId = requestId;
   setPageHeader('ENCONTRE ALGO NOVO', query ? `Resultados para “${query}”` : 'O que vai ouvir hoje?');
   if (!query.trim()) {
-    const albums = await window.nation.getAlbums().catch(() => []);
-    if (requestId !== state.searchRequestId) return;
     contentView.innerHTML = `
-      <section class="home-section search-genres">
-        <div class="section-heading"><h2>Navegue por gênero</h2><span>Escolha um estilo para começar</span></div>
-        ${genreGridMarkup()}
-      </section>
-      ${albums.length ? `<section class="home-section"><div class="section-heading"><h2>Álbuns no catálogo</h2><span>${albums.length} disponíveis</span></div><div class="home-shelf search-playlist-grid">${albums.slice(0, 20).map((album, index) => `<article class="home-album-card" data-browse-album-index="${index}"><div>${album.coverUrl ? `<img src="${escapeHtml(album.coverUrl)}" alt="" />` : icon('music')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(album.name)}</strong><p>${escapeHtml(album.artist || `${album.songCount} músicas`)}</p></article>`).join('')}</div></section>` : ''}
-      <div class="empty-state"><b>Busque uma música, artista, álbum ou playlist</b><span>A busca entende acentos, palavras fora de ordem e pequenos erros de digitação.</span></div>
+      <div class="empty-state"><b>Busque uma música, artista, álbum, playlist ou gênero</b><span>A busca entende acentos, palavras fora de ordem e pequenos erros de digitação.</span></div>
     `;
-    bindGenreActions();
-    document.querySelectorAll('[data-browse-album-index]').forEach((card) => card.addEventListener('click', () => void renderAlbum(albums[Number(card.dataset.browseAlbumIndex)])));
     return;
   }
   setLoading('Buscando músicas...');
@@ -2298,7 +2291,7 @@ async function renderSearch(query = '', exactGenre = false) {
         : window.nation.smartSearch(query.trim()),
       window.nation.getLibrary(),
     ]);
-    if (requestId !== state.searchRequestId) return;
+    if (requestId !== state.searchRequestId || state.view !== 'search') return;
     const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
     const merged = (discovery.songs || []).map((song) => savedBySource.has(song.sourceId)
       ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
@@ -2306,11 +2299,9 @@ async function renderSearch(query = '', exactGenre = false) {
     const matchingPlaylists = discovery.playlists || [];
     const artists = discovery.artists || [];
     const albums = discovery.albums || [];
+    const genres = discovery.genres || [];
     contentView.innerHTML = `
-      <section class="home-section search-genres">
-        <div class="section-heading"><h2>Gêneros</h2><span>Explore outros estilos</span></div>
-        ${genreGridMarkup()}
-      </section>
+      ${genres.length ? `<section class="home-section search-genres"><div class="section-heading"><h2>Gêneros</h2><span>${genres.length} encontrados</span></div><div class="genre-grid">${genres.map((genre) => `<button class="genre-card genre-${escapeHtml(genre.tone || 'green')}" data-genre-query="${escapeHtml(genre.query)}" type="button"><span>${escapeHtml(genre.icon || '♫')}</span><strong>${escapeHtml(genre.name)}</strong></button>`).join('')}</div></section>` : ''}
       ${artists.length ? `<section class="home-section"><div class="section-heading"><h2>Artistas</h2><span>${artists.length} encontrados</span></div><div class="artist-results">${artists.map((artist, index) => `<button class="artist-result" data-artist-index="${index}" type="button">${artist.artworkUrl ? `<img src="${escapeHtml(artist.artworkUrl)}" alt="" />` : `<span class="artist-result-placeholder">${icon('users')}</span>`}<strong>${escapeHtml(artist.name)}</strong><small>Ver músicas</small></button>`).join('')}</div></section>` : ''}
       ${albums.length ? `<section class="home-section"><div class="section-heading"><h2>Álbuns</h2><span>${albums.length} encontrados</span></div><div class="home-shelf search-playlist-grid">${albums.map((album, index) => `<article class="home-album-card" data-search-album-index="${index}"><div>${album.coverUrl ? `<img src="${escapeHtml(album.coverUrl)}" alt="" />` : icon('music')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(album.name)}</strong><p>${escapeHtml(album.artist || `${album.songCount} músicas`)}</p></article>`).join('')}</div></section>` : ''}
       ${matchingPlaylists.length ? `<section class="home-section"><div class="section-heading"><h2>Playlists</h2><span>${matchingPlaylists.length} encontradas</span></div><div class="home-shelf search-playlist-grid">${matchingPlaylists.map((playlist, index) => `<article class="home-album-card" data-search-playlist-index="${index}"><div>${playlist.iconUrl ? `<img src="${escapeHtml(playlist.iconUrl)}" alt="" />` : icon('playlist')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(playlist.name)}</strong><p>${escapeHtml(playlist.description || 'Playlist do NationMusics')}</p></article>`).join('')}</div></section>` : ''}
@@ -2337,7 +2328,7 @@ async function renderSearch(query = '', exactGenre = false) {
     });
     bindSongActions();
   } catch (error) {
-    if (requestId !== state.searchRequestId) return;
+    if (requestId !== state.searchRequestId || state.view !== 'search') return;
     if (await handleAuthenticationError(error)) return;
     contentView.innerHTML = `<div class="empty-state"><b>Erro na busca</b><span>${escapeHtml(error.message)}</span></div>`;
   }

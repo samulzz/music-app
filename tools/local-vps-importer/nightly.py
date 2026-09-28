@@ -7,6 +7,7 @@ import os
 import sqlite3
 import sys
 import time
+import urllib.parse
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -221,6 +222,35 @@ def run(
     read_limit = min(200, max(max_source, int(raw.get("spotifyReadLimit", 100))))
     deadline = time.monotonic() + max(1, int(raw.get("maxRuntimeMinutes", 480))) * 60
     importer = load_importer()
+    base_config = importer.parse_config(
+        {
+            "sshHost": raw.get("sshHost"), "sshPort": raw.get("sshPort"), "sshUser": raw.get("sshUser"),
+            "sshPassword": ssh_password or os.environ.get("NATIONMUSICS_SSH_PASSWORD", ""),
+            "sshKeyPath": raw.get("sshKeyPath") or os.environ.get("NATIONMUSICS_SSH_KEY_PATH", ""),
+            "apiBase": raw.get("apiBase"), "spotifyUrl": sources[0].url,
+            "createPersonalPlaylist": False, "createGlobalPlaylist": False,
+            "sleepSeconds": raw.get("sleepSeconds", 8), "limit": read_limit,
+        }
+    )
+    priority_tracks: list[dict[str, Any]] = []
+    try:
+        api_key = importer.get_remote_api_key(base_config)
+        pending = importer.request_json(base_config.api_base, f"/catalog/import-priorities?limit={min(max_total, 100)}", api_key=api_key, timeout=60)
+        if isinstance(pending, list):
+            priority_tracks = [
+                {
+                    "spotifyId": str(item.get("externalTrackId") or ""), "title": item.get("title") or "",
+                    "artist": item.get("artist") or "", "album": item.get("album") or "",
+                    "albumArtist": item.get("albumArtist") or "", "coverUrl": item.get("coverUrl") or "",
+                    "durationMs": item.get("durationMs") or 0,
+                }
+                for item in pending if item.get("externalTrackId")
+            ]
+        if priority_tracks:
+            sources.insert(0, Source("Prioridades de álbuns", "backend-priority", False))
+            logger(f"Backend pediu prioridade para {len(priority_tracks)} faixa(s) ausente(s) de álbuns.")
+    except Exception as exc:
+        logger(f"Aviso: não foi possível ler prioridades de álbuns: {exc}")
     db = open_state(state_path)
     run_id = db.execute(
         "INSERT INTO runs (started_at, status) VALUES (?, 'running')", (now_iso(),)
@@ -238,11 +268,16 @@ def run(
             ):
                 break
             logger(f"Lendo fonte: {source.name}")
-            playlist = importer.run_json_script(
-                importer.DEPLOY_DIR / "spotify_playlist.py",
-                [source.url, str(read_limit)],
-                logger,
-            )
+            if source.url == "backend-priority":
+                playlist = {"spotifyId": "backend-priority", "type": "playlist", "name": source.name,
+                            "description": "Faixas ausentes de álbuns", "tracks": priority_tracks,
+                            "totalTracks": len(priority_tracks), "truncated": False}
+            else:
+                playlist = importer.run_json_script(
+                    importer.DEPLOY_DIR / "spotify_playlist.py",
+                    [source.url, str(read_limit)],
+                    logger,
+                )
             tracks = [track for track in playlist.get("tracks", []) if isinstance(track, dict)]
             remember_tracks(db, source, tracks)
             batch_limit = min(max_source, max_total - imported_total)
@@ -280,6 +315,12 @@ def run(
                 result = importer.run_import(import_config, logger, playlist_override=batch_playlist)
                 imported_ids = {str(item) for item in result.get("spotifyTrackIds", [])}
                 mark_result(db, selected, imported_ids)
+                if source.url == "backend-priority":
+                    for external_id in imported_ids:
+                        try:
+                            importer.request_json(base_config.api_base, "/catalog/import-priorities/" + urllib.parse.quote(external_id, safe="") + "/done", method="POST", api_key=api_key)
+                        except Exception as exc:
+                            logger(f"Aviso: faixa importada, mas prioridade não foi confirmada no backend: {exc}")
                 imported_total += len(imported_ids)
                 failed = len(selected) - len(imported_ids)
                 logger(f"{source.name}: {len(imported_ids)} importada(s), {failed} falha(s).")

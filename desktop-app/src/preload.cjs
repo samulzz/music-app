@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('nation', {
   getPlaylistSongs: (id) => ipcRenderer.invoke('playlists:songs', id),
   getDailyMix: () => ipcRenderer.invoke('recommendations:daily'),
   reportPlayback: (payload) => ipcRenderer.invoke('recommendations:listen', payload),
+  reportPlaybackTelemetry: (payload) => ipcRenderer.invoke('telemetry:playback-event', payload),
   sendRecommendationFeedback: (payload) => ipcRenderer.invoke('recommendations:feedback', payload),
   getPersonalPlaylists: () => ipcRenderer.invoke('personal-playlists:list'),
   getPersonalPlaylistSongs: (id) => ipcRenderer.invoke('personal-playlists:songs', id),

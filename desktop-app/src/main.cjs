@@ -1116,6 +1116,27 @@ ipcMain.handle('music:cache-stats', async () => {
   }
   return { count, bytes };
 });
+ipcMain.handle('telemetry:playback-event', async (_event, rawPayload) => {
+  const payload = rawPayload && typeof rawPayload === 'object' ? rawPayload : {};
+  const song = normalizeSong(payload.song || {});
+  await apiRequest('/telemetry/events', {
+    method: 'POST',
+    body: {
+      sessionId: String(payload.sessionId || '').slice(0, 36),
+      songId: Number.isFinite(Number(song.serverId || song.id)) ? Number(song.serverId || song.id) : null,
+      sourceId: song.sourceId || '',
+      title: song.title || '',
+      artist: song.artist || '',
+      eventType: String(payload.eventType || '').slice(0, 24),
+      platform: 'desktop',
+      appVersion: app.getVersion(),
+      loadTimeMs: Number.isFinite(Number(payload.loadTimeMs)) ? Math.max(0, Math.round(Number(payload.loadTimeMs))) : null,
+      positionSeconds: Number.isFinite(Number(payload.positionSeconds)) ? Math.max(0, Number(payload.positionSeconds)) : null,
+      message: String(payload.message || '').slice(0, 500),
+    },
+  });
+  return true;
+});
 ipcMain.handle('music:clear-cache', async () => {
   let entries = [];
   try { entries = await fsp.readdir(audioCacheDirectory(), { withFileTypes: true }); } catch { return true; }

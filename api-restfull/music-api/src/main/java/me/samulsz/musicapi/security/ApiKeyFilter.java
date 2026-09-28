@@ -18,6 +18,13 @@ public class ApiKeyFilter extends OncePerRequestFilter {
     private String apiKey;
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        // O painel administrativo usa uma sessão própria, curta e aleatória.
+        // A API key do aplicativo nunca é colocada no navegador.
+        return request.getRequestURI().startsWith("/api/admin/");
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
 

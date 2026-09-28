@@ -8,6 +8,7 @@ import TrackPlayer, {
   type MediaItem,
 } from '@rntp/player';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
 import type { MusicSong } from '../types/music';
@@ -26,6 +27,52 @@ const shuffleListeners = new Set<(enabled: boolean) => void>();
 let lastShuffleEnabled = false;
 let recommendationAppendInFlight: Promise<void> | null = null;
 let playbackQueueRevision = 0;
+let playbackTelemetry: { sessionId: string; song: MusicSong; startedAt: number; ready: boolean; lastWaitingAt: number } | null = null;
+
+function telemetrySong(item: MediaItem): MusicSong {
+  const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
+  return {
+    id: String(extras.songId || item.mediaId || ''),
+    sourceId: typeof extras.sourceId === 'string' ? extras.sourceId : String(item.mediaId || ''),
+    title: item.title || 'Música',
+    artist: item.artist || 'Artista desconhecido',
+    artworkUrl: typeof item.artworkUrl === 'string' ? item.artworkUrl : '',
+  };
+}
+
+function sendPlaybackTelemetry(eventType: string, details: { loadTimeMs?: number; message?: string } = {}) {
+  if (!playbackTelemetry) return;
+  const { song, sessionId } = playbackTelemetry;
+  void apiRequest('/telemetry/events', {
+    method: 'POST',
+    json: true,
+    body: JSON.stringify({
+      sessionId,
+      songId: Number.isFinite(Number(song.id)) ? Number(song.id) : null,
+      sourceId: song.sourceId || '',
+      title: song.title,
+      artist: song.artist,
+      eventType,
+      platform: Platform.OS === 'ios' ? 'ios' : 'android',
+      appVersion: Constants.expoConfig?.version || '',
+      loadTimeMs: details.loadTimeMs ?? null,
+      positionSeconds: TrackPlayer.getProgress().position,
+      message: details.message || '',
+    }),
+  }).catch(() => {});
+}
+
+function beginPlaybackTelemetry(item: MediaItem | null) {
+  if (!item) return;
+  playbackTelemetry = {
+    sessionId: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`,
+    song: telemetrySong(item),
+    startedAt: Date.now(),
+    ready: false,
+    lastWaitingAt: 0,
+  };
+  sendPlaybackTelemetry('LOAD_STARTED');
+}
 
 function queueOrigin(item: MediaItem) {
   return item.extras && typeof item.extras === 'object' ? item.extras.queueOrigin : undefined;
@@ -176,11 +223,25 @@ export function setupMusicPlayer() {
   // as sugestões precisavam ser anexadas antes e acabavam entrando no aleatório.
   TrackPlayer.setRepeatMode(RepeatMode.Off);
   TrackPlayer.setShuffleEnabled(false);
-  TrackPlayer.addEventListener(Event.MediaItemTransition, () => {
+  TrackPlayer.addEventListener(Event.MediaItemTransition, ({ item }) => {
+    beginPlaybackTelemetry(item);
     prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
   });
   TrackPlayer.addEventListener(Event.PlaybackStateChanged, ({ state }) => {
+    if (state === PlaybackState.Ready && playbackTelemetry && !playbackTelemetry.ready) {
+      playbackTelemetry.ready = true;
+      sendPlaybackTelemetry('READY', { loadTimeMs: Date.now() - playbackTelemetry.startedAt });
+    } else if (state === PlaybackState.Buffering && playbackTelemetry?.ready) {
+      const now = Date.now();
+      if (now - playbackTelemetry.lastWaitingAt >= 8_000) {
+        playbackTelemetry.lastWaitingAt = now;
+        sendPlaybackTelemetry('WAITING');
+      }
+    } else if (state === PlaybackState.Error) {
+      sendPlaybackTelemetry('ERROR', { message: 'O player nativo informou erro de reprodução.' });
+    }
     if (state !== PlaybackState.Ended) return;
+    sendPlaybackTelemetry('ENDED');
     const revision = playbackQueueRevision;
     void continueWithDailyRecommendations(revision);
   });

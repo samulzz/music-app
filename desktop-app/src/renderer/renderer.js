@@ -74,6 +74,9 @@ let friendListTimer = null;
 let jamHostTimer = null;
 let jamFollowTimer = null;
 let connectSyncTimer = null;
+let playbackTelemetrySessionId = '';
+let playbackLoadStartedAt = 0;
+const lastTelemetryIncidentAt = new Map();
 
 const ICONS = {
   home: '<path d="M3 10.8 12 4l9 6.8" /><path d="M5.5 10v9h13v-9" /><path d="M10 19v-5h4v5" />',
@@ -217,6 +220,7 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     getPlaylistSongs: async () => demoSongs,
     getDailyMix: async () => ({ songs: demoSongs }),
     reportPlayback: async () => true,
+    reportPlaybackTelemetry: async () => true,
     sendRecommendationFeedback: async () => true,
     getPersonalPlaylists: async () => [{ id: 10, name: 'Minha playlist', description: 'Criada por você.' }],
     getPersonalPlaylistSongs: async () => demoSongs.filter((song) => song.saved),
@@ -2547,9 +2551,31 @@ function reportCurrentPlayback(completed = false) {
   }).catch(() => {});
 }
 
+function reportPlaybackTelemetry(eventType, details = {}) {
+  const song = state.queue[state.queueIndex];
+  if (!song || !playbackTelemetrySessionId) return;
+  if (eventType === 'WAITING' || eventType === 'STALLED') {
+    const key = `${playbackTelemetrySessionId}:${eventType}`;
+    const now = Date.now();
+    if (now - (lastTelemetryIncidentAt.get(key) || 0) < 8_000) return;
+    lastTelemetryIncidentAt.set(key, now);
+  }
+  void window.nation.reportPlaybackTelemetry({
+    sessionId: playbackTelemetrySessionId,
+    eventType,
+    song,
+    positionSeconds: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+    loadTimeMs: details.loadTimeMs,
+    message: details.message || '',
+  }).catch(() => {});
+}
+
 async function loadCurrentTrack() {
   const song = state.queue[state.queueIndex];
   if (!song) return;
+  playbackTelemetrySessionId = crypto.randomUUID();
+  playbackLoadStartedAt = performance.now();
+  reportPlaybackTelemetry('LOAD_STARTED');
   $('#like-button')?.classList.remove('active');
   if ($('#like-button')) $('#like-button').title = 'Curtir';
   const requestId = ++state.trackLoadRequestId;
@@ -2584,6 +2610,7 @@ async function loadCurrentTrack() {
     audio.src = url;
     $('#player-artist').textContent = resolved.artist;
     await audio.play();
+    reportPlaybackTelemetry('READY', { loadTimeMs: Math.round(performance.now() - playbackLoadStartedAt) });
     await syncDiscordActivity(true);
     void syncHostedJamState(true);
     syncSongRows();
@@ -2817,6 +2844,7 @@ $('#connect-takeover')?.addEventListener('click', async () => {
 restoreSavedVolume();
 audio.addEventListener('play', () => {
   setPlayButtonIcon(true);
+  reportPlaybackTelemetry('PLAYING');
   void syncDiscordActivity(true);
   void syncFriendPresence(true);
   void syncHostedJamState(true);
@@ -2830,6 +2858,7 @@ audio.addEventListener('pause', () => {
   void syncConnectPlayback();
 });
 audio.addEventListener('ended', () => {
+  reportPlaybackTelemetry('ENDED');
   reportCurrentPlayback(true);
   void window.nation.clearDiscordActivity();
   void syncFriendPresence(true);
@@ -2837,10 +2866,13 @@ audio.addEventListener('ended', () => {
   nextTrack(1);
 });
 audio.addEventListener('error', () => {
+  reportPlaybackTelemetry('ERROR', { message: `MediaError ${audio.error?.code || 0}: ${audio.error?.message || 'erro desconhecido'}` });
   if (audio.src) showBanner('O streaming foi interrompido. Tente novamente.', true);
   void window.nation.clearDiscordActivity();
   void syncFriendPresence(true);
 });
+audio.addEventListener('waiting', () => reportPlaybackTelemetry('WAITING'));
+audio.addEventListener('stalled', () => reportPlaybackTelemetry('STALLED'));
 audio.addEventListener('timeupdate', () => {
   $('#current-time').textContent = formatTime(audio.currentTime);
   $('#duration').textContent = formatTime(audio.duration);

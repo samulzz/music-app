@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-23T12:48:00-03:00",
+  "generatedAt": "2026-09-27T23:49:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.27",
-    "versionCode": 29,
-    "minimumVersion": "1.1.27",
-    "minimumVersionCode": 29,
+    "version": "1.1.28",
+    "versionCode": 30,
+    "minimumVersion": "1.1.28",
+    "minimumVersionCode": 30,
     "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.27.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.28.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Fila de reproducao fiel, musicas adicionadas manualmente com prioridade, mix diario sem lista antiga e avisos de novidades."
+    "releaseNotes": "Monitoramento tecnico de carregamento e interrupcoes do player para melhorar a estabilidade."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.30",
-    "minimumVersion": "1.2.30",
+    "version": "1.2.31",
+    "minimumVersion": "1.2.31",
     "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.30.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.31.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Player desktop migrado para entrega local de audio via HTTP nativo, eliminando travamentos do protocolo interno do Electron."
+    "releaseNotes": "Monitoramento tecnico de carregamento, travamentos e erros do player integrado ao novo painel administrativo."
   }
 }

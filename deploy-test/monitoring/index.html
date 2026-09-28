@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'" />
+  <title>NationMusics Monitor</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main>
+    <section id="login-view" class="login-shell">
+      <form id="login-form" class="login-card">
+        <div class="brand">NM</div>
+        <p class="eyebrow">ADMINISTRAÇÃO</p>
+        <h1>Monitor de reprodução</h1>
+        <p class="muted">Entre com o mesmo usuário administrativo do importador.</p>
+        <label>Usuário<input id="username" autocomplete="username" required /></label>
+        <label>Senha<input id="password" type="password" autocomplete="current-password" required /></label>
+        <button type="submit">Entrar no painel</button>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+    </section>
+
+    <section id="dashboard-view" class="dashboard hidden">
+      <header>
+        <div><p class="eyebrow">NATIONMUSICS</p><h1>Saúde da reprodução</h1><p id="updated-at" class="muted"></p></div>
+        <div class="toolbar">
+          <select id="period" aria-label="Período"><option value="24">Últimas 24 horas</option><option value="168">Últimos 7 dias</option></select>
+          <button id="refresh" type="button" class="secondary">Atualizar</button>
+          <button id="logout" type="button" class="ghost">Sair</button>
+        </div>
+      </header>
+
+      <div id="notice" class="notice hidden"></div>
+      <section id="summary" class="cards"></section>
+
+      <section class="panel wide">
+        <div class="panel-head"><div><p class="eyebrow">LINHA DO TEMPO</p><h2>Incidentes por hora</h2></div><div class="legend"><span class="waiting">Espera</span><span class="stalled">Travamento</span><span class="errors">Erro</span></div></div>
+        <canvas id="timeline" height="230"></canvas>
+      </section>
+
+      <div class="grid">
+        <section class="panel">
+          <div class="panel-head"><div><p class="eyebrow">RANKING</p><h2>Músicas problemáticas</h2></div></div>
+          <div class="table-scroll"><table><thead><tr><th>Música</th><th>Incidentes</th><th>Carregamento</th><th>Pontuação</th></tr></thead><tbody id="problem-songs"></tbody></table></div>
+        </section>
+        <section class="panel">
+          <div class="panel-head"><div><p class="eyebrow">AGORA</p><h2>Incidentes recentes</h2></div></div>
+          <div class="table-scroll"><table><thead><tr><th>Horário</th><th>Evento</th><th>Música</th><th>Plataforma</th></tr></thead><tbody id="recent-incidents"></tbody></table></div>
+        </section>
+      </div>
+      <footer>Atualização automática a cada 30 segundos · Eventos mantidos por 30 dias</footer>
+    </section>
+  </main>
+  <script src="./app.js"></script>
+</body>
+</html>

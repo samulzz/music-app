@@ -16,10 +16,10 @@
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.34",
-    "minimumVersion": "1.2.34",
+    "version": "1.2.35",
+    "minimumVersion": "1.2.35",
     "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.34.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.35.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
     "releaseNotes": "Busca sem travamento ou pisca, gêneros como resultado e álbuns úteis no catálogo."
   }

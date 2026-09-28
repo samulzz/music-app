@@ -2045,6 +2045,7 @@ async function renderHome(force = false) {
   else setLoading('Carregando playlists...');
   try {
     const [playlists, home] = await Promise.all([window.nation.getPlaylists(), window.nation.getPersonalizedHome()]);
+    if (state.view !== 'home') return;
     state.playlists = playlists;
     state.homeData = home;
     state.playlistsFetchedAt = Date.now();

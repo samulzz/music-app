@@ -3,6 +3,7 @@ package me.samulsz.musicapi.repositories;
 import me.samulsz.musicapi.models.Song;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
@@ -53,6 +54,36 @@ public interface SongRepository extends JpaRepository<Song, Long> {
             LIMIT 500
             """, nativeQuery = true)
     List<Song> findCatalogSongsByArtist(@Param("artist") String artist);
+
+    @Query(value = """
+            SELECT s.* FROM songs s
+            WHERE s.source_id IS NOT NULL AND TRIM(s.source_id) <> ''
+              AND LOWER(COALESCE(s.album, '')) = LOWER(:album)
+              AND (:artist = '' OR LOWER(COALESCE(s.album_artist, s.artist, '')) LIKE LOWER(CONCAT('%', :artist, '%')))
+            ORDER BY LOWER(s.title), s.id
+            """, nativeQuery = true)
+    List<Song> findCatalogSongsByAlbum(@Param("album") String album, @Param("artist") String artist);
+
+    @Query(value = """
+            SELECT s.* FROM songs s
+            WHERE s.source_id IS NOT NULL AND TRIM(s.source_id) <> ''
+            ORDER BY s.id DESC
+            """, nativeQuery = true)
+    List<Song> findAllCatalogSongs();
+
+    @Query(value = """
+            SELECT s.* FROM songs s
+            WHERE s.source_id IS NOT NULL AND TRIM(s.source_id) <> ''
+              AND (s.album IS NULL OR TRIM(s.album) = '')
+              AND (s.album_metadata_checked IS NULL OR s.album_metadata_checked = FALSE)
+            ORDER BY s.id
+            LIMIT 20
+            """, nativeQuery = true)
+    List<Song> findAlbumMetadataCandidates();
+
+    @Modifying
+    @Query("update Song s set s.albumMetadataChecked = false where s.album is null or trim(s.album) = ''")
+    int resetMissingAlbumMetadataChecks();
 
     @Query("select distinct s from Song s join s.genres g where lower(g) = lower(:genre) order by lower(s.title), lower(s.artist)")
     List<Song> findByExactGenre(@Param("genre") String genre);

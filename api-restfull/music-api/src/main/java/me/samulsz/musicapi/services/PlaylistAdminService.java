@@ -139,6 +139,12 @@ public class PlaylistAdminService {
         if (title != null) song.setTitle(title);
         if (artist != null) song.setArtist(artist);
 
+        String album = safeTrim(request.getAlbum());
+        if (album != null) song.setAlbum(album);
+        String albumArtist = safeTrim(request.getAlbumArtist());
+        if (albumArtist != null) song.setAlbumArtist(albumArtist);
+        if (album != null) song.setAlbumMetadataChecked(true);
+
         String coverUrl = safeTrim(request.getCoverUrl());
         if (coverUrl != null) song.setCoverUrl(coverUrl);
 
@@ -165,6 +171,8 @@ public class PlaylistAdminService {
         playlist.setDescription(request.getDescription());
         playlist.setIconUrl(request.getIconUrl());
         playlist.setGlobalPlaylist(request.getGlobalPlaylist() == null || request.getGlobalPlaylist());
+        String collectionType = safeTrim(request.getCollectionType());
+        playlist.setCollectionType("album".equalsIgnoreCase(collectionType) ? "album" : "playlist");
     }
 
     private String safeTrim(String value) {

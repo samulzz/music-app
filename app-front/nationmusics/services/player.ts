@@ -408,6 +408,37 @@ export async function playSongQueue(
   return startIndex;
 }
 
+export async function restorePausedSongQueue(
+  songs: MusicSong[],
+  requestedIndex: number,
+  positionSeconds: number,
+  context: PlaybackContext | null = null,
+) {
+  setupMusicPlayer();
+  if (TrackPlayer.getQueue().length) return false;
+  const playableSongs = await mergeWithOfflineLibrary(songs);
+  const needsNetwork = playableSongs.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
+  const headers = needsNetwork ? await getMediaHeaders() : undefined;
+  const queue: MediaItem[] = [];
+  let queueIndex = -1;
+  playableSongs.forEach((song, index) => {
+    if (!song.localUri && !headers) return;
+    const item = toMediaItem(song, headers, 'playlist');
+    if (!item) return;
+    if (index === requestedIndex) queueIndex = queue.length;
+    item.extras = { ...item.extras, queueSequence: index };
+    queue.push(item);
+  });
+  if (queueIndex < 0 || !queue.length) return false;
+  playbackQueueRevision += 1;
+  playbackContext = context;
+  TrackPlayer.setMediaItems(queue, queueIndex);
+  TrackPlayer.seekTo(Math.max(0, positionSeconds));
+  TrackPlayer.pause();
+  prefetchNextInQueue(queueIndex);
+  return true;
+}
+
 export function getPlaybackContext() { return playbackContext; }
 
 export async function addSongsToPlaybackQueue(songs: MusicSong[]) {

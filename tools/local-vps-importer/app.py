@@ -650,6 +650,8 @@ def save_to_user_library(
         payload = {
             "title": entry.get("title") or entry["sourceId"],
             "artist": entry.get("artist") or "",
+            "album": entry.get("album") or "",
+            "albumArtist": entry.get("albumArtist") or "",
             "uri": stream_url(config.api_base, entry),
             "coverUrl": entry.get("coverUrl") or "",
             "sourceId": entry["sourceId"],
@@ -682,6 +684,8 @@ def import_songs_to_catalog(
         payload = {
             "title": entry.get("title") or entry["sourceId"],
             "artist": entry.get("artist") or "",
+            "album": entry.get("album") or "",
+            "albumArtist": entry.get("albumArtist") or "",
             "uri": stream_url(config.api_base, entry),
             "coverUrl": entry.get("coverUrl") or "",
             "sourceId": entry["sourceId"],
@@ -719,6 +723,7 @@ def upsert_personal_playlist(
         "description": f"Musicas selecionadas da playlist {name}.",
         "iconUrl": playlist.get("coverUrl") or None,
         "globalPlaylist": False,
+        "collectionType": "album" if playlist.get("type") == "album" else "playlist",
     }
     playlists = request_json(config.api_base, "/playlists/personal", api_key=api_key, token=token, timeout=60)
     name_key = normalize_playlist_name(name)
@@ -821,6 +826,7 @@ def upsert_global_playlist(
         "description": f"Musicas selecionadas da playlist {name}.",
         "iconUrl": playlist.get("coverUrl") or None,
         "globalPlaylist": True,
+        "collectionType": "album" if playlist.get("type") == "album" else "playlist",
     }
     playlists = request_json(config.api_base, "/admin/playlists", api_key=api_key, admin_token=admin_token)
     name_key = normalize_playlist_name(name)
@@ -876,12 +882,22 @@ def run_import(
         DEPLOY_DIR / "spotify_playlist.py", [config.spotify_url, str(config.limit)], log
     )
     log(f"Spotify: {playlist.get('name')} ({len(playlist.get('tracks', []))} faixa(s))")
+    if playlist.get("type") == "album":
+        album_artist = next((str(track.get("artist") or "").split(",")[0].strip() for track in playlist.get("tracks", []) if track.get("artist")), "")
+        for track in playlist.get("tracks", []):
+            track["album"] = playlist.get("name") or ""
+            track["albumArtist"] = album_artist
     inferred_genres = infer_playlist_genres(playlist)
     with PotTunnel(config, log) as tunnel:
         pot_url = f"http://127.0.0.1:{tunnel.local_port}"
         output_dir, entries = precache_playlist(config, playlist, pot_url, log)
     for entry in entries:
         entry["genres"] = sorted(set(entry.get("genres") or []) | set(inferred_genres))
+        if playlist.get("type") == "album":
+            entry["album"] = playlist.get("name") or ""
+            entry["albumArtist"] = next((str(track.get("albumArtist") or "") for track in playlist.get("tracks", []) if track.get("albumArtist")), "")
+            if playlist.get("coverUrl"):
+                entry["coverUrl"] = playlist["coverUrl"]
     api_key = upload_entries(config, output_dir, entries, log)
     user_song_ids: list[int] = []
     personal_playlist_id = None

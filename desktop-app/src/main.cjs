@@ -629,6 +629,8 @@ function normalizeSong(song, saved = false) {
     sourceId,
     title: String(song.title ?? song.titulo ?? 'Música'),
     artist: String(song.artist ?? song.artista ?? 'Artista desconhecido'),
+    album: String(song.album ?? ''),
+    albumArtist: String(song.albumArtist ?? ''),
     artworkUrl: song.artworkUrl ?? song.coverUrl ?? song.capa ?? '',
     serverId: Number.isFinite(Number(song.id)) ? Number(song.id) : undefined,
     saved,
@@ -1083,6 +1085,17 @@ ipcMain.handle('music:artist', async (_event, artist) => {
   const songs = await apiRequest(`/songs/artist?name=${encodeURIComponent(String(artist || '').trim())}`);
   return songs.map((song) => normalizeSong(song, false));
 });
+ipcMain.handle('catalog:search', async (_event, query) => {
+  const result = await apiRequest(`/catalog/search?q=${encodeURIComponent(String(query || '').trim())}`);
+  return { ...result, songs: (result.songs || []).map((song) => normalizeSong(song, false)) };
+});
+ipcMain.handle('catalog:albums', async () => apiRequest('/catalog/albums'));
+ipcMain.handle('catalog:album-songs', async (_event, album) => {
+  const query = new URLSearchParams({ name: String(album?.name || ''), artist: String(album?.artist || '') });
+  if (album?.playlistId) query.set('playlistId', String(album.playlistId));
+  const songs = await apiRequest(`/catalog/albums/songs?${query.toString()}`);
+  return songs.map((song) => normalizeSong(song, false));
+});
 ipcMain.handle('music:prepare-stream', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) throw new Error('Esta música não possui uma origem válida.');
@@ -1161,6 +1174,8 @@ ipcMain.handle('library:save', async (_event, rawSong) => {
     body: {
       title: song.title,
       artist: song.artist,
+      album: song.album,
+      albumArtist: song.albumArtist,
       uri: `${API_BASE_URL}/musicas/baixar/${encodeURIComponent(song.sourceId)}`,
       coverUrl: song.artworkUrl,
       sourceId: song.sourceId,

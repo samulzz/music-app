@@ -2,6 +2,8 @@ export type MusicSong = {
   id: string;
   title: string;
   artist: string;
+  album?: string;
+  albumArtist?: string;
   artworkUrl?: string;
   sourceId?: string;
   localUri?: string;
@@ -16,6 +18,8 @@ export type ApiLibrarySong = {
   id: number | string;
   title: string;
   artist: string;
+  album?: string;
+  albumArtist?: string;
   coverUrl?: string;
   sourceId?: string;
   uri?: string;
@@ -27,6 +31,8 @@ export type ApiSearchSong = {
   sourceId?: string;
   title?: string;
   artist?: string;
+  album?: string;
+  albumArtist?: string;
   coverUrl?: string;
   uri?: string;
   titulo?: string;
@@ -66,6 +72,8 @@ export function fromApiLibrarySong(song: ApiLibrarySong): MusicSong {
     id: String(song.id),
     title: song.title,
     artist: song.artist,
+    album: song.album,
+    albumArtist: song.albumArtist,
     artworkUrl: song.coverUrl,
     sourceId: song.sourceId,
     genres: song.genres,
@@ -79,7 +87,25 @@ export function fromApiSearchSong(song: ApiSearchSong): MusicSong {
     sourceId,
     title: song.title || song.titulo || 'Musica',
     artist: song.artist || song.artista || 'Artista desconhecido',
+    album: song.album,
+    albumArtist: song.albumArtist,
     artworkUrl: song.coverUrl || song.capa,
     genres: song.genres,
   };
 }
+
+export type AlbumSummary = {
+  name: string;
+  artist: string;
+  coverUrl?: string;
+  songCount: number;
+  playlistId?: number;
+};
+
+export type SmartSearchResponse = {
+  correctedQuery?: string;
+  songs: ApiSearchSong[];
+  artists: Array<{ name: string; artworkUrl?: string; songCount: number }>;
+  albums: AlbumSummary[];
+  playlists: ApiPlaylist[];
+};

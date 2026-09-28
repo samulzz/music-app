@@ -34,6 +34,7 @@ export default function RootLayout() {
           <Stack.Screen name="(tabs)" />
           <Stack.Screen name="playlist/[id]" />
           <Stack.Screen name="artist/[name]" />
+          <Stack.Screen name="album/[name]" />
           <Stack.Screen name="jam/[code]" />
         </Stack>
       </MandatoryUpdateGate>

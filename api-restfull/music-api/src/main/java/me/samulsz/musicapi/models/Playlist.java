@@ -22,6 +22,9 @@ public class Playlist {
 
     private String iconUrl;
 
+    @Column(length = 24)
+    private String collectionType = "playlist";
+
     @Column(nullable = false)
     private boolean globalPlaylist = true;
 
@@ -69,6 +72,11 @@ public class Playlist {
 
     public void setIconUrl(String iconUrl) {
         this.iconUrl = iconUrl;
+    }
+
+    public String getCollectionType() { return collectionType == null || collectionType.isBlank() ? "playlist" : collectionType; }
+    public void setCollectionType(String collectionType) {
+        this.collectionType = collectionType == null || collectionType.isBlank() ? "playlist" : collectionType;
     }
 
     public boolean isGlobalPlaylist() {

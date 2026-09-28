@@ -21,7 +21,7 @@ import { fromApiLibrarySong } from '../../types/music';
 import { apiRequest, OfflineError } from '../../services/api';
 import { getSession } from '../../services/auth';
 import { getPersonalizedHome, type PersonalizedHome } from '../../services/recommendations';
-import { playSongQueue, seekToPosition } from '../../services/player';
+import { playSongQueue, restorePausedSongQueue, seekToPosition } from '../../services/player';
 import { MUSIC_GENRES } from '../../constants/music-genres';
 
 type HomePlaylist = {
@@ -81,6 +81,7 @@ export default function HomePlaylistsScreen() {
   const hydratedRef = useRef(false);
   const lastRefreshAtRef = useRef(0);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const restoredPlayerRef = useRef(false);
 
   useEffect(() => {
     getSession().then((session) => setUsername(session?.username || '')).catch(() => {});
@@ -227,7 +228,7 @@ export default function HomePlaylistsScreen() {
     }
   }, []);
 
-  const resumePlayback = useCallback(async (item: NonNullable<PersonalizedHome['continueListening']>) => {
+  const restorePausedPlayback = useCallback(async (item: NonNullable<PersonalizedHome['continueListening']>) => {
     const fallback: MusicSong = { ...item.song, id: item.song.id || item.song.sourceId || '' };
     try {
       let queue = [fallback];
@@ -241,6 +242,8 @@ export default function HomePlaylistsScreen() {
               ? `/playlists/personal/${encodeURIComponent(context.id)}/songs`
               : context.type === 'library'
                 ? '/songs/my-library'
+                : context.type === 'album'
+                  ? `/catalog/albums/songs?name=${encodeURIComponent(context.name || context.id)}${/^\d+$/.test(context.id) ? `&playlistId=${encodeURIComponent(context.id)}` : ''}`
                 : `/playlists/${encodeURIComponent(context.id)}/songs`;
         const raw = context.type === 'daily'
           ? personalized?.dailyMix.songs || []
@@ -249,16 +252,19 @@ export default function HomePlaylistsScreen() {
         if (restored.length) queue = restored;
       }
       const target = queue.findIndex((song) => (song.sourceId || song.id) === (fallback.sourceId || fallback.id));
-      await playSongQueue(queue, target >= 0 ? target : 0, 'playlist', context);
-      seekToPosition(item.positionSeconds);
-    } catch (error) {
-      Alert.alert('Não foi possível continuar', error instanceof Error ? error.message : 'Tente novamente.');
-    }
+      await restorePausedSongQueue(queue, target >= 0 ? target : 0, item.positionSeconds, context);
+    } catch {}
   }, [personalized]);
 
   const resume = personalized?.continueListening;
   const recentSongs = (personalized?.recentSongs || []).map(fromApiLibrarySong);
   const recommendedSongs = (personalized?.recommendedSongs || []).map(fromApiLibrarySong);
+
+  useEffect(() => {
+    if (!resume || restoredPlayerRef.current) return;
+    restoredPlayerRef.current = true;
+    void restorePausedPlayback(resume);
+  }, [restorePausedPlayback, resume]);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -315,24 +321,6 @@ export default function HomePlaylistsScreen() {
             )}
             ListHeaderComponent={(playlists[0] || personalized) ? (
               <View>
-                {resume && (
-                  <TouchableOpacity
-                    style={styles.continueCard}
-                    onPress={() => void resumePlayback(resume)}
-                    activeOpacity={0.86}
-                  >
-                    {resume.song.artworkUrl ? <Image source={{ uri: resume.song.artworkUrl }} style={styles.continueCover} /> : (
-                      <View style={[styles.continueCover, styles.artPlaceholder]}><Ionicons name="musical-note" size={28} color="#1db954" /></View>
-                    )}
-                    <View style={styles.continueMeta}>
-                      <Text style={styles.featuredEyebrow}>CONTINUAR OUVINDO</Text>
-                      <Text style={styles.continueTitle} numberOfLines={1}>{resume.song.title}</Text>
-                      <Text style={styles.continueArtist} numberOfLines={1}>{resume.song.artist}</Text>
-                      <View style={styles.resumeTrack}><View style={[styles.resumeProgress, { width: `${Math.min(100, (resume.positionSeconds / Math.max(1, resume.durationSeconds)) * 100)}%` }]} /></View>
-                    </View>
-                    <View style={styles.featuredPlay}><Ionicons name="play" size={20} color="#111" /></View>
-                  </TouchableOpacity>
-                )}
                 {playlists[0] && <TouchableOpacity style={styles.featuredCard} onPress={() => openPlaylist(playlists[0])} activeOpacity={0.84}>
                   {playlists[0].iconUrl ? (
                     <Image source={{ uri: playlists[0].iconUrl }} style={styles.featuredCover} />

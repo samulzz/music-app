@@ -1248,6 +1248,10 @@ nav {
 .artist-hero span { color: #1db954; font-size: 11px; font-weight: 900; letter-spacing: 2px; }
 .artist-hero h2 { font-size: clamp(28px, 4vw, 52px); margin: 9px 0; }
 .artist-hero p { color: #aaa; margin: 0; }
+.artist-hero.album-hero .artist-hero-cover { border-radius: 14px; }
+.search-correction { display: flex; align-items: center; gap: 8px; margin: 0 0 24px; padding: 10px 14px; border: 1px solid #285d3a; border-radius: 999px; background: #17251c; color: #9ee5b5; cursor: pointer; font-weight: 800; }
+.search-correction:hover { background: #1d3325; }
+.search-correction .app-icon { width: 17px; height: 17px; }
 @media (max-width: 700px) { .artist-hero { gap: 16px; padding: 18px; } .artist-hero-cover { width: 110px; height: 110px; flex-basis: 110px; } }
 
 .danger-button { min-height: 42px; padding: 0 16px; border: 1px solid #5b3030; border-radius: 10px; background: #351d1d; color: #ffb1b1; cursor: pointer; font-weight: 800; }

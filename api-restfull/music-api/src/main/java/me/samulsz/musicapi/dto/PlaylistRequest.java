@@ -5,6 +5,7 @@ public class PlaylistRequest {
     private String description;
     private String iconUrl;
     private Boolean globalPlaylist;
+    private String collectionType;
 
     public String getName() {
         return name;
@@ -37,4 +38,7 @@ public class PlaylistRequest {
     public void setGlobalPlaylist(Boolean globalPlaylist) {
         this.globalPlaylist = globalPlaylist;
     }
+
+    public String getCollectionType() { return collectionType; }
+    public void setCollectionType(String collectionType) { this.collectionType = collectionType; }
 }

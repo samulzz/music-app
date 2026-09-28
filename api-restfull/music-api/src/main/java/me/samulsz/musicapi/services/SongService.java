@@ -38,6 +38,9 @@ public class SongService {
 
         song.setTitle(request.getTitle());
         song.setArtist(request.getArtist());
+        if (request.getAlbum() != null && !request.getAlbum().isBlank()) song.setAlbum(request.getAlbum().trim());
+        if (request.getAlbumArtist() != null && !request.getAlbumArtist().isBlank()) song.setAlbumArtist(request.getAlbumArtist().trim());
+        if (request.getAlbum() != null && !request.getAlbum().isBlank()) song.setAlbumMetadataChecked(true);
         song.setUri(request.getUri());
         song.setCoverUrl(request.getCoverUrl());
         if (request.getSourceId() != null && !request.getSourceId().isBlank()) {
@@ -80,6 +83,15 @@ public class SongService {
         String name = artist == null ? "" : artist.trim();
         if (name.isBlank() || name.length() > 120) return java.util.List.of();
         return songRepository.findCatalogSongsByArtist(name).stream()
+                .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
+                .toList();
+    }
+
+    public java.util.List<Song> findByAlbum(String album, String artist) {
+        String name = album == null ? "" : album.trim();
+        String albumArtist = artist == null ? "" : artist.trim();
+        if (name.isBlank() || name.length() > 180 || albumArtist.length() > 180) return java.util.List.of();
+        return songRepository.findCatalogSongsByAlbum(name, albumArtist).stream()
                 .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
                 .toList();
     }

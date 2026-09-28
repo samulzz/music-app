@@ -46,6 +46,9 @@ const state = {
   connectSyncInFlight: false,
   pendingResumePosition: 0,
   playbackContext: null,
+  artistName: '',
+  albumName: '',
+  albumSummary: null,
 };
 
 const DISCORD_DEFAULT_CLIENT_ID = '1519319956796473544';
@@ -193,6 +196,9 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     search: async () => demoSongs,
     searchGenre: async () => demoSongs,
     getArtistSongs: async (artist) => demoSongs.filter((song) => song.artist.toLowerCase().includes(String(artist).toLowerCase())),
+    smartSearch: async () => ({ correctedQuery: '', songs: demoSongs, artists: [{ name: 'Nation Sessions', artworkUrl: '', songCount: 1 }], albums: [], playlists: [] }),
+    getAlbums: async () => [],
+    getAlbumSongs: async () => demoSongs,
     prepareStream: async () => '',
     downloadSong: async () => true,
     isSongDownloaded: async (song) => Boolean(song.downloaded),
@@ -1941,7 +1947,6 @@ function renderHomeContent(playlists = state.playlists, home = state.homeData) {
   const featured = playlists[0];
   const quick = playlists.slice(0, 6);
   const shelf = playlists;
-  const resume = home?.continueListening;
   const recent = home?.recentSongs || [];
   const recommended = home?.recommendedSongs || [];
   const artists = home?.topArtists || [];
@@ -1952,11 +1957,6 @@ function renderHomeContent(playlists = state.playlists, home = state.homeData) {
       <strong>${escapeHtml(song.title)}</strong><small>${escapeHtml(song.artist)}</small>
     </button>`).join('')}</div>`;
   contentView.innerHTML = `
-    ${resume ? `<section class="home-continue" id="home-continue">
-      <div class="home-continue-art">${resume.song.artworkUrl ? `<img src="${escapeHtml(resume.song.artworkUrl)}" alt="" />` : icon('music')}</div>
-      <div class="home-continue-copy"><span>CONTINUAR OUVINDO</span><h2>${escapeHtml(resume.song.title)}</h2><p>${escapeHtml(resume.song.artist)}</p><div><i style="width:${Math.min(100, (Number(resume.positionSeconds) / Math.max(1, Number(resume.durationSeconds))) * 100)}%"></i></div></div>
-      <button type="button" title="Continuar do ponto salvo">${icon('play')}</button>
-    </section>` : ''}
     ${featured ? `<section class="home-hero" data-home-index="0">
       <div class="home-hero-art">${featured.iconUrl ? `<img src="${escapeHtml(featured.iconUrl)}" alt="" />` : icon('music')}</div>
       <div class="home-hero-copy"><span>DESTAQUE DO NATIONMUSICS</span><h2>${escapeHtml(featured.name)}</h2><p>${escapeHtml(featured.description || 'Uma seleção pronta para tocar.')}</p><button class="home-hero-play" type="button">${icon('play')} Ouvir agora</button></div>
@@ -1985,7 +1985,6 @@ function renderHomeContent(playlists = state.playlists, home = state.homeData) {
   document.querySelectorAll('[data-home-index]').forEach((card) => {
     card.addEventListener('click', () => openPlaylist(playlists[Number(card.dataset.homeIndex)]));
   });
-  $('#home-continue')?.addEventListener('click', () => void resumeHomePlayback(resume));
   document.querySelectorAll('[data-home-recent]').forEach((card) => card.addEventListener('click', () => playQueue([recent[Number(card.dataset.homeRecent)]], 0)));
   document.querySelectorAll('[data-home-recommended]').forEach((card) => card.addEventListener('click', () => playQueue([recommended[Number(card.dataset.homeRecommended)]], 0)));
   document.querySelectorAll('[data-home-artist]').forEach((card) => card.addEventListener('click', () => void renderArtist(artists[Number(card.dataset.homeArtist)].name)));
@@ -2002,6 +2001,7 @@ async function resumeHomePlayback(resume) {
     if (context) {
       if (context.type === 'personal') songs = await window.nation.getPersonalPlaylistSongs(context.id);
       else if (context.type === 'library') songs = await window.nation.getLibrary();
+      else if (context.type === 'album') songs = await window.nation.getAlbumSongs({ name: context.name || context.id, playlistId: /^\d+$/.test(context.id) ? Number(context.id) : undefined });
       else songs = await window.nation.getPlaylistSongs(context.id);
     }
   } catch {}
@@ -2010,6 +2010,23 @@ async function resumeHomePlayback(resume) {
   const index = Math.max(0, songs.findIndex((song) => songIdentity(song) === targetIdentity));
   state.pendingResumePosition = Math.max(0, Number(resume.positionSeconds) || 0);
   playQueue(songs, index, context);
+}
+
+async function restoreHomePlaybackPaused(resume) {
+  if (!resume?.song || state.queue.length || audio.src) return;
+  const fallback = { ...resume.song, id: resume.song.id || resume.song.sourceId };
+  const context = resume.contextId ? { type: resume.contextType || 'global', id: String(resume.contextId), name: resume.contextName || '' } : null;
+  let songs = [fallback];
+  try {
+    if (context?.type === 'personal') songs = await window.nation.getPersonalPlaylistSongs(context.id);
+    else if (context?.type === 'library') songs = await window.nation.getLibrary();
+    else if (context?.type === 'album') songs = await window.nation.getAlbumSongs({ name: context.name || context.id, playlistId: /^\d+$/.test(context.id) ? Number(context.id) : undefined });
+    else if (context) songs = await window.nation.getPlaylistSongs(context.id);
+  } catch {}
+  if (!songs.length) songs = [fallback];
+  const index = Math.max(0, songs.findIndex((song) => songIdentity(song) === songIdentity(fallback)));
+  state.pendingResumePosition = Math.max(0, Number(resume.positionSeconds) || 0);
+  playQueue(songs, index, context, { autoplay: false, passive: true });
 }
 
 async function renderHome(force = false) {
@@ -2031,6 +2048,7 @@ async function renderHome(force = false) {
     state.playlistsFetchedAt = Date.now();
     state.homeDataFetchedAt = Date.now();
     renderHomeContent();
+    void restoreHomePlaybackPaused(home?.continueListening);
   } catch (error) {
     if (await handleAuthenticationError(error)) return;
     if (state.playlists.length) {
@@ -2258,40 +2276,45 @@ async function renderSearch(query = '', exactGenre = false) {
   state.searchRequestId = requestId;
   setPageHeader('ENCONTRE ALGO NOVO', query ? `Resultados para “${query}”` : 'O que vai ouvir hoje?');
   if (!query.trim()) {
+    const albums = await window.nation.getAlbums().catch(() => []);
+    if (requestId !== state.searchRequestId) return;
     contentView.innerHTML = `
       <section class="home-section search-genres">
         <div class="section-heading"><h2>Navegue por gênero</h2><span>Escolha um estilo para começar</span></div>
         ${genreGridMarkup()}
       </section>
-      <div class="empty-state"><b>Busque uma música, artista ou playlist</b><span>Ouça imediatamente e salve suas favoritas na conta.</span></div>
+      ${albums.length ? `<section class="home-section"><div class="section-heading"><h2>Álbuns no catálogo</h2><span>${albums.length} disponíveis</span></div><div class="home-shelf search-playlist-grid">${albums.slice(0, 20).map((album, index) => `<article class="home-album-card" data-browse-album-index="${index}"><div>${album.coverUrl ? `<img src="${escapeHtml(album.coverUrl)}" alt="" />` : icon('music')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(album.name)}</strong><p>${escapeHtml(album.artist || `${album.songCount} músicas`)}</p></article>`).join('')}</div></section>` : ''}
+      <div class="empty-state"><b>Busque uma música, artista, álbum ou playlist</b><span>A busca entende acentos, palavras fora de ordem e pequenos erros de digitação.</span></div>
     `;
     bindGenreActions();
+    document.querySelectorAll('[data-browse-album-index]').forEach((card) => card.addEventListener('click', () => void renderAlbum(albums[Number(card.dataset.browseAlbumIndex)])));
     return;
   }
   setLoading('Buscando músicas...');
   try {
-    const [songs, library, playlists] = await Promise.all([
-      exactGenre ? window.nation.searchGenre(query.trim()) : window.nation.search(query.trim()),
+    const [discovery, library] = await Promise.all([
+      exactGenre
+        ? window.nation.searchGenre(query.trim()).then((songs) => ({ songs, artists: [], albums: [], playlists: [], correctedQuery: '' }))
+        : window.nation.smartSearch(query.trim()),
       window.nation.getLibrary(),
-      state.playlists.length ? Promise.resolve(state.playlists) : window.nation.getPlaylists(),
     ]);
     if (requestId !== state.searchRequestId) return;
     const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
-    const merged = songs.map((song) => savedBySource.has(song.sourceId)
+    const merged = (discovery.songs || []).map((song) => savedBySource.has(song.sourceId)
       ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
       : song);
-    state.playlists = playlists;
-    state.playlistsFetchedAt = Date.now();
-    const normalizedQuery = normalizeCatalogText(query.trim());
-    const matchingPlaylists = playlists.filter((playlist) => normalizeCatalogText(`${playlist.name} ${playlist.description || ''}`).includes(normalizedQuery));
-    const artists = exactGenre ? [] : artistsFromSongs(merged, query);
+    const matchingPlaylists = discovery.playlists || [];
+    const artists = discovery.artists || [];
+    const albums = discovery.albums || [];
     contentView.innerHTML = `
       <section class="home-section search-genres">
         <div class="section-heading"><h2>Gêneros</h2><span>Explore outros estilos</span></div>
         ${genreGridMarkup()}
       </section>
       ${artists.length ? `<section class="home-section"><div class="section-heading"><h2>Artistas</h2><span>${artists.length} encontrados</span></div><div class="artist-results">${artists.map((artist, index) => `<button class="artist-result" data-artist-index="${index}" type="button">${artist.artworkUrl ? `<img src="${escapeHtml(artist.artworkUrl)}" alt="" />` : `<span class="artist-result-placeholder">${icon('users')}</span>`}<strong>${escapeHtml(artist.name)}</strong><small>Ver músicas</small></button>`).join('')}</div></section>` : ''}
+      ${albums.length ? `<section class="home-section"><div class="section-heading"><h2>Álbuns</h2><span>${albums.length} encontrados</span></div><div class="home-shelf search-playlist-grid">${albums.map((album, index) => `<article class="home-album-card" data-search-album-index="${index}"><div>${album.coverUrl ? `<img src="${escapeHtml(album.coverUrl)}" alt="" />` : icon('music')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(album.name)}</strong><p>${escapeHtml(album.artist || `${album.songCount} músicas`)}</p></article>`).join('')}</div></section>` : ''}
       ${matchingPlaylists.length ? `<section class="home-section"><div class="section-heading"><h2>Playlists</h2><span>${matchingPlaylists.length} encontradas</span></div><div class="home-shelf search-playlist-grid">${matchingPlaylists.map((playlist, index) => `<article class="home-album-card" data-search-playlist-index="${index}"><div>${playlist.iconUrl ? `<img src="${escapeHtml(playlist.iconUrl)}" alt="" />` : icon('playlist')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(playlist.name)}</strong><p>${escapeHtml(playlist.description || 'Playlist do NationMusics')}</p></article>`).join('')}</div></section>` : ''}
+      ${discovery.correctedQuery ? `<button class="search-correction" id="search-correction" type="button">${icon('search')} Você quis dizer “${escapeHtml(discovery.correctedQuery)}”?</button>` : ''}
       <div class="section-heading">
         <h2>Músicas</h2>
         <span>${merged.length} encontrados</span>
@@ -2304,6 +2327,13 @@ async function renderSearch(query = '', exactGenre = false) {
     });
     document.querySelectorAll('[data-search-playlist-index]').forEach((card) => {
       card.addEventListener('click', () => openPlaylist(matchingPlaylists[Number(card.dataset.searchPlaylistIndex)]));
+    });
+    document.querySelectorAll('[data-search-album-index]').forEach((card) => {
+      card.addEventListener('click', () => void renderAlbum(albums[Number(card.dataset.searchAlbumIndex)]));
+    });
+    $('#search-correction')?.addEventListener('click', () => {
+      $('#search-input').value = discovery.correctedQuery;
+      void renderSearch(discovery.correctedQuery);
     });
     bindSongActions();
   } catch (error) {
@@ -2333,6 +2363,29 @@ async function renderArtist(artistName) {
   } catch (error) {
     if (await handleAuthenticationError(error)) return;
     contentView.innerHTML = `<div class="empty-state"><b>Não foi possível carregar o artista</b><span>${escapeHtml(error.message)}</span></div>`;
+  }
+}
+
+async function renderAlbum(album) {
+  if (!album?.name) return;
+  state.view = 'album';
+  state.albumName = album.name;
+  state.albumSummary = album;
+  state.searchRequestId += 1;
+  setPageHeader('ÁLBUM', album.name);
+  setLoading('Carregando álbum...');
+  try {
+    const [songs, library] = await Promise.all([window.nation.getAlbumSongs(album), window.nation.getLibrary()]);
+    if (state.view !== 'album' || state.albumName !== album.name) return;
+    const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
+    const merged = songs.map((song) => savedBySource.has(song.sourceId) ? { ...song, ...savedBySource.get(song.sourceId), saved: true } : song);
+    const artwork = album.coverUrl || merged.find((song) => song.artworkUrl)?.artworkUrl;
+    contentView.innerHTML = `<section class="artist-hero album-hero"><div class="artist-hero-cover">${artwork ? `<img src="${escapeHtml(artwork)}" alt="" />` : icon('music')}</div><div><span>ÁLBUM</span><h2>${escapeHtml(album.name)}</h2><p>${escapeHtml(album.artist || 'NationMusics')} • ${merged.length} ${merged.length === 1 ? 'música' : 'músicas'}</p></div></section>${merged.length ? queueControlsMarkup(merged.length, 'Tocar álbum', false) : ''}<div class="section-heading"><h2>Faixas</h2></div>${songRows(merged, 'Nenhuma música disponível deste álbum.')}`;
+    if (merged.length) bindQueueControls(merged, { type: 'album', id: String(album.playlistId || album.name), name: album.name });
+    bindSongActions();
+  } catch (error) {
+    if (await handleAuthenticationError(error)) return;
+    contentView.innerHTML = `<div class="empty-state"><b>Não foi possível carregar o álbum</b><span>${escapeHtml(error.message)}</span></div>`;
   }
 }
 
@@ -2539,7 +2592,7 @@ async function saveSong(song) {
   }
 }
 
-function playQueue(songs, index, context = null) {
+function playQueue(songs, index, context = null, options = {}) {
   reportCurrentPlayback(false);
   const playable = songs.filter((song) => song.sourceId || song.spotifyId || song.title);
   const selected = songs[index];
@@ -2562,11 +2615,11 @@ function playQueue(songs, index, context = null) {
   state.shuffleNextIndex = -1;
   resetShuffleRemainingIndexes();
   void (async () => {
-    if (state.connectState && !state.connectState.currentDeviceActive) {
+    if (!options.passive && state.connectState && !state.connectState.currentDeviceActive) {
       const connect = await controlConnectPlayback('SYNC');
       if (connect) state.connectProcessedRevision = Math.max(state.connectProcessedRevision, Number(connect.commandRevision) || 0);
     }
-    await loadCurrentTrack();
+    await loadCurrentTrack(options.autoplay !== false);
     window.setTimeout(prefetchNextTrack, 1000);
     void syncConnectPlayback();
   })();
@@ -2645,7 +2698,7 @@ function reportPlaybackTelemetry(eventType, details = {}) {
   }).catch(() => {});
 }
 
-async function loadCurrentTrack() {
+async function loadCurrentTrack(autoplay = true) {
   const song = state.queue[state.queueIndex];
   if (!song) return;
   playbackTelemetrySessionId = crypto.randomUUID();
@@ -2684,14 +2737,28 @@ async function loadCurrentTrack() {
     state.preparingSourceId = '';
     audio.src = url;
     $('#player-artist').textContent = resolved.artist;
-    await audio.play();
+    if (autoplay) {
+      await audio.play();
+    } else {
+      audio.load();
+      if (audio.readyState < 1) {
+        await new Promise((resolve) => {
+          const timer = window.setTimeout(resolve, 2500);
+          audio.addEventListener('loadedmetadata', () => { window.clearTimeout(timer); resolve(); }, { once: true });
+        });
+      }
+      audio.pause();
+      setPlayButtonIcon(false);
+    }
     if (state.pendingResumePosition > 0) {
       audio.currentTime = Math.min(state.pendingResumePosition, Number.isFinite(audio.duration) ? Math.max(0, audio.duration - 1) : state.pendingResumePosition);
       state.pendingResumePosition = 0;
     }
     reportPlaybackTelemetry('READY', { loadTimeMs: Math.round(performance.now() - playbackLoadStartedAt) });
-    await syncDiscordActivity(true);
-    void syncHostedJamState(true);
+    if (autoplay) {
+      await syncDiscordActivity(true);
+      void syncHostedJamState(true);
+    }
     syncSongRows();
     prefetchNextTrack();
   } catch (error) {
@@ -2722,6 +2789,7 @@ async function refreshCurrentView() {
   if (state.view === 'library') await renderLibrary();
   else if (state.view === 'search') await renderSearch($('#search-input').value);
   else if (state.view === 'artist') await renderArtist(state.artistName);
+  else if (state.view === 'album') await renderAlbum(state.albumSummary || { name: state.albumName });
   else if (state.view === 'spotify') renderSpotifyImport(state.spotifyUrl);
   else if (state.view === 'friends') await refreshFriendsPanel(false);
 }

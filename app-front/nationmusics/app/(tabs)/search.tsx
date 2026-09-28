@@ -14,14 +14,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
-import type { ApiPlaylist, ApiSearchSong, MusicSong } from '../../types/music';
+import type { AlbumSummary, ApiPlaylist, ApiSearchSong, MusicSong, SmartSearchResponse } from '../../types/music';
 import { fromApiSearchSong } from '../../types/music';
 import { apiRequest } from '../../services/api';
 import { getSession } from '../../services/auth';
 import { downloadSong } from '../../services/offline-library';
 import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
 import { MUSIC_GENRES } from '../../constants/music-genres';
-import { artistsFromSongs } from '../../services/artists';
 
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -89,16 +88,21 @@ export default function SearchScreen() {
   const [selectedGenre, setSelectedGenre] = useState('');
   const [results, setResults] = useState<MusicSong[]>([]);
   const [playlistResults, setPlaylistResults] = useState<ApiPlaylist[]>([]);
+  const [albumResults, setAlbumResults] = useState<AlbumSummary[]>([]);
+  const [featuredAlbums, setFeaturedAlbums] = useState<AlbumSummary[]>([]);
+  const [artistResults, setArtistResults] = useState<SmartSearchResponse['artists']>([]);
+  const [correctedQuery, setCorrectedQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState('');
   const [username, setUsername] = useState('');
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
   const searchRequestId = useRef(0);
-  const artistResults = selectedGenre ? [] : artistsFromSongs(results, query);
+  const visibleAlbums = query.trim() ? albumResults : featuredAlbums;
 
   useEffect(() => {
     getSession().then((session) => setUsername(session?.username || '')).catch(() => {});
+    apiRequest<AlbumSummary[]>('/catalog/albums').then((albums) => setFeaturedAlbums(albums.slice(0, 16))).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -118,6 +122,9 @@ export default function SearchScreen() {
     if (!value) {
       setResults([]);
       setPlaylistResults([]);
+      setAlbumResults([]);
+      setArtistResults([]);
+      setCorrectedQuery('');
       setSearchError('');
       setSearching(false);
       return;
@@ -127,29 +134,25 @@ export default function SearchScreen() {
     setSearchError('');
     try {
       const genreValue = selectedGenre && value === selectedGenre ? selectedGenre : '';
-      const [data, playlists] = await Promise.all([
-        apiRequest<ApiSearchSong[]>(genreValue
-          ? `/songs/genre?genre=${encodeURIComponent(genreValue)}`
-          : `/songs/search?q=${encodeURIComponent(value)}`),
-        apiRequest<ApiPlaylist[]>('/playlists/global', { authenticated: false }),
-      ]);
+      const smart = genreValue ? null : await apiRequest<SmartSearchResponse>(`/catalog/search?q=${encodeURIComponent(value)}`);
+      const data = genreValue
+        ? await apiRequest<ApiSearchSong[]>(`/songs/genre?genre=${encodeURIComponent(genreValue)}`)
+        : smart?.songs || [];
       if (requestId !== searchRequestId.current) return;
       const songs = data.map(fromApiSearchSong);
-      const normalizedValue = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-      const matchingPlaylists = playlists.filter((playlist) => (
-        `${playlist.name} ${playlist.description || ''}`
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase()
-          .includes(normalizedValue)
-      ));
       setResults(songs);
-      setPlaylistResults(matchingPlaylists);
-      setSearchError(songs.length || matchingPlaylists.length ? '' : 'Nenhuma música, artista ou playlist encontrada.');
+      setPlaylistResults(smart?.playlists || []);
+      setAlbumResults(smart?.albums || []);
+      setArtistResults(smart?.artists || []);
+      setCorrectedQuery(smart?.correctedQuery || '');
+      setSearchError(songs.length || smart?.playlists?.length || smart?.albums?.length || smart?.artists?.length ? '' : 'Nenhuma música, artista, álbum ou playlist encontrada.');
     } catch (error) {
       if (requestId !== searchRequestId.current) return;
       setResults([]);
       setPlaylistResults([]);
+      setAlbumResults([]);
+      setArtistResults([]);
+      setCorrectedQuery('');
       setSearchError(error instanceof Error ? error.message : 'Tente novamente.');
     } finally {
       if (requestId === searchRequestId.current) setSearching(false);
@@ -173,6 +176,9 @@ export default function SearchScreen() {
       searchRequestId.current += 1;
       setResults([]);
       setPlaylistResults([]);
+      setAlbumResults([]);
+      setArtistResults([]);
+      setCorrectedQuery('');
       setSearchError('');
       setSearching(false);
     }
@@ -212,6 +218,8 @@ export default function SearchScreen() {
           body: JSON.stringify({
             title: offlineSong.title,
             artist: offlineSong.artist,
+            album: offlineSong.album,
+            albumArtist: offlineSong.albumArtist,
             uri: offlineSong.localUri,
             coverUrl: offlineSong.artworkUrl,
             sourceId: offlineSong.sourceId,
@@ -249,7 +257,7 @@ export default function SearchScreen() {
             <Ionicons name="search-outline" size={19} color="#777" />
             <TextInput
               style={styles.searchInput}
-              placeholder="Músicas ou artistas..."
+              placeholder="Música, artista, álbum ou playlist..."
               placeholderTextColor="#666"
               value={query}
               onChangeText={changeQuery}
@@ -272,6 +280,12 @@ export default function SearchScreen() {
             <Ionicons name="information-circle-outline" size={17} color="#d5bd83" />
             <Text style={styles.catalogNoticeText}>{searchError}</Text>
           </View>
+        )}
+        {Boolean(correctedQuery) && (
+          <TouchableOpacity style={styles.correction} onPress={() => changeQuery(correctedQuery)}>
+            <Ionicons name="sparkles-outline" size={17} color="#1db954" />
+            <Text style={styles.correctionText}>Você quis dizer “{correctedQuery}”?</Text>
+          </TouchableOpacity>
         )}
 
         <FlatList
@@ -323,6 +337,18 @@ export default function SearchScreen() {
                     <TouchableOpacity key={artist.name} style={styles.playlistCard} onPress={() => router.push({ pathname: '/artist/[name]' as never, params: { name: artist.name } })}>
                       {artist.artworkUrl ? <Image source={{ uri: artist.artworkUrl }} style={styles.artistCover} /> : <View style={[styles.playlistCoverPlaceholder, styles.artistCover]}><Ionicons name="person" size={23} color="#1db954" /></View>}
                       <View style={styles.playlistMeta}><Text style={styles.cardTitle} numberOfLines={1}>{artist.name}</Text><Text style={styles.cardArtist}>Ver músicas do artista</Text></View>
+                      <Ionicons name="chevron-forward" size={20} color="#777" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+              {visibleAlbums.length > 0 && (
+                <View style={styles.playlistSection}>
+                  <Text style={styles.genreTitle}>{query.trim() ? 'Álbuns' : 'Álbuns no catálogo'}</Text>
+                  {visibleAlbums.map((album) => (
+                    <TouchableOpacity key={`${album.name}:${album.artist}`} style={styles.playlistCard} onPress={() => router.push({ pathname: '/album/[name]' as never, params: { name: album.name, artist: album.artist, coverUrl: album.coverUrl || '', playlistId: album.playlistId ? String(album.playlistId) : '' } })}>
+                      {album.coverUrl ? <Image source={{ uri: album.coverUrl }} style={styles.playlistCover} /> : <View style={styles.playlistCoverPlaceholder}><Ionicons name="disc" size={23} color="#1db954" /></View>}
+                      <View style={styles.playlistMeta}><Text style={styles.cardTitle} numberOfLines={1}>{album.name}</Text><Text style={styles.cardArtist} numberOfLines={1}>{album.artist || `${album.songCount} músicas`}</Text></View>
                       <Ionicons name="chevron-forward" size={20} color="#777" />
                     </TouchableOpacity>
                   ))}
@@ -430,6 +456,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   catalogNoticeText: { color: '#d5bd83', fontSize: 12, flex: 1 },
+  correction: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4, marginBottom: 13 },
+  correctionText: { color: '#b8ddc4', fontSize: 13, fontWeight: '700' },
   list: { paddingBottom: 175 },
   genreTitle: { color: '#fff', fontSize: 17, fontWeight: '800', marginBottom: 11 },
   genreGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 22 },

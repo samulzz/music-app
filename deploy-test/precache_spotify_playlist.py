@@ -267,6 +267,8 @@ def download_track(yt_dlp, ffmpeg_path, output_dir, track):
             "sourceId": video_id,
             "title": track["title"],
             "artist": track["artist"],
+            "album": track.get("album") or "",
+            "albumArtist": track.get("albumArtist") or "",
             "coverUrl": thumbnail,
             "fileName": audio_path.name,
             "size": audio_path.stat().st_size,

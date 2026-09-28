@@ -18,6 +18,7 @@ import { mergeWithOfflineLibrary } from './offline-library';
 import { getDailyMixSongs } from './recommendations';
 import { sortSongsAlphabetically } from './song-order';
 import { getLatestConnectState, markConnectRevisionProcessed, takeOverConnectPlayback } from './connect';
+import type { PlaybackContext } from './connect';
 
 let initialized = false;
 const OFFLINE_INDEX_KEY = 'nationmusics.offline-library.v2';
@@ -28,6 +29,7 @@ let lastShuffleEnabled = false;
 let recommendationAppendInFlight: Promise<void> | null = null;
 let playbackQueueRevision = 0;
 let playbackTelemetry: { sessionId: string; song: MusicSong; startedAt: number; ready: boolean; lastWaitingAt: number } | null = null;
+let playbackContext: PlaybackContext | null = null;
 
 function telemetrySong(item: MediaItem): MusicSong {
   const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
@@ -357,7 +359,12 @@ function emitShuffleEnabled(enabled: boolean) {
   });
 }
 
-export async function playSongQueue(songs: MusicSong[], requestedIndex: number, origin: MusicSong['queueOrigin'] = 'playlist') {
+export async function playSongQueue(
+  songs: MusicSong[],
+  requestedIndex: number,
+  origin: MusicSong['queueOrigin'] = 'playlist',
+  context: PlaybackContext | null = null,
+) {
   setupMusicPlayer();
   if (getLatestConnectState() && !getLatestConnectState()?.currentDeviceActive) {
     try {
@@ -390,6 +397,7 @@ export async function playSongQueue(songs: MusicSong[], requestedIndex: number, 
   }
 
   playbackQueueRevision += 1;
+  playbackContext = context;
   const ordered = lastShuffleEnabled
     ? [queue[queueIndex], ...shuffled(queue.filter((_item, index) => index !== queueIndex))]
     : queue;
@@ -399,6 +407,8 @@ export async function playSongQueue(songs: MusicSong[], requestedIndex: number, 
   prefetchNextInQueue(startIndex);
   return startIndex;
 }
+
+export function getPlaybackContext() { return playbackContext; }
 
 export async function addSongsToPlaybackQueue(songs: MusicSong[]) {
   setupMusicPlayer();
@@ -491,6 +501,7 @@ export function stopMusicPlayer(clearQueue = false) {
   if (!initialized) return;
   TrackPlayer.stop();
   if (clearQueue) {
+    playbackContext = null;
     playbackQueueRevision += 1;
     TrackPlayer.clear();
   }

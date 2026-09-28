@@ -1,14 +1,18 @@
 package me.samulsz.musicapi.services;
 
 import me.samulsz.musicapi.dto.DailyMixResponse;
+import me.samulsz.musicapi.dto.ConnectSongDto;
+import me.samulsz.musicapi.dto.PersonalizedHomeResponse;
 import me.samulsz.musicapi.dto.PlaybackReportRequest;
 import me.samulsz.musicapi.dto.RecommendationFeedbackRequest;
 import me.samulsz.musicapi.models.DailyMix;
+import me.samulsz.musicapi.models.AccountPlayback;
 import me.samulsz.musicapi.models.PlaybackPreference;
 import me.samulsz.musicapi.models.Playlist;
 import me.samulsz.musicapi.models.Song;
 import me.samulsz.musicapi.models.User;
 import me.samulsz.musicapi.repositories.DailyMixRepository;
+import me.samulsz.musicapi.repositories.AccountPlaybackRepository;
 import me.samulsz.musicapi.repositories.PlaybackPreferenceRepository;
 import me.samulsz.musicapi.repositories.PlaylistRepository;
 import me.samulsz.musicapi.repositories.SongRepository;
@@ -44,6 +48,7 @@ public class RecommendationService {
     private final PlaylistRepository playlistRepository;
     private final PlaybackPreferenceRepository preferenceRepository;
     private final DailyMixRepository dailyMixRepository;
+    private final AccountPlaybackRepository accountPlaybackRepository;
     private final MusicService musicService;
 
     public RecommendationService(
@@ -52,6 +57,7 @@ public class RecommendationService {
             PlaylistRepository playlistRepository,
             PlaybackPreferenceRepository preferenceRepository,
             DailyMixRepository dailyMixRepository,
+            AccountPlaybackRepository accountPlaybackRepository,
             MusicService musicService
     ) {
         this.userRepository = userRepository;
@@ -59,6 +65,7 @@ public class RecommendationService {
         this.playlistRepository = playlistRepository;
         this.preferenceRepository = preferenceRepository;
         this.dailyMixRepository = dailyMixRepository;
+        this.accountPlaybackRepository = accountPlaybackRepository;
         this.musicService = musicService;
     }
 
@@ -119,6 +126,102 @@ public class RecommendationService {
         DailyMix mix = dailyMixRepository.findByUserIdAndMixDate(user.getId(), today)
                 .orElseGet(() -> createDailyMix(user, today));
         return response(mix);
+    }
+
+    @Transactional
+    public PersonalizedHomeResponse getPersonalizedHome(String username) {
+        User user = getUser(username);
+        List<PlaybackPreference> preferences = preferenceRepository.findByUserIdOrderByLastListenedAtDesc(user.getId());
+        List<PlaybackPreference> usablePreferences = preferences.stream()
+                .filter(item -> item.getSong() != null)
+                .filter(item -> item.getSong().getSourceId() != null && !item.getSong().getSourceId().isBlank())
+                .filter(item -> musicService.hasPrecachedAudio(item.getSong().getSourceId()))
+                .toList();
+
+        List<Song> recentSongs = usablePreferences.stream()
+                .map(PlaybackPreference::getSong)
+                .filter(distinctById())
+                .limit(12)
+                .toList();
+
+        Map<String, ArtistAccumulator> artists = new LinkedHashMap<>();
+        usablePreferences.forEach(item -> {
+            String name = primaryArtist(item.getSong().getArtist());
+            String key = normalizeArtist(name);
+            long score = Math.max(1, item.getPlayCount()) + item.getCompletedCount() * 2 + (item.isLiked() ? 12 : 0);
+            artists.computeIfAbsent(key, ignored -> new ArtistAccumulator(name, item.getSong().getCoverUrl()))
+                    .add(score, item.getSong().getCoverUrl());
+        });
+        List<PersonalizedHomeResponse.ArtistSummary> topArtists = artists.values().stream()
+                .sorted(Comparator.comparingLong(ArtistAccumulator::score).reversed())
+                .limit(10)
+                .map(ArtistAccumulator::response)
+                .toList();
+
+        DailyMixResponse daily = getDailyMix(username);
+        Set<Long> recentIds = recentSongs.stream().map(Song::getId).collect(Collectors.toSet());
+        List<Song> recommended = daily.songs().stream()
+                .filter(song -> !recentIds.contains(song.getId()))
+                .limit(12)
+                .toList();
+        if (recommended.size() < 6) recommended = daily.songs().stream().limit(12).toList();
+
+        Set<Long> affinitySongIds = usablePreferences.stream()
+                .filter(item -> item.isLiked() || item.getPlayCount() > 1 || item.getCompletedCount() > 0)
+                .map(item -> item.getSong().getId())
+                .collect(Collectors.toSet());
+        Set<String> affinityArtists = topArtists.stream()
+                .limit(5)
+                .map(item -> normalizeArtist(item.name()))
+                .collect(Collectors.toSet());
+        List<PersonalizedHomeResponse.PlaylistSummary> relatedPlaylists = playlistRepository
+                .findByGlobalPlaylistTrueOrderByIdDesc().stream()
+                .map(playlist -> Map.entry(playlist, playlistAffinity(playlist, affinitySongIds, affinityArtists)))
+                .sorted(Map.Entry.<Playlist, Integer>comparingByValue().reversed()
+                        .thenComparing(entry -> entry.getKey().getId(), Comparator.reverseOrder()))
+                .limit(8)
+                .map(entry -> new PersonalizedHomeResponse.PlaylistSummary(
+                        entry.getKey().getId(), entry.getKey().getName(), entry.getKey().getDescription(), entry.getKey().getIconUrl()))
+                .toList();
+
+        PersonalizedHomeResponse.ContinueListening continueListening = accountPlaybackRepository
+                .findByUser_Id(user.getId())
+                .filter(this::canResume)
+                .map(state -> new PersonalizedHomeResponse.ContinueListening(
+                        new ConnectSongDto(state.getSongId(), state.getSongSourceId(), state.getSongTitle(), state.getSongArtist(),
+                                state.getSongArtworkUrl(), state.getSongRemoteUrl()),
+                        state.getPositionSeconds(), state.getDurationSeconds(), state.getStateUpdatedAt(),
+                        state.getContextType(), state.getContextId(), state.getContextName()))
+                .orElse(null);
+        String reason = topArtists.isEmpty()
+                ? "Uma seleção para começar a descobrir seu gosto."
+                : "Porque você ouve " + topArtists.getFirst().name();
+        return new PersonalizedHomeResponse(continueListening, recentSongs, topArtists, recommended,
+                relatedPlaylists, reason, daily);
+    }
+
+    private boolean canResume(AccountPlayback state) {
+        if ((state.getSongId().isBlank() && state.getSongSourceId().isBlank()) || state.getPositionSeconds() < 5) return false;
+        return state.getDurationSeconds() <= 0 || state.getPositionSeconds() < state.getDurationSeconds() - 8;
+    }
+
+    private int playlistAffinity(Playlist playlist, Set<Long> songIds, Set<String> artists) {
+        int score = 0;
+        for (Song song : playlist.getSongs()) {
+            if (songIds.contains(song.getId())) score += 5;
+            if (artists.contains(normalizeArtist(primaryArtist(song.getArtist())))) score += 2;
+        }
+        return score;
+    }
+
+    private java.util.function.Predicate<Song> distinctById() {
+        Set<Long> seen = new HashSet<>();
+        return song -> song.getId() != null && seen.add(song.getId());
+    }
+
+    private String primaryArtist(String value) {
+        String artist = Objects.toString(value, "Artista desconhecido").split("(?i)\\s*(?:,|feat\\.?|ft\\.?|&)\\s*")[0].trim();
+        return artist.isBlank() ? "Artista desconhecido" : artist;
     }
 
     private DailyMix createDailyMix(User user, LocalDate today) {
@@ -268,5 +371,16 @@ public class RecommendationService {
                 .replaceAll("\\s+(feat|ft)\\.?\\s+.*$", "")
                 .trim();
         return normalized.isBlank() ? "artista desconhecido" : normalized;
+    }
+
+    private static class ArtistAccumulator {
+        private final String name;
+        private String artworkUrl;
+        private long score;
+
+        ArtistAccumulator(String name, String artworkUrl) { this.name = name; this.artworkUrl = artworkUrl; }
+        void add(long value, String cover) { score += value; if ((artworkUrl == null || artworkUrl.isBlank()) && cover != null) artworkUrl = cover; }
+        long score() { return score; }
+        PersonalizedHomeResponse.ArtistSummary response() { return new PersonalizedHomeResponse.ArtistSummary(name, artworkUrl, score); }
     }
 }

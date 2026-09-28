@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-27T23:49:00-03:00",
+  "generatedAt": "2026-09-28T00:33:14-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.28",
-    "versionCode": 30,
-    "minimumVersion": "1.1.28",
-    "minimumVersionCode": 30,
+    "version": "1.1.29",
+    "versionCode": 31,
+    "minimumVersion": "1.1.29",
+    "minimumVersionCode": 31,
     "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.28.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.29.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Monitoramento tecnico de carregamento e interrupcoes do player para melhorar a estabilidade."
+    "releaseNotes": "Continuar ouvindo sincronizado por conta e nova tela inicial personalizada com historico, artistas e recomendacoes."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.31",
-    "minimumVersion": "1.2.31",
+    "version": "1.2.32",
+    "minimumVersion": "1.2.32",
     "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.31.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.32.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Monitoramento tecnico de carregamento, travamentos e erros do player integrado ao novo painel administrativo."
+    "releaseNotes": "Continuar ouvindo sincronizado por conta e nova tela inicial personalizada com historico, artistas e recomendacoes."
   }
 }

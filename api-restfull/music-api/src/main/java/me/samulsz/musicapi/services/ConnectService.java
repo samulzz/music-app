@@ -67,15 +67,17 @@ public class ConnectService {
         if (deviceId.equals(playback.getActiveDeviceId())) {
             if (request.song() != null) {
                 writeSong(playback, request.song());
+                playback.setContextType(clean(request.contextType()));
+                playback.setContextId(clean(request.contextId()));
+                playback.setContextName(clean(request.contextName()));
                 playback.setPositionSeconds(Math.max(0, value(request.positionSeconds(), playback.getPositionSeconds())));
                 playback.setDurationSeconds(Math.max(0, value(request.durationSeconds(), playback.getDurationSeconds())));
                 playback.setPlaying(Boolean.TRUE.equals(request.playing()));
                 playback.setVolumeLevel(clamp(value(request.volumeLevel(), playback.getVolumeLevel()), 0, 1));
             } else {
-                // Sem fila local, encerra a sessão daquele aparelho em vez de manter um
-                // dispositivo fantasma como ativo.
+                // Sem fila local, encerra a sessão ativa sem apagar a última posição.
+                // Esse estado fica invisível no Connect, mas alimenta "Continuar ouvindo".
                 playback.setPlaying(false);
-                clearSong(playback);
                 playback.setActiveDeviceId("");
             }
             playback.setStateUpdatedAt(now);
@@ -134,7 +136,8 @@ public class ConnectService {
         boolean commandPending = currentDeviceId.equals(playback.getCommandTargetDeviceId()) && playback.getCommandRevision() > processedRevision;
         return new ConnectStateResponse(
                 playback.getActiveDeviceId(), currentDeviceId.equals(playback.getActiveDeviceId()), online,
-                readSong(playback), playback.getPositionSeconds(), playback.getDurationSeconds(), playback.isPlaying(), playback.getVolumeLevel(),
+                playback.getActiveDeviceId().isBlank() ? null : readSong(playback),
+                playback.getPositionSeconds(), playback.getDurationSeconds(), playback.isPlaying(), playback.getVolumeLevel(),
                 playback.getStateUpdatedAt(), commandPending ? playback.getCommandAction() : "", playback.getCommandValue(),
                 playback.getCommandRevision(), now
         );
@@ -148,11 +151,6 @@ public class ConnectService {
     private void writeSong(AccountPlayback state, ConnectSongDto song) {
         state.setSongId(clean(song.id())); state.setSongSourceId(clean(song.sourceId())); state.setSongTitle(clean(song.title()));
         state.setSongArtist(clean(song.artist())); state.setSongArtworkUrl(clean(song.artworkUrl())); state.setSongRemoteUrl(clean(song.remoteUrl()));
-    }
-    private void clearSong(AccountPlayback state) {
-        state.setSongId(""); state.setSongSourceId(""); state.setSongTitle("");
-        state.setSongArtist(""); state.setSongArtworkUrl(""); state.setSongRemoteUrl("");
-        state.setPositionSeconds(0); state.setDurationSeconds(0);
     }
     private ConnectSongDto readSong(AccountPlayback state) {
         if (state.getSongId().isBlank() && state.getSongSourceId().isBlank()) return null;

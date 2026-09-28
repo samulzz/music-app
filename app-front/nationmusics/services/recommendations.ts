@@ -10,8 +10,37 @@ export type DailyMix = {
   songs: ApiLibrarySong[];
 };
 
+export type PersonalizedHome = {
+  continueListening: null | {
+    song: {
+      id: string;
+      sourceId?: string;
+      title: string;
+      artist: string;
+      artworkUrl?: string;
+      remoteUrl?: string;
+    };
+    positionSeconds: number;
+    durationSeconds: number;
+    updatedAt: number;
+    contextType?: string;
+    contextId?: string;
+    contextName?: string;
+  };
+  recentSongs: ApiLibrarySong[];
+  topArtists: Array<{ name: string; artworkUrl?: string; score: number }>;
+  recommendedSongs: ApiLibrarySong[];
+  frequentPlaylists: Array<{ id: number; name: string; description?: string; iconUrl?: string }>;
+  recommendationReason: string;
+  dailyMix: DailyMix;
+};
+
 export function getDailyMix() {
   return apiRequest<DailyMix>('/recommendations/daily');
+}
+
+export function getPersonalizedHome() {
+  return apiRequest<PersonalizedHome>('/recommendations/home');
 }
 
 export async function getDailyMixSongs(): Promise<MusicSong[]> {

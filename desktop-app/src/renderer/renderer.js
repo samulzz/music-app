@@ -4,6 +4,8 @@ const state = {
   authMode: 'login',
   playlists: [],
   playlistsFetchedAt: 0,
+  homeData: null,
+  homeDataFetchedAt: 0,
   personalPlaylists: [],
   personalPlaylistsFetchedAt: 0,
   library: [],
@@ -42,6 +44,8 @@ const state = {
   connectState: null,
   connectProcessedRevision: 0,
   connectSyncInFlight: false,
+  pendingResumePosition: 0,
+  playbackContext: null,
 };
 
 const DISCORD_DEFAULT_CLIENT_ID = '1519319956796473544';
@@ -219,6 +223,15 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     ],
     getPlaylistSongs: async () => demoSongs,
     getDailyMix: async () => ({ songs: demoSongs }),
+    getPersonalizedHome: async () => ({
+      continueListening: null,
+      recentSongs: demoSongs,
+      topArtists: [{ name: 'Nation Sessions', artworkUrl: '', score: 5 }],
+      recommendedSongs: demoSongs,
+      frequentPlaylists: [],
+      recommendationReason: 'Porque você ouve Nation Sessions',
+      dailyMix: { id: 'daily', name: 'Sintonia de Hoje', description: 'Feita para você.', songs: demoSongs },
+    }),
     reportPlayback: async () => true,
     reportPlaybackTelemetry: async () => true,
     sendRecommendationFeedback: async () => true,
@@ -877,6 +890,7 @@ async function executeConnectCommand(connect) {
       state.queueIndex = 0;
       state.queueRevision += 1;
       state.queueMode = 'external';
+      state.playbackContext = null;
       state.shuffleRemainingIndexes = [];
       await loadCurrentTrack();
     }
@@ -906,6 +920,9 @@ async function syncConnectPlayback() {
       playing: Boolean(audio.src && !audio.paused && !audio.ended),
       volumeLevel: audio.volume,
       processedCommandRevision: state.connectProcessedRevision,
+      contextType: state.playbackContext?.type || '',
+      contextId: state.playbackContext?.id || '',
+      contextName: state.playbackContext?.name || '',
     });
     state.connectState = connect;
     if (!connect.currentDeviceActive && !audio.paused) audio.pause();
@@ -1769,12 +1786,12 @@ function queueControlsMarkup(count, label = 'Tocar lista', allowDownload = true)
   `;
 }
 
-function bindQueueControls(songs = state.visibleSongs) {
+function bindQueueControls(songs = state.visibleSongs, context = null) {
   document.querySelectorAll('.queue-play-button').forEach((button) => {
     button.addEventListener('click', () => {
       if (!songs.length) return;
       const index = state.shuffle ? Math.floor(Math.random() * songs.length) : 0;
-      playQueue(songs, index);
+      playQueue(songs, index, context);
     });
   });
 
@@ -1812,6 +1829,11 @@ function bindQueueControls(songs = state.visibleSongs) {
 }
 
 function bindSongActions(playlist = null) {
+  const context = playlist ? {
+    type: playlist.library ? 'library' : playlist.personal ? 'personal' : playlist.daily ? 'daily' : String(playlist.id) === 'most-downloaded' ? 'most-downloaded' : 'global',
+    id: String(playlist.id || ''),
+    name: playlist.name || '',
+  } : null;
   document.querySelectorAll('.song-more').forEach((button) => {
     button.addEventListener('click', () => {
       const song = state.visibleSongs[Number(button.dataset.index)];
@@ -1827,7 +1849,7 @@ function bindSongActions(playlist = null) {
       menu.addEventListener('click', (event) => {
         const action = event.target.closest('[data-song-menu]')?.dataset.songMenu;
         if (action === 'queue') addSongToPlaybackQueue(song);
-        if (action === 'play') playQueue(state.visibleSongs, Number(button.dataset.index));
+        if (action === 'play') playQueue(state.visibleSongs, Number(button.dataset.index), context);
         menu.remove();
       });
       const dismiss = (event) => {
@@ -1838,7 +1860,7 @@ function bindSongActions(playlist = null) {
     });
   });
   document.querySelectorAll('.play-song').forEach((button) => {
-    button.addEventListener('click', () => playQueue(state.visibleSongs, Number(button.dataset.index)));
+    button.addEventListener('click', () => playQueue(state.visibleSongs, Number(button.dataset.index), context));
   });
   document.querySelectorAll('.save-song').forEach((button) => {
     button.addEventListener('click', () => saveSong(state.visibleSongs[Number(button.dataset.index)]));
@@ -1915,15 +1937,34 @@ function syncSongRows() {
   });
 }
 
-function renderHomeContent(playlists = state.playlists) {
+function renderHomeContent(playlists = state.playlists, home = state.homeData) {
   const featured = playlists[0];
   const quick = playlists.slice(0, 6);
   const shelf = playlists;
+  const resume = home?.continueListening;
+  const recent = home?.recentSongs || [];
+  const recommended = home?.recommendedSongs || [];
+  const artists = home?.topArtists || [];
+  const personalShortcuts = home?.frequentPlaylists || [];
+  const songShelf = (songs, attribute) => `<div class="home-song-shelf">${songs.map((song, index) => `
+    <button class="home-song-card" ${attribute}="${index}" type="button">
+      <span>${song.artworkUrl ? `<img src="${escapeHtml(song.artworkUrl)}" alt="" />` : icon('music')}</span>
+      <strong>${escapeHtml(song.title)}</strong><small>${escapeHtml(song.artist)}</small>
+    </button>`).join('')}</div>`;
   contentView.innerHTML = `
+    ${resume ? `<section class="home-continue" id="home-continue">
+      <div class="home-continue-art">${resume.song.artworkUrl ? `<img src="${escapeHtml(resume.song.artworkUrl)}" alt="" />` : icon('music')}</div>
+      <div class="home-continue-copy"><span>CONTINUAR OUVINDO</span><h2>${escapeHtml(resume.song.title)}</h2><p>${escapeHtml(resume.song.artist)}</p><div><i style="width:${Math.min(100, (Number(resume.positionSeconds) / Math.max(1, Number(resume.durationSeconds))) * 100)}%"></i></div></div>
+      <button type="button" title="Continuar do ponto salvo">${icon('play')}</button>
+    </section>` : ''}
     ${featured ? `<section class="home-hero" data-home-index="0">
       <div class="home-hero-art">${featured.iconUrl ? `<img src="${escapeHtml(featured.iconUrl)}" alt="" />` : icon('music')}</div>
       <div class="home-hero-copy"><span>DESTAQUE DO NATIONMUSICS</span><h2>${escapeHtml(featured.name)}</h2><p>${escapeHtml(featured.description || 'Uma seleção pronta para tocar.')}</p><button class="home-hero-play" type="button">${icon('play')} Ouvir agora</button></div>
     </section>` : ''}
+    ${recent.length ? `<section class="home-section"><div class="section-heading"><h2>Tocadas recentemente</h2><span>Sincronizadas na sua conta</span></div>${songShelf(recent, 'data-home-recent')}</section>` : ''}
+    ${artists.length ? `<section class="home-section"><div class="section-heading"><h2>Seus artistas</h2><span>Com base no que você realmente ouve</span></div><div class="home-artist-shelf">${artists.map((artist, index) => `<button data-home-artist="${index}" type="button"><span>${artist.artworkUrl ? `<img src="${escapeHtml(artist.artworkUrl)}" alt="" />` : icon('users')}</span><strong>${escapeHtml(artist.name)}</strong></button>`).join('')}</div></section>` : ''}
+    ${recommended.length ? `<section class="home-section"><div class="section-heading"><h2>${escapeHtml(home.recommendationReason || 'Escolhidas para você')}</h2><span>Atualizadas pelo seu histórico</span></div>${songShelf(recommended, 'data-home-recommended')}</section>` : ''}
+    ${personalShortcuts.length ? `<section class="home-section"><div class="section-heading"><h2>Atalhos para você</h2><span>Playlists próximas do seu gosto</span></div><div class="home-quick-grid">${personalShortcuts.slice(0, 6).map((playlist, index) => `<button class="home-quick-card" data-home-shortcut="${index}" type="button"><span>${playlist.iconUrl ? `<img src="${escapeHtml(playlist.iconUrl)}" alt="" />` : icon('playlist')}</span><strong>${escapeHtml(playlist.name)}</strong><i>${icon('play')}</i></button>`).join('')}</div></section>` : ''}
     <section class="home-section">
       <div class="section-heading"><h2>Acesso rápido</h2><span>${playlists.length} coleções</span></div>
       <div class="home-quick-grid">
@@ -1944,14 +1985,38 @@ function renderHomeContent(playlists = state.playlists) {
   document.querySelectorAll('[data-home-index]').forEach((card) => {
     card.addEventListener('click', () => openPlaylist(playlists[Number(card.dataset.homeIndex)]));
   });
+  $('#home-continue')?.addEventListener('click', () => void resumeHomePlayback(resume));
+  document.querySelectorAll('[data-home-recent]').forEach((card) => card.addEventListener('click', () => playQueue([recent[Number(card.dataset.homeRecent)]], 0)));
+  document.querySelectorAll('[data-home-recommended]').forEach((card) => card.addEventListener('click', () => playQueue([recommended[Number(card.dataset.homeRecommended)]], 0)));
+  document.querySelectorAll('[data-home-artist]').forEach((card) => card.addEventListener('click', () => void renderArtist(artists[Number(card.dataset.homeArtist)].name)));
+  document.querySelectorAll('[data-home-shortcut]').forEach((card) => card.addEventListener('click', () => openPlaylist(personalShortcuts[Number(card.dataset.homeShortcut)])));
   bindGenreActions();
+}
+
+async function resumeHomePlayback(resume) {
+  if (!resume?.song) return;
+  const fallback = { ...resume.song, id: resume.song.id || resume.song.sourceId };
+  const context = resume.contextId ? { type: resume.contextType || 'global', id: String(resume.contextId), name: resume.contextName || '' } : null;
+  let songs = [fallback];
+  try {
+    if (context) {
+      if (context.type === 'personal') songs = await window.nation.getPersonalPlaylistSongs(context.id);
+      else if (context.type === 'library') songs = await window.nation.getLibrary();
+      else songs = await window.nation.getPlaylistSongs(context.id);
+    }
+  } catch {}
+  if (!songs.length) songs = [fallback];
+  const targetIdentity = songIdentity(fallback);
+  const index = Math.max(0, songs.findIndex((song) => songIdentity(song) === targetIdentity));
+  state.pendingResumePosition = Math.max(0, Number(resume.positionSeconds) || 0);
+  playQueue(songs, index, context);
 }
 
 async function renderHome(force = false) {
   state.view = 'home';
   setPageHeader('BEM-VINDO DE VOLTA', 'Sua música, do seu jeito.');
-  const cacheIsFresh = state.playlists.length
-    && Date.now() - state.playlistsFetchedAt < VIEW_CACHE_TTL_MS;
+  const cacheIsFresh = state.playlists.length && state.homeData
+    && Date.now() - Math.min(state.playlistsFetchedAt, state.homeDataFetchedAt) < VIEW_CACHE_TTL_MS;
   if (!force && cacheIsFresh) {
     renderHomeContent();
     return;
@@ -1960,8 +2025,11 @@ async function renderHome(force = false) {
   if (state.playlists.length) renderHomeContent();
   else setLoading('Carregando playlists...');
   try {
-    state.playlists = await window.nation.getPlaylists();
+    const [playlists, home] = await Promise.all([window.nation.getPlaylists(), window.nation.getPersonalizedHome()]);
+    state.playlists = playlists;
+    state.homeData = home;
     state.playlistsFetchedAt = Date.now();
+    state.homeDataFetchedAt = Date.now();
     renderHomeContent();
   } catch (error) {
     if (await handleAuthenticationError(error)) return;
@@ -1997,7 +2065,12 @@ function renderPlaylistSongsContent(playlist, songs) {
     ${songRows(songs, 'Esta playlist esta vazia.', { removalMode: playlist.personal ? 'personal' : playlist.library ? 'library' : '' })}
   `;
   bindSongActions(playlist);
-  bindQueueControls(state.visibleSongs);
+  const context = {
+    type: playlist.library ? 'library' : playlist.personal ? 'personal' : playlist.daily ? 'daily' : String(playlist.id) === 'most-downloaded' ? 'most-downloaded' : 'global',
+    id: String(playlist.id || ''),
+    name: playlist.name || '',
+  };
+  bindQueueControls(state.visibleSongs, context);
   $('#edit-personal-playlist')?.addEventListener('click', () => editPersonalPlaylist(playlist, songs));
   $('#delete-personal-playlist')?.addEventListener('click', () => deletePersonalPlaylist(playlist));
 }
@@ -2466,7 +2539,7 @@ async function saveSong(song) {
   }
 }
 
-function playQueue(songs, index) {
+function playQueue(songs, index, context = null) {
   reportCurrentPlayback(false);
   const playable = songs.filter((song) => song.sourceId || song.spotifyId || song.title);
   const selected = songs[index];
@@ -2484,6 +2557,7 @@ function playQueue(songs, index) {
   state.queueIndex = state.shuffle ? 0 : actualIndex;
   state.queueRevision += 1;
   state.queueMode = 'selection';
+  state.playbackContext = context;
   state.recommendationContinuationInFlight = false;
   state.shuffleNextIndex = -1;
   resetShuffleRemainingIndexes();
@@ -2525,6 +2599,7 @@ async function continueWithDailyRecommendations() {
     state.queueIndex = 0;
     state.queueRevision += 1;
     state.queueMode = 'recommendations';
+    state.playbackContext = null;
     state.shuffleNextIndex = -1;
     state.shuffleRemainingIndexes = [];
     await loadCurrentTrack();
@@ -2610,6 +2685,10 @@ async function loadCurrentTrack() {
     audio.src = url;
     $('#player-artist').textContent = resolved.artist;
     await audio.play();
+    if (state.pendingResumePosition > 0) {
+      audio.currentTime = Math.min(state.pendingResumePosition, Number.isFinite(audio.duration) ? Math.max(0, audio.duration - 1) : state.pendingResumePosition);
+      state.pendingResumePosition = 0;
+    }
     reportPlaybackTelemetry('READY', { loadTimeMs: Math.round(performance.now() - playbackLoadStartedAt) });
     await syncDiscordActivity(true);
     void syncHostedJamState(true);

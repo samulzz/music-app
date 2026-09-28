@@ -316,11 +316,11 @@ export default function PlaylistDetailsScreen() {
   const play = useCallback(async (song: MusicSong) => {
     const index = songs.findIndex((candidate) => identity(candidate) === identity(song));
     try {
-      await playSongQueue(songs, index);
+      await playSongQueue(songs, index, 'playlist', { type: playlistKind, id: playlistId, name: title });
     } catch (error) {
       Alert.alert('Não foi possível reproduzir', error instanceof Error ? error.message : 'Tente novamente.');
     }
-  }, [songs]);
+  }, [playlistId, playlistKind, songs, title]);
 
   const playAll = async () => {
     const playable = offlineMode

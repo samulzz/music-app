@@ -1207,6 +1207,20 @@ ipcMain.handle('recommendations:daily', async () => {
   const mix = await apiRequest('/recommendations/daily');
   return { ...mix, songs: (mix.songs || []).map((song) => normalizeSong(song, false)) };
 });
+ipcMain.handle('recommendations:home', async () => {
+  const home = await apiRequest('/recommendations/home');
+  return {
+    ...home,
+    recentSongs: (home.recentSongs || []).map((song) => normalizeSong(song, false)),
+    recommendedSongs: (home.recommendedSongs || []).map((song) => normalizeSong(song, false)),
+    dailyMix: home.dailyMix
+      ? { ...home.dailyMix, songs: (home.dailyMix.songs || []).map((song) => normalizeSong(song, false)) }
+      : null,
+    continueListening: home.continueListening?.song
+      ? { ...home.continueListening, song: normalizeSong(home.continueListening.song, false) }
+      : null,
+  };
+});
 ipcMain.handle('recommendations:listen', async (_event, payload) => {
   await apiRequest('/recommendations/listen', {
     method: 'POST',

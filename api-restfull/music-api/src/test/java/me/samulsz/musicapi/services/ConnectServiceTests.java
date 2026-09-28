@@ -90,12 +90,14 @@ class ConnectServiceTests {
         assertFalse(idle.playing());
         assertEquals("", idle.activeDeviceId());
         assertEquals(null, idle.song());
+        assertEquals("source-1", storedPlayback.getSongSourceId());
+        assertEquals(15D, storedPlayback.getPositionSeconds());
     }
 
     private me.samulsz.musicapi.dto.ConnectStateResponse heartbeat(String id, ConnectSongDto song, Boolean playing, Long revision) {
         return service.heartbeat("ouvinte", new ConnectHeartbeatRequest(
                 id, id, id.equals("desktop") ? "desktop" : "android", song,
-                15D, 180D, playing, 0.7D, revision
+                15D, 180D, playing, 0.7D, revision, "", "", ""
         ));
     }
 

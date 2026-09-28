@@ -26,6 +26,15 @@ public class RecommendationController {
         }
     }
 
+    @GetMapping("/home")
+    public ResponseEntity<?> home(Authentication authentication) {
+        try {
+            return ResponseEntity.ok(recommendationService.getPersonalizedHome(authentication.getName()));
+        } catch (Exception error) {
+            return ResponseEntity.badRequest().body(error.getMessage());
+        }
+    }
+
     @PostMapping("/listen")
     public ResponseEntity<?> listen(
             Authentication authentication,

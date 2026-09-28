@@ -36,6 +36,8 @@ export type ConnectState = {
   serverTime: number;
 };
 
+export type PlaybackContext = { type: string; id: string; name: string };
+
 const DEVICE_KEY = 'nationmusics.connect.device-id.v1';
 let cachedDeviceId = '';
 let latestState: ConnectState | null = null;
@@ -82,6 +84,7 @@ export async function sendConnectHeartbeat(playback: {
   durationSeconds: number;
   playing: boolean;
   volumeLevel: number;
+  context?: PlaybackContext | null;
 }) {
   const deviceId = await getConnectDeviceId();
   const state = await apiRequest<ConnectState>('/connect/heartbeat', {
@@ -91,6 +94,9 @@ export async function sendConnectHeartbeat(playback: {
       deviceName: connectDeviceName(),
       platform: Platform.OS,
       ...playback,
+      contextType: playback.context?.type || '',
+      contextId: playback.context?.id || '',
+      contextName: playback.context?.name || '',
       processedCommandRevision: processedRevision,
     }),
   });

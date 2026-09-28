@@ -8,7 +8,7 @@ import {
   type ConnectSong,
   type ConnectState,
 } from '../services/connect';
-import { playNext, playPrevious, playSongQueue } from '../services/player';
+import { getPlaybackContext, playNext, playPrevious, playSongQueue } from '../services/player';
 import { getActiveMediaItemSafely, getPlayerProgressSafely, isPlayerPlayingSafely } from '../services/player-state';
 import { getSession } from '../services/auth';
 
@@ -63,6 +63,7 @@ export function ConnectSync() {
           durationSeconds: progress.duration,
           playing: isPlayerPlayingSafely(),
           volumeLevel: volume,
+          context: getPlaybackContext(),
         });
         if (!state.currentDeviceActive && isPlayerPlayingSafely()) TrackPlayer.pause();
         await applyCommand(state);

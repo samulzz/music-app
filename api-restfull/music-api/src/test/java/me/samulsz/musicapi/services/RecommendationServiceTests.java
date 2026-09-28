@@ -4,6 +4,7 @@ import me.samulsz.musicapi.models.DailyMix;
 import me.samulsz.musicapi.models.Song;
 import me.samulsz.musicapi.models.User;
 import me.samulsz.musicapi.repositories.DailyMixRepository;
+import me.samulsz.musicapi.repositories.AccountPlaybackRepository;
 import me.samulsz.musicapi.repositories.PlaybackPreferenceRepository;
 import me.samulsz.musicapi.repositories.PlaylistRepository;
 import me.samulsz.musicapi.repositories.SongRepository;
@@ -31,6 +32,7 @@ class RecommendationServiceTests {
         PlaylistRepository playlists = mock(PlaylistRepository.class);
         PlaybackPreferenceRepository preferences = mock(PlaybackPreferenceRepository.class);
         DailyMixRepository dailyMixes = mock(DailyMixRepository.class);
+        AccountPlaybackRepository accountPlayback = mock(AccountPlaybackRepository.class);
         MusicService music = mock(MusicService.class);
 
         User user = new User();
@@ -59,7 +61,7 @@ class RecommendationServiceTests {
         when(music.hasPrecachedAudio(any())).thenReturn(true);
 
         RecommendationService service = new RecommendationService(
-                users, songs, playlists, preferences, dailyMixes, music
+                users, songs, playlists, preferences, dailyMixes, accountPlayback, music
         );
         var response = service.getDailyMix("ouvinte");
 

@@ -16,6 +16,9 @@ public class AccountPlayback {
     @Column(name = "song_artist") private String songArtist = "";
     @Column(name = "song_artwork_url", length = 1000) private String songArtworkUrl = "";
     @Column(name = "song_remote_url", length = 1000) private String songRemoteUrl = "";
+    @Column(name = "context_type", length = 30) private String contextType = "";
+    @Column(name = "context_id", length = 100) private String contextId = "";
+    @Column(name = "context_name", length = 240) private String contextName = "";
     @Column(name = "position_seconds", nullable = false) private double positionSeconds;
     @Column(name = "duration_seconds", nullable = false) private double durationSeconds;
     @Column(nullable = false) private boolean playing;
@@ -36,6 +39,9 @@ public class AccountPlayback {
         if (songArtist == null) songArtist = "";
         if (songArtworkUrl == null) songArtworkUrl = "";
         if (songRemoteUrl == null) songRemoteUrl = "";
+        if (contextType == null) contextType = "";
+        if (contextId == null) contextId = "";
+        if (contextName == null) contextName = "";
         if (commandAction == null) commandAction = "";
         if (commandTargetDeviceId == null) commandTargetDeviceId = "";
     }
@@ -48,6 +54,9 @@ public class AccountPlayback {
     public String getSongArtist() { return songArtist; } public void setSongArtist(String value) { songArtist = value; }
     public String getSongArtworkUrl() { return songArtworkUrl; } public void setSongArtworkUrl(String value) { songArtworkUrl = value; }
     public String getSongRemoteUrl() { return songRemoteUrl; } public void setSongRemoteUrl(String value) { songRemoteUrl = value; }
+    public String getContextType() { return contextType; } public void setContextType(String value) { contextType = value; }
+    public String getContextId() { return contextId; } public void setContextId(String value) { contextId = value; }
+    public String getContextName() { return contextName; } public void setContextName(String value) { contextName = value; }
     public double getPositionSeconds() { return positionSeconds; } public void setPositionSeconds(double value) { positionSeconds = value; }
     public double getDurationSeconds() { return durationSeconds; } public void setDurationSeconds(double value) { durationSeconds = value; }
     public boolean isPlaying() { return playing; } public void setPlaying(boolean value) { playing = value; }

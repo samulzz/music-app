@@ -19,6 +19,8 @@ const state = {
   queueMode: 'idle',
   shuffleRemainingIndexes: [],
   recommendationContinuationInFlight: false,
+  recommendationSeedingInFlight: false,
+  recoveredSourceIds: new Set(),
   shuffle: false,
   shuffleNextIndex: -1,
   preparingSourceId: '',
@@ -75,6 +77,7 @@ const FRIEND_LIST_REFRESH_MS = 20_000;
 const JAM_SYNC_INTERVAL_MS = 2500;
 const CONNECT_SYNC_INTERVAL_MS = 2500;
 const CONNECT_DEVICE_ID_KEY = 'nationmusics.desktop.connectDeviceId';
+const CONNECT_REVISION_KEY = 'nationmusics.desktop.connectProcessedRevision';
 let liveSearchTimer = null;
 let friendPresenceTimer = null;
 let friendListTimer = null;
@@ -200,6 +203,7 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     getAlbums: async () => [],
     getAlbumSongs: async () => demoSongs,
     prepareStream: async () => '',
+    invalidateStream: async () => true,
     downloadSong: async () => true,
     isSongDownloaded: async (song) => Boolean(song.downloaded),
     getCacheStats: async () => ({ count: 2, bytes: 12582912 }),
@@ -538,6 +542,49 @@ function shuffleSongs(songs) {
   return result;
 }
 
+function primaryArtistKey(value) {
+  return normalizeCatalogText(String(value || '').split(/\s*(?:,|\bfeat\.?\b|\bft\.?\b|\s+&\s+)\s*/i)[0]);
+}
+
+function recommendationAffinity(anchor, candidate) {
+  let score = 0;
+  if (primaryArtistKey(anchor.artist) && primaryArtistKey(anchor.artist) === primaryArtistKey(candidate.artist)) score += 100;
+  const anchorGenres = new Set((anchor.genres || []).map(normalizeCatalogText));
+  const overlap = (candidate.genres || []).map(normalizeCatalogText).filter((genre) => anchorGenres.has(genre)).length;
+  score += overlap * 35;
+  return score;
+}
+
+async function seedRecommendationsForSingleSong(anchor, revision) {
+  if (state.recommendationSeedingInFlight) return;
+  state.recommendationSeedingInFlight = true;
+  try {
+    const mix = await window.nation.getDailyMix();
+    if (revision !== state.queueRevision || state.queue.length !== 1 || state.queueMode !== 'selection') return;
+    const existing = new Set(state.queue.map(songIdentity));
+    const additions = (mix.songs || [])
+      .map((song, order) => ({ song, order, score: recommendationAffinity(anchor, song) }))
+      .filter(({ song }) => {
+        const identity = songIdentity(song);
+        if (!identity || existing.has(identity)) return false;
+        existing.add(identity);
+        return true;
+      })
+      .sort((left, right) => right.score - left.score || left.order - right.order)
+      .slice(0, 30)
+      .map(({ song }, queueSequence) => ({ ...song, queueOrigin: 'recommendation', queueSequence }));
+    if (!additions.length || revision !== state.queueRevision) return;
+    state.queue.push(...additions);
+    state.queueHistory = [...state.queue];
+    if (!$('#queue-panel')?.classList.contains('hidden')) renderQueuePanel();
+    prefetchNextTrack();
+  } catch {
+    // A música escolhida continua tocando mesmo se as recomendações estiverem offline.
+  } finally {
+    state.recommendationSeedingInFlight = false;
+  }
+}
+
 function reorderUpcomingQueue() {
   if (state.queueIndex < 0) return;
   const prefix = state.queue.slice(0, state.queueIndex + 1);
@@ -784,6 +831,21 @@ function connectDeviceId() {
   return deviceId;
 }
 
+function restoreConnectRevision() {
+  try {
+    const key = `${CONNECT_REVISION_KEY}.${state.session?.username || 'default'}`;
+    state.connectProcessedRevision = Math.max(0, Number(localStorage.getItem(key)) || 0);
+  } catch { state.connectProcessedRevision = 0; }
+}
+
+function rememberConnectRevision(revision) {
+  state.connectProcessedRevision = Math.max(state.connectProcessedRevision, Number(revision) || 0);
+  try {
+    const key = `${CONNECT_REVISION_KEY}.${state.session?.username || 'default'}`;
+    localStorage.setItem(key, String(state.connectProcessedRevision));
+  } catch {}
+}
+
 function currentConnectSong() {
   const song = state.queue[state.queueIndex];
   if (!song) return null;
@@ -827,9 +889,8 @@ function renderConnectState() {
     $('#duration').textContent = formatTime(Number(connect.durationSeconds) || 0);
     $('#seek').value = Number(connect.durationSeconds) > 0 ? String((connectEffectivePosition(connect) / Number(connect.durationSeconds)) * 100) : '0';
     setPlayButtonIcon(Boolean(connect.playing));
-    const remoteSlider = Math.round((clamp(Number(connect.volumeLevel) || 0, 0, 1) ** (1 / VOLUME_CURVE)) * 100);
-    state.volumeSliderValue = remoteSlider;
-    updateVolumeUi();
+    // O volume pertence ao dispositivo. Mostrar outro aparelho não pode apagar
+    // o volume salvo deste computador.
   }
   if (panel && panel.classList.contains('hidden')) return;
 }
@@ -901,7 +962,7 @@ async function executeConnectCommand(connect) {
       await loadCurrentTrack();
     }
     if (Number.isFinite(connect.positionSeconds)) audio.currentTime = Math.max(0, Number(connect.positionSeconds));
-    setVolumeFromSlider((clamp(Number(connect.volumeLevel) || 0, 0, 1) ** (1 / VOLUME_CURVE)) * 100);
+    // Ao trazer a reprodução para este PC, mantém o volume que já estava salvo nele.
     if (connect.playing) await audio.play(); else audio.pause();
   } else if (action === 'PLAY') await audio.play();
   else if (action === 'PAUSE') audio.pause();
@@ -909,7 +970,7 @@ async function executeConnectCommand(connect) {
   else if (action === 'PREVIOUS') nextTrack(-1);
   else if (action === 'SEEK' && Number.isFinite(connect.commandValue)) audio.currentTime = Math.max(0, Number(connect.commandValue));
   else if (action === 'VOLUME') setVolumeFromSlider((clamp(Number(connect.commandValue) || 0, 0, 1) ** (1 / VOLUME_CURVE)) * 100);
-  state.connectProcessedRevision = Math.max(state.connectProcessedRevision, Number(connect.commandRevision) || 0);
+  rememberConnectRevision(connect.commandRevision);
 }
 
 async function syncConnectPlayback() {
@@ -2594,7 +2655,8 @@ function playQueue(songs, index, context = null, options = {}) {
     showBanner('Esta música não possui uma fonte de reprodução.', true);
     return;
   }
-  const ordered = playable.map((song, queueSequence) => ({ ...song, queueOrigin: song.queueOrigin || 'playlist', queueSequence }));
+  const isSingle = playable.length === 1 && !context;
+  const ordered = playable.map((song, queueSequence) => ({ ...song, queueOrigin: song.queueOrigin || (isSingle ? 'manual' : 'playlist'), queueSequence }));
   state.queue = state.shuffle
     ? [ordered[actualIndex], ...shuffleSongs(ordered.filter((_song, position) => position !== actualIndex))]
     : ordered;
@@ -2604,14 +2666,17 @@ function playQueue(songs, index, context = null, options = {}) {
   state.queueMode = 'selection';
   state.playbackContext = context;
   state.recommendationContinuationInFlight = false;
+  state.recommendationSeedingInFlight = false;
+  state.recoveredSourceIds.delete(selectedIdentity);
   state.shuffleNextIndex = -1;
   resetShuffleRemainingIndexes();
   void (async () => {
     if (!options.passive && state.connectState && !state.connectState.currentDeviceActive) {
       const connect = await controlConnectPlayback('SYNC');
-      if (connect) state.connectProcessedRevision = Math.max(state.connectProcessedRevision, Number(connect.commandRevision) || 0);
+      if (connect) rememberConnectRevision(connect.commandRevision);
     }
     await loadCurrentTrack(options.autoplay !== false);
+    if (isSingle) void seedRecommendationsForSingleSong(state.queue[0], state.queueRevision);
     window.setTimeout(prefetchNextTrack, 1000);
     void syncConnectPlayback();
   })();
@@ -2758,6 +2823,14 @@ async function loadCurrentTrack(autoplay = true) {
     state.preparingSourceId = '';
     $('#player-artist').textContent = song.artist;
     if (await handleAuthenticationError(error)) return;
+    const failedKey = songIdentity(state.queue[state.queueIndex] || song);
+    if (failedKey && !state.recoveredSourceIds.has(failedKey)) {
+      state.recoveredSourceIds.add(failedKey);
+      preparedStreamUrls.delete(failedKey);
+      await window.nation.invalidateStream(state.queue[state.queueIndex] || song).catch(() => {});
+      await loadCurrentTrack(autoplay);
+      return;
+    }
     showBanner(error.message || 'Não foi possível reproduzir esta música.', true);
     syncSongRows();
   }
@@ -2794,6 +2867,7 @@ function activateNavigation(view) {
 
 async function showApp(session) {
   state.session = session;
+  restoreConnectRevision();
   authScreen.classList.add('hidden');
   appShell.classList.remove('hidden');
   $('#profile-name').textContent = session.username;
@@ -3006,7 +3080,13 @@ audio.addEventListener('ended', () => {
 });
 audio.addEventListener('error', () => {
   reportPlaybackTelemetry('ERROR', { message: `MediaError ${audio.error?.code || 0}: ${audio.error?.message || 'erro desconhecido'}` });
-  if (audio.src) showBanner('O streaming foi interrompido. Tente novamente.', true);
+  const song = state.queue[state.queueIndex];
+  const key = songIdentity(song);
+  if (audio.src && song && key && !state.recoveredSourceIds.has(key)) {
+    state.recoveredSourceIds.add(key);
+    preparedStreamUrls.delete(key);
+    void window.nation.invalidateStream(song).catch(() => {}).then(() => loadCurrentTrack(true));
+  } else if (audio.src) showBanner('O streaming foi interrompido. Tente novamente.', true);
   void window.nation.clearDiscordActivity();
   void syncFriendPresence(true);
 });

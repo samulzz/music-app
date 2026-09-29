@@ -686,7 +686,8 @@ async function waitUntilPrepared(song) {
 
   const operation = (async () => {
     const metadata = `?titulo=${encodeURIComponent(song.title || 'Música')}&artista=${encodeURIComponent(song.artist || '')}`;
-    await apiRequest(`/musicas/preparar/${encodeURIComponent(sourceId)}${metadata}`, { method: 'POST' });
+    const initial = await apiRequest(`/musicas/preparar/${encodeURIComponent(sourceId)}${metadata}`, { method: 'POST' });
+    if (initial?.status === 'ready') return;
     const startedAt = Date.now();
     while (Date.now() - startedAt < PREPARATION_TIMEOUT_MS) {
       await new Promise((resolve) => setTimeout(resolve, PREPARATION_POLL_MS));
@@ -1100,11 +1101,20 @@ ipcMain.handle('music:prepare-stream', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) throw new Error('Esta música não possui uma origem válida.');
   await waitUntilPrepared(song);
-  // O player sempre recebe uma faixa local completa. Antes, ele iniciava o
-  // streaming e baixava a mesma musica em paralelo, causando engasgos e cache
-  // incompleto mesmo em conexoes rapidas.
-  await ensureDesktopAudioCached(song);
-  return streamUrl(song);
+  // Dá uma pequena vantagem ao cache local, mas não prende o Play esperando o
+  // arquivo inteiro. Se ainda estiver baixando, o protocolo autenticado começa
+  // a tocar da VPS e o cache fica pronto para as próximas execuções.
+  const cacheOperation = ensureDesktopAudioCached(song);
+  await Promise.race([cacheOperation.catch(() => ''), new Promise((resolve) => setTimeout(resolve, 900))]);
+  if (await hasUsableCachedAudio(cachedAudioFilePath(song.sourceId))) return streamUrl(song);
+  void cacheOperation.catch(() => {});
+  return `nationmusic://stream/${encodeURIComponent(song.sourceId)}?title=${encodeURIComponent(song.title)}&artist=${encodeURIComponent(song.artist || '')}`;
+});
+ipcMain.handle('music:invalidate-stream', async (_event, rawSong) => {
+  const song = normalizeSong(rawSong);
+  if (!song.sourceId) return false;
+  await fsp.rm(cachedAudioFilePath(song.sourceId), { force: true }).catch(() => {});
+  return true;
 });
 ipcMain.handle('music:download', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);

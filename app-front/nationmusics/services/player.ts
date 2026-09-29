@@ -27,6 +27,9 @@ const prefetchAttemptAt = new Map<string, number>();
 const shuffleListeners = new Set<(enabled: boolean) => void>();
 let lastShuffleEnabled = false;
 let recommendationAppendInFlight: Promise<void> | null = null;
+let recommendationSeedInFlight: Promise<void> | null = null;
+let playbackRecoveryInFlight: Promise<void> | null = null;
+const lastRecoveryAt = new Map<string, number>();
 let playbackQueueRevision = 0;
 let playbackTelemetry: { sessionId: string; song: MusicSong; startedAt: number; ready: boolean; lastWaitingAt: number } | null = null;
 let playbackContext: PlaybackContext | null = null;
@@ -241,18 +244,25 @@ export function setupMusicPlayer() {
       }
     } else if (state === PlaybackState.Error) {
       sendPlaybackTelemetry('ERROR', { message: 'O player nativo informou erro de reprodução.' });
+      void recoverActivePlayback();
     }
     if (state !== PlaybackState.Ended) return;
     sendPlaybackTelemetry('ENDED');
     const revision = playbackQueueRevision;
     void continueWithDailyRecommendations(revision);
   });
+  TrackPlayer.addEventListener(Event.PlaybackError, ({ code, message }) => {
+    sendPlaybackTelemetry('ERROR', { message: `${code}: ${message}` });
+    void recoverActivePlayback();
+  });
   initialized = true;
 }
 
 function toMediaItem(song: MusicSong, headers?: Record<string, string>, origin: MusicSong['queueOrigin'] = 'manual'): MediaItem | null {
   const sourceId = song.sourceId?.trim();
-  const remoteUrl = song.remoteUrl || (sourceId ? musicDownloadUrl(sourceId, song.title, song.artist) : '');
+  // URLs vindas de uma sessão anterior podem carregar cabeçalhos expirados.
+  // Com sourceId, sempre recria a URL canônica usando a sessão atual.
+  const remoteUrl = sourceId ? musicDownloadUrl(sourceId, song.title, song.artist) : song.remoteUrl || '';
   const url = song.localUri || remoteUrl;
   if (!url) return null;
 
@@ -270,6 +280,85 @@ function toMediaItem(song: MusicSong, headers?: Record<string, string>, origin: 
       queueOrigin: song.queueOrigin || origin,
     },
   };
+}
+
+function primaryArtist(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .split(/\s*(?:,|\bfeat\.?\b|\bft\.?\b|\s+&\s+)\s*/i)[0].trim();
+}
+
+function normalizedGenre(value: string) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+}
+
+function recommendationAffinity(anchor: MusicSong, candidate: MusicSong) {
+  let score = primaryArtist(anchor.artist) === primaryArtist(candidate.artist) ? 100 : 0;
+  const genres = new Set((anchor.genres || []).map(normalizedGenre));
+  score += (candidate.genres || []).map(normalizedGenre).filter((genre) => genres.has(genre)).length * 35;
+  return score;
+}
+
+async function seedRecommendationsForSingleSong(anchor: MusicSong, expectedRevision: number) {
+  if (recommendationSeedInFlight) return recommendationSeedInFlight;
+  recommendationSeedInFlight = (async () => {
+    try {
+      const dailySongs = await mergeWithOfflineLibrary(await getDailyMixSongs());
+      if (expectedRevision !== playbackQueueRevision || TrackPlayer.getQueue().length !== 1) return;
+      const existing = new Set(TrackPlayer.getQueue().map((item) => mediaItemSourceId(item) || String(item.mediaId || '')));
+      const needsNetwork = dailySongs.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
+      const headers = needsNetwork ? await getMediaHeaders() : undefined;
+      const additions = dailySongs
+        .map((song, order) => ({ song, order, score: recommendationAffinity(anchor, song) }))
+        .filter(({ song }) => {
+          const identity = song.sourceId?.trim() || song.id;
+          if (!identity || existing.has(identity)) return false;
+          existing.add(identity);
+          return true;
+        })
+        .sort((left, right) => right.score - left.score || left.order - right.order)
+        .slice(0, 30)
+        .map(({ song }, index) => {
+          const item = toMediaItem(song, headers, 'recommendation');
+          if (item) item.extras = { ...item.extras, queueSequence: index + 1 };
+          return item;
+        })
+        .filter((item): item is MediaItem => item !== null);
+      if (expectedRevision !== playbackQueueRevision || !additions.length) return;
+      TrackPlayer.addMediaItems(additions);
+      prefetchNextInQueue(0);
+    } catch {
+      // Mantém a faixa escolhida quando as recomendações estiverem indisponíveis.
+    } finally {
+      recommendationSeedInFlight = null;
+    }
+  })();
+  return recommendationSeedInFlight;
+}
+
+async function recoverActivePlayback() {
+  if (playbackRecoveryInFlight) return playbackRecoveryInFlight;
+  playbackRecoveryInFlight = (async () => {
+    const index = TrackPlayer.getActiveMediaItemIndex();
+    const queue = TrackPlayer.getQueue();
+    if (index === null || index < 0 || index >= queue.length) return;
+    const item = queue[index];
+    const sourceId = mediaItemSourceId(item);
+    if (!sourceId || (item.extras && typeof item.extras === 'object' && item.extras.localUri)) return;
+    const previous = lastRecoveryAt.get(sourceId) || 0;
+    if (Date.now() - previous < 15_000) return;
+    lastRecoveryAt.set(sourceId, Date.now());
+    const position = TrackPlayer.getProgress().position;
+    const headers = await getMediaHeaders();
+    const freshUrl = musicDownloadUrl(sourceId, String(item.title || 'Música'), String(item.artist || ''));
+    const refreshed = [...queue];
+    refreshed[index] = { ...item, url: { uri: freshUrl, headers } };
+    playbackQueueRevision += 1;
+    TrackPlayer.setMediaItems(refreshed, index);
+    if (position > 0) TrackPlayer.seekTo(position);
+    TrackPlayer.play();
+    prefetchNextInQueue(index);
+  })().catch(() => {}).finally(() => { playbackRecoveryInFlight = null; });
+  return playbackRecoveryInFlight;
 }
 
 function mediaItemSourceId(item: MediaItem | null | undefined) {
@@ -405,6 +494,7 @@ export async function playSongQueue(
   TrackPlayer.setMediaItems(ordered, startIndex);
   TrackPlayer.play();
   prefetchNextInQueue(startIndex);
+  if (queue.length === 1) void seedRecommendationsForSingleSong(playableSongs[requestedIndex], playbackQueueRevision);
   return startIndex;
 }
 
@@ -415,7 +505,7 @@ export async function restorePausedSongQueue(
   context: PlaybackContext | null = null,
 ) {
   setupMusicPlayer();
-  if (TrackPlayer.getQueue().length) return false;
+  if (TrackPlayer.getQueue().length && TrackPlayer.isPlaying()) return false;
   const playableSongs = await mergeWithOfflineLibrary(songs);
   const needsNetwork = playableSongs.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
   const headers = needsNetwork ? await getMediaHeaders() : undefined;
@@ -484,10 +574,12 @@ export function playQueueIndex(index: number) {
   prefetchNextInQueue(index);
 }
 
-export function togglePlayback() {
+export async function togglePlayback() {
   setupMusicPlayer();
   if (TrackPlayer.isPlaying()) {
     TrackPlayer.pause();
+  } else if (TrackPlayer.getPlaybackState() === PlaybackState.Error) {
+    await recoverActivePlayback();
   } else {
     TrackPlayer.play();
   }

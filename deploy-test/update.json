@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-28T10:15:00-03:00",
+  "generatedAt": "2026-09-28T22:02:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.31",
-    "versionCode": 33,
-    "minimumVersion": "1.1.31",
-    "minimumVersionCode": 33,
+    "version": "1.1.32",
+    "versionCode": 34,
+    "minimumVersion": "1.1.32",
+    "minimumVersionCode": 34,
     "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.31.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.32.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Busca mais rápida, gêneros como resultado e curadoria gradual de álbuns completos."
+    "releaseNotes": "Recuperação automática da música, fila coerente para faixas avulsas e início de reprodução mais confiável."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.35",
-    "minimumVersion": "1.2.35",
+    "version": "1.2.36",
+    "minimumVersion": "1.2.36",
     "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.35.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.36.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Busca sem travamento ou pisca, gêneros como resultado e álbuns úteis no catálogo."
+    "releaseNotes": "Volume preservado ao voltar, recuperação automática do áudio e reprodução iniciando sem esperar o download completo."
   }
 }

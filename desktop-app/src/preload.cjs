@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('nation', {
   getAlbums: () => ipcRenderer.invoke('catalog:albums'),
   getAlbumSongs: (album) => ipcRenderer.invoke('catalog:album-songs', album),
   prepareStream: (song) => ipcRenderer.invoke('music:prepare-stream', song),
+  invalidateStream: (song) => ipcRenderer.invoke('music:invalidate-stream', song),
   downloadSong: (song) => ipcRenderer.invoke('music:download', song),
   isSongDownloaded: (song) => ipcRenderer.invoke('music:is-downloaded', song),
   getCacheStats: () => ipcRenderer.invoke('music:cache-stats'),

@@ -245,6 +245,7 @@ public class RecommendationService {
         anchors.addAll(historyIds);
 
         Map<String, Double> artistAffinity = new HashMap<>();
+        Map<String, Double> genreAffinity = new HashMap<>();
         Map<Long, Double> score = new HashMap<>();
         preferences.forEach(preference -> {
             Song song = preference.getSong();
@@ -252,12 +253,15 @@ public class RecommendationService {
                     + Math.log1p(preference.getCompletedCount()) * 5.0
                     + Math.min(4.0, preference.getListenedSeconds() / 1800.0);
             if (preference.isLiked()) strength += 24.0;
+            final double affinityStrength = strength;
             score.merge(song.getId(), strength * 1.5, Double::sum);
             artistAffinity.merge(normalizeArtist(song.getArtist()), strength, Double::sum);
+            song.getGenres().forEach(genre -> genreAffinity.merge(normalizeGenre(genre), affinityStrength, Double::sum));
         });
         user.getDownloadedSongs().forEach(song -> {
             score.merge(song.getId(), 5.0, Double::sum);
             artistAffinity.merge(normalizeArtist(song.getArtist()), 3.0, Double::sum);
+            song.getGenres().forEach(genre -> genreAffinity.merge(normalizeGenre(genre), 3.0, Double::sum));
         });
 
         List<Song> popular = songRepository.findMostDownloadedSongs();
@@ -293,8 +297,12 @@ public class RecommendationService {
         ranked.sort(Comparator
                 .comparingDouble((Song song) -> {
                     double affinity = artistAffinity.getOrDefault(normalizeArtist(song.getArtist()), 0.0);
+                    double genreScore = song.getGenres().stream()
+                            .mapToDouble(genre -> genreAffinity.getOrDefault(normalizeGenre(genre), 0.0))
+                            .sum();
                     double value = score.getOrDefault(song.getId(), 0.0)
                             + Math.min(14.0, affinity * 0.75)
+                            + Math.min(12.0, genreScore * 0.28)
                             + dailyJitter.getOrDefault(song.getId(), 0.0);
                     if (previousMixIds.contains(song.getId())) value *= 0.62;
                     return value;
@@ -371,6 +379,11 @@ public class RecommendationService {
                 .replaceAll("\\s+(feat|ft)\\.?\\s+.*$", "")
                 .trim();
         return normalized.isBlank() ? "artista desconhecido" : normalized;
+    }
+
+    private String normalizeGenre(String value) {
+        return Normalizer.normalize(Objects.toString(value, ""), Normalizer.Form.NFD)
+                .replaceAll("\\p{M}", "").toLowerCase(Locale.ROOT).trim();
     }
 
     private static class ArtistAccumulator {

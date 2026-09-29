@@ -9,7 +9,7 @@ import TrackPlayer, {
 } from '@rntp/player';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 
 import type { MusicSong } from '../types/music';
 import { apiRequest, getMediaHeaders } from './api';
@@ -22,7 +22,10 @@ import type { PlaybackContext } from './connect';
 
 let initialized = false;
 const OFFLINE_INDEX_KEY = 'nationmusics.offline-library.v2';
+const PLAYBACK_SESSION_KEY = 'nationmusics.playback-session.v1';
+const PLAYBACK_SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const PREFETCH_RETRY_MS = 5 * 60 * 1000;
+const PREFETCH_AHEAD_COUNT = 2;
 const prefetchAttemptAt = new Map<string, number>();
 const shuffleListeners = new Set<(enabled: boolean) => void>();
 let lastShuffleEnabled = false;
@@ -33,6 +36,111 @@ const lastRecoveryAt = new Map<string, number>();
 let playbackQueueRevision = 0;
 let playbackTelemetry: { sessionId: string; song: MusicSong; startedAt: number; ready: boolean; lastWaitingAt: number } | null = null;
 let playbackContext: PlaybackContext | null = null;
+let playbackSessionPersistTimer: ReturnType<typeof setTimeout> | null = null;
+let playbackSessionRestoring = false;
+
+type PersistedPlaybackItem = {
+  song: MusicSong;
+  queueOrigin: MusicSong['queueOrigin'];
+  queueSequence: number;
+};
+
+type PersistedPlaybackSession = {
+  savedAt: number;
+  queue: PersistedPlaybackItem[];
+  queueIndex: number;
+  positionSeconds: number;
+  wasPlaying: boolean;
+  volume: number;
+  shuffle: boolean;
+  context: PlaybackContext | null;
+};
+
+function persistedItem(item: MediaItem, index: number): PersistedPlaybackItem {
+  const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
+  return {
+    song: {
+      id: String(extras.songId || item.mediaId || ''),
+      sourceId: typeof extras.sourceId === 'string' ? extras.sourceId : String(item.mediaId || ''),
+      title: item.title || 'Música',
+      artist: item.artist || 'Artista desconhecido',
+      artworkUrl: typeof item.artworkUrl === 'string' ? item.artworkUrl : undefined,
+      localUri: typeof extras.localUri === 'string' ? extras.localUri : undefined,
+      album: typeof extras.album === 'string' ? extras.album : undefined,
+      albumArtist: typeof extras.albumArtist === 'string' ? extras.albumArtist : undefined,
+      genres: Array.isArray(extras.genres) ? extras.genres.filter((genre): genre is string => typeof genre === 'string') : [],
+      queueOrigin: extras.queueOrigin as MusicSong['queueOrigin'],
+    },
+    queueOrigin: (extras.queueOrigin as MusicSong['queueOrigin']) || 'playlist',
+    queueSequence: typeof extras.queueSequence === 'number' ? extras.queueSequence : index,
+  };
+}
+
+async function persistPlaybackSessionNow() {
+  if (!initialized || playbackSessionRestoring) return;
+  if (playbackSessionPersistTimer) clearTimeout(playbackSessionPersistTimer);
+  playbackSessionPersistTimer = null;
+  const queue = TrackPlayer.getQueue();
+  const queueIndex = TrackPlayer.getActiveMediaItemIndex();
+  if (!queue.length || queueIndex === null || queueIndex < 0) return;
+  const session: PersistedPlaybackSession = {
+    savedAt: Date.now(),
+    queue: queue.slice(0, 250).map(persistedItem),
+    queueIndex,
+    positionSeconds: Math.max(0, TrackPlayer.getProgress().position || 0),
+    wasPlaying: TrackPlayer.isPlaying(),
+    volume: Math.max(0, Math.min(1, Number(TrackPlayer.getVolume()) || 0)),
+    shuffle: lastShuffleEnabled,
+    context: playbackContext,
+  };
+  await AsyncStorage.setItem(PLAYBACK_SESSION_KEY, JSON.stringify(session));
+}
+
+function schedulePersistPlaybackSession(delay = 350) {
+  if (playbackSessionRestoring) return;
+  if (playbackSessionPersistTimer) clearTimeout(playbackSessionPersistTimer);
+  playbackSessionPersistTimer = setTimeout(() => { void persistPlaybackSessionNow().catch(() => {}); }, delay);
+}
+
+async function restorePersistedPlaybackSession(expectedRevision: number) {
+  if (TrackPlayer.getQueue().length) {
+    schedulePersistPlaybackSession();
+    return;
+  }
+  playbackSessionRestoring = true;
+  try {
+    const raw = await AsyncStorage.getItem(PLAYBACK_SESSION_KEY);
+    const session = raw ? JSON.parse(raw) as PersistedPlaybackSession : null;
+    if (!session || Date.now() - Number(session.savedAt || 0) > PLAYBACK_SESSION_MAX_AGE_MS) return;
+    if (expectedRevision !== playbackQueueRevision || TrackPlayer.getQueue().length || !Array.isArray(session.queue) || !session.queue.length) return;
+    const needsNetwork = session.queue.some(({ song }) => !song.localUri && Boolean(song.sourceId || song.remoteUrl));
+    const headers = needsNetwork ? await getMediaHeaders() : undefined;
+    if (expectedRevision !== playbackQueueRevision || TrackPlayer.getQueue().length) return;
+    const items = session.queue
+      .map(({ song, queueOrigin: origin, queueSequence: sequence }) => {
+        const item = toMediaItem(song, headers, origin);
+        if (item) item.extras = { ...item.extras, queueOrigin: origin, queueSequence: sequence };
+        return item;
+      })
+      .filter((item): item is MediaItem => item !== null);
+    if (!items.length) return;
+    const index = Math.max(0, Math.min(items.length - 1, Number(session.queueIndex) || 0));
+    playbackQueueRevision += 1;
+    playbackContext = session.context || null;
+    emitShuffleEnabled(Boolean(session.shuffle));
+    TrackPlayer.setVolume(Math.max(0, Math.min(1, Number(session.volume) || 0)));
+    TrackPlayer.setMediaItems(items, index);
+    if (Number(session.positionSeconds) > 0) TrackPlayer.seekTo(Number(session.positionSeconds));
+    // Uma restauração fria sempre volta pausada para o app nunca começar sozinho.
+    TrackPlayer.pause();
+    prefetchNextInQueue(index);
+  } catch {
+    // O app continua normalmente quando não existe sessão válida para restaurar.
+  } finally {
+    playbackSessionRestoring = false;
+    schedulePersistPlaybackSession();
+  }
+}
 
 function telemetrySong(item: MediaItem): MusicSong {
   const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
@@ -201,7 +309,7 @@ export function setupMusicPlayer() {
       audioMixing: 'exclusive',
       cache: {
         maxSizeBytes: 256 * 1024 * 1024,
-        preloading: { window: 1 },
+        preloading: { window: PREFETCH_AHEAD_COUNT },
       },
       android: {
         wakeMode: 'network',
@@ -231,7 +339,9 @@ export function setupMusicPlayer() {
   TrackPlayer.addEventListener(Event.MediaItemTransition, ({ item }) => {
     beginPlaybackTelemetry(item);
     prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
+    schedulePersistPlaybackSession();
   });
+  TrackPlayer.addEventListener(Event.QueueChanged, () => schedulePersistPlaybackSession());
   TrackPlayer.addEventListener(Event.PlaybackStateChanged, ({ state }) => {
     if (state === PlaybackState.Ready && playbackTelemetry && !playbackTelemetry.ready) {
       playbackTelemetry.ready = true;
@@ -246,6 +356,7 @@ export function setupMusicPlayer() {
       sendPlaybackTelemetry('ERROR', { message: 'O player nativo informou erro de reprodução.' });
       void recoverActivePlayback();
     }
+    schedulePersistPlaybackSession();
     if (state !== PlaybackState.Ended) return;
     sendPlaybackTelemetry('ENDED');
     const revision = playbackQueueRevision;
@@ -256,6 +367,12 @@ export function setupMusicPlayer() {
     void recoverActivePlayback();
   });
   initialized = true;
+  const restoreRevision = playbackQueueRevision;
+  void restorePersistedPlaybackSession(restoreRevision);
+  AppState.addEventListener('change', (nextState) => {
+    if (nextState !== 'active') void persistPlaybackSessionNow().catch(() => {});
+  });
+  setInterval(() => schedulePersistPlaybackSession(0), 5_000);
 }
 
 function toMediaItem(song: MusicSong, headers?: Record<string, string>, origin: MusicSong['queueOrigin'] = 'manual'): MediaItem | null {
@@ -277,6 +394,9 @@ function toMediaItem(song: MusicSong, headers?: Record<string, string>, origin: 
       sourceId: song.sourceId,
       songId: song.id,
       localUri: song.localUri,
+      album: song.album,
+      albumArtist: song.albumArtist,
+      genres: song.genres || [],
       queueOrigin: song.queueOrigin || origin,
     },
   };
@@ -326,6 +446,7 @@ async function seedRecommendationsForSingleSong(anchor: MusicSong, expectedRevis
       if (expectedRevision !== playbackQueueRevision || !additions.length) return;
       TrackPlayer.addMediaItems(additions);
       prefetchNextInQueue(0);
+      schedulePersistPlaybackSession();
     } catch {
       // Mantém a faixa escolhida quando as recomendações estiverem indisponíveis.
     } finally {
@@ -357,6 +478,7 @@ async function recoverActivePlayback() {
     if (position > 0) TrackPlayer.seekTo(position);
     TrackPlayer.play();
     prefetchNextInQueue(index);
+    schedulePersistPlaybackSession();
   })().catch(() => {}).finally(() => { playbackRecoveryInFlight = null; });
   return playbackRecoveryInFlight;
 }
@@ -389,16 +511,14 @@ function prefetchMediaItem(item: MediaItem | null | undefined) {
   }).catch(() => {});
 }
 
-function nextPrefetchIndex(currentIndex: number | null, queueLength: number) {
-  if (currentIndex === null || currentIndex < 0 || queueLength <= 1) return -1;
-  return currentIndex + 1 < queueLength ? currentIndex + 1 : -1;
-}
-
 function prefetchNextInQueue(currentIndex = TrackPlayer.getActiveMediaItemIndex()) {
   const queue = TrackPlayer.getQueue();
-  const index = nextPrefetchIndex(currentIndex, queue.length);
-  if (index < 0) return;
-  prefetchMediaItem(queue[index]);
+  if (currentIndex === null || currentIndex < 0 || queue.length <= 1) return;
+  for (let offset = 1; offset <= PREFETCH_AHEAD_COUNT; offset += 1) {
+    const index = currentIndex + offset;
+    if (index >= queue.length) break;
+    prefetchMediaItem(queue[index]);
+  }
 }
 
 async function continueWithDailyRecommendations(expectedRevision: number) {
@@ -423,12 +543,14 @@ async function continueWithDailyRecommendations(expectedRevision: number) {
         .map((song) => toMediaItem(song, headers, 'recommendation'))
         .filter((item): item is MediaItem => item !== null);
       if (additions.length) {
-        // A playlist original já terminou. Começamos outra fila para que músicas
-        // recomendadas nunca sejam misturadas ao aleatório da seleção original.
+        const arranged = lastShuffleEnabled ? shuffled(additions) : additions;
+        const firstRecommendationIndex = endedQueue.length;
         playbackQueueRevision += 1;
-        TrackPlayer.setMediaItems(lastShuffleEnabled ? shuffled(additions) : additions, 0);
+        TrackPlayer.addMediaItems(arranged);
+        TrackPlayer.skipToIndex(firstRecommendationIndex);
         TrackPlayer.play();
-        prefetchNextInQueue(0);
+        prefetchNextInQueue(firstRecommendationIndex);
+        schedulePersistPlaybackSession();
       }
     } catch {
       // A fila original continua funcionando quando o usuário estiver offline.
@@ -494,6 +616,7 @@ export async function playSongQueue(
   TrackPlayer.setMediaItems(ordered, startIndex);
   TrackPlayer.play();
   prefetchNextInQueue(startIndex);
+  schedulePersistPlaybackSession();
   if (queue.length === 1) void seedRecommendationsForSingleSong(playableSongs[requestedIndex], playbackQueueRevision);
   return startIndex;
 }
@@ -526,6 +649,7 @@ export async function restorePausedSongQueue(
   TrackPlayer.seekTo(Math.max(0, positionSeconds));
   TrackPlayer.pause();
   prefetchNextInQueue(queueIndex);
+  schedulePersistPlaybackSession();
   return true;
 }
 
@@ -546,6 +670,7 @@ export async function addSongsToPlaybackQueue(songs: MusicSong[]) {
   if (activeIndex === null || activeIndex < 0) {
     TrackPlayer.setMediaItems(items, 0);
     TrackPlayer.play();
+    schedulePersistPlaybackSession();
     return items.length;
   }
   const queue = TrackPlayer.getQueue();
@@ -557,6 +682,7 @@ export async function addSongsToPlaybackQueue(songs: MusicSong[]) {
     TrackPlayer.play();
   }
   prefetchNextInQueue(activeIndex);
+  schedulePersistPlaybackSession();
   return items.length;
 }
 
@@ -572,6 +698,7 @@ export function playQueueIndex(index: number) {
   TrackPlayer.skipToIndex(index);
   TrackPlayer.play();
   prefetchNextInQueue(index);
+  schedulePersistPlaybackSession();
 }
 
 export async function togglePlayback() {
@@ -583,11 +710,13 @@ export async function togglePlayback() {
   } else {
     TrackPlayer.play();
   }
+  schedulePersistPlaybackSession();
 }
 
 export function seekToPosition(positionSeconds: number) {
   setupMusicPlayer();
   TrackPlayer.seekTo(Math.max(0, positionSeconds));
+  schedulePersistPlaybackSession();
 }
 
 export function setPlaybackSleepTimer(minutes: number) {
@@ -611,6 +740,7 @@ export function playNext() {
   TrackPlayer.skipToNext();
   TrackPlayer.play();
   prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
+  schedulePersistPlaybackSession();
 }
 
 export function playPrevious() {
@@ -618,6 +748,7 @@ export function playPrevious() {
   TrackPlayer.skipToPrevious();
   TrackPlayer.play();
   prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
+  schedulePersistPlaybackSession();
 }
 
 export function stopMusicPlayer(clearQueue = false) {
@@ -627,6 +758,7 @@ export function stopMusicPlayer(clearQueue = false) {
     playbackContext = null;
     playbackQueueRevision += 1;
     TrackPlayer.clear();
+    void AsyncStorage.removeItem(PLAYBACK_SESSION_KEY).catch(() => {});
   }
 }
 
@@ -637,6 +769,7 @@ export function setShuffleEnabled(enabled: boolean) {
   emitShuffleEnabled(enabled);
   reorderUpcomingQueue();
   prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
+  schedulePersistPlaybackSession();
   return enabled;
 }
 

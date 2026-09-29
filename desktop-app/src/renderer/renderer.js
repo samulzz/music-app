@@ -60,6 +60,9 @@ const playlistDetailsCache = new Map();
 const MAX_PREPARED_STREAMS = 120;
 const VIEW_CACHE_TTL_MS = 5 * 60 * 1000;
 const VOLUME_STORAGE_KEY = 'nationmusics.desktop.volumeSliderValue';
+const PLAYBACK_SESSION_STORAGE_KEY = 'nationmusics.desktop.playbackSession.v1';
+const PLAYBACK_SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+const PREFETCH_AHEAD_COUNT = 2;
 const VOLUME_CURVE = 1.6;
 const SEARCH_DEBOUNCE_MS = 220;
 const MUSIC_GENRES = [
@@ -86,6 +89,7 @@ let jamFollowTimer = null;
 let connectSyncTimer = null;
 let playbackTelemetrySessionId = '';
 let playbackLoadStartedAt = 0;
+let playbackSessionPersistTimer = null;
 const lastTelemetryIncidentAt = new Map();
 
 const ICONS = {
@@ -476,6 +480,88 @@ function restoreSavedVolume() {
   setVolumeFromSlider(savedVolume, { persist: false });
 }
 
+function playbackSessionKey() {
+  const username = String(state.session?.username || '').trim().toLowerCase();
+  return username ? `${PLAYBACK_SESSION_STORAGE_KEY}.${username}` : PLAYBACK_SESSION_STORAGE_KEY;
+}
+
+function persistedSong(song) {
+  if (!song) return null;
+  return {
+    id: song.id,
+    serverId: song.serverId,
+    sourceId: song.sourceId,
+    spotifyId: song.spotifyId,
+    title: song.title,
+    artist: song.artist,
+    album: song.album,
+    albumArtist: song.albumArtist,
+    artworkUrl: song.artworkUrl,
+    remoteUrl: song.remoteUrl,
+    localUri: song.localUri,
+    genres: Array.isArray(song.genres) ? song.genres : [],
+    queueOrigin: song.queueOrigin,
+    queueSequence: song.queueSequence,
+    saved: Boolean(song.saved),
+    downloaded: Boolean(song.downloaded),
+  };
+}
+
+function persistPlaybackSession() {
+  window.clearTimeout(playbackSessionPersistTimer);
+  playbackSessionPersistTimer = null;
+  if (!state.session?.username || !state.queue.length || state.queueIndex < 0) return;
+  try {
+    localStorage.setItem(playbackSessionKey(), JSON.stringify({
+      savedAt: Date.now(),
+      queue: state.queue.slice(0, 250).map(persistedSong).filter(Boolean),
+      queueIndex: state.queueIndex,
+      queueMode: state.queueMode,
+      shuffle: state.shuffle,
+      positionSeconds: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
+      wasPlaying: Boolean(audio.src && !audio.paused && !audio.ended),
+      playbackContext: state.playbackContext,
+      volumeSliderValue: state.volumeSliderValue,
+    }));
+  } catch {
+    // A reprodução continua mesmo se o armazenamento local estiver indisponível.
+  }
+}
+
+function schedulePersistPlaybackSession(delay = 350) {
+  window.clearTimeout(playbackSessionPersistTimer);
+  playbackSessionPersistTimer = window.setTimeout(persistPlaybackSession, delay);
+}
+
+async function restorePersistedPlaybackSession() {
+  if (!state.session?.username || state.queue.length || audio.src) return false;
+  let restored = null;
+  try {
+    restored = JSON.parse(localStorage.getItem(playbackSessionKey()) || 'null');
+  } catch {
+    return false;
+  }
+  if (!restored || Date.now() - Number(restored.savedAt || 0) > PLAYBACK_SESSION_MAX_AGE_MS) return false;
+  const queue = Array.isArray(restored.queue) ? restored.queue.filter((song) => song?.title && (song.sourceId || song.spotifyId || song.id)) : [];
+  if (!queue.length) return false;
+  state.queue = queue;
+  state.queueHistory = [...queue];
+  state.queueIndex = clamp(Number(restored.queueIndex) || 0, 0, queue.length - 1);
+  state.queueMode = restored.queueMode || 'selection';
+  state.shuffle = Boolean(restored.shuffle);
+  state.playbackContext = restored.playbackContext || null;
+  state.queueRevision += 1;
+  state.pendingResumePosition = Math.max(0, Number(restored.positionSeconds) || 0);
+  if (Number.isFinite(Number(restored.volumeSliderValue))) {
+    setVolumeFromSlider(Number(restored.volumeSliderValue), { persist: false });
+  }
+  updateShuffleButton();
+  resetShuffleRemainingIndexes();
+  await loadCurrentTrack(false);
+  prefetchNextTracks();
+  return true;
+}
+
 function songIdentity(song) {
   return String(song?.spotifyId || song?.sourceId || song?.id || '');
 }
@@ -577,7 +663,8 @@ async function seedRecommendationsForSingleSong(anchor, revision) {
     state.queue.push(...additions);
     state.queueHistory = [...state.queue];
     if (!$('#queue-panel')?.classList.contains('hidden')) renderQueuePanel();
-    prefetchNextTrack();
+    prefetchNextTracks();
+    schedulePersistPlaybackSession();
   } catch {
     // A música escolhida continua tocando mesmo se as recomendações estiverem offline.
   } finally {
@@ -597,6 +684,7 @@ function reorderUpcomingQueue() {
   state.queue = [...prefix, ...manual, ...arranged];
   state.queueRevision += 1;
   if (!$('#queue-panel')?.classList.contains('hidden')) renderQueuePanel();
+  schedulePersistPlaybackSession();
 }
 
 function addSongToPlaybackQueue(song) {
@@ -610,20 +698,21 @@ function addSongToPlaybackQueue(song) {
   state.queue.splice(insertAt, 0, { ...song, queueOrigin: 'manual' });
   state.queueRevision += 1;
   if (!$('#queue-panel')?.classList.contains('hidden')) renderQueuePanel();
-  prefetchNextTrack();
+  prefetchNextTracks();
+  schedulePersistPlaybackSession();
 }
 
-function prefetchNextTrack() {
-  if (state.queue.length <= 1) return;
-  const index = plannedNextQueueIndex();
-  const song = state.queue[index];
-  if (!song || isPrepared(song)) return;
-
-  void resolvePlayableSong(song)
-    .then((resolved) => prepareStreamCached(resolved))
-    .catch((error) => {
-      if (isAuthenticationError(error)) void handleAuthenticationError(error);
-    });
+function prefetchNextTracks() {
+  if (state.queue.length <= 1 || state.queueIndex < 0) return;
+  for (let offset = 1; offset <= PREFETCH_AHEAD_COUNT; offset += 1) {
+    const song = state.queue[state.queueIndex + offset];
+    if (!song || isPrepared(song)) continue;
+    void resolvePlayableSong(song)
+      .then((resolved) => prepareStreamCached(resolved))
+      .catch((error) => {
+        if (isAuthenticationError(error)) void handleAuthenticationError(error);
+      });
+  }
 }
 
 function updateShuffleButton() {
@@ -657,7 +746,8 @@ function setShuffleMode(enabled, _notify = true) {
   state.shuffleNextIndex = -1;
   reorderUpcomingQueue();
   updateShuffleButton();
-  prefetchNextTrack();
+  prefetchNextTracks();
+  schedulePersistPlaybackSession();
 }
 
 function toggleShuffleMode(notify = true) {
@@ -2670,6 +2760,7 @@ function playQueue(songs, index, context = null, options = {}) {
   state.recoveredSourceIds.delete(selectedIdentity);
   state.shuffleNextIndex = -1;
   resetShuffleRemainingIndexes();
+  schedulePersistPlaybackSession();
   void (async () => {
     if (!options.passive && state.connectState && !state.connectState.currentDeviceActive) {
       const connect = await controlConnectPlayback('SYNC');
@@ -2677,7 +2768,7 @@ function playQueue(songs, index, context = null, options = {}) {
     }
     await loadCurrentTrack(options.autoplay !== false);
     if (isSingle) void seedRecommendationsForSingleSong(state.queue[0], state.queueRevision);
-    window.setTimeout(prefetchNextTrack, 1000);
+    window.setTimeout(prefetchNextTracks, 600);
     void syncConnectPlayback();
   })();
 }
@@ -2703,17 +2794,19 @@ async function continueWithDailyRecommendations() {
       await loadCurrentTrack();
       return;
     }
-    state.queue = additions.map((song, queueSequence) => ({ ...song, queueOrigin: 'recommendation', queueSequence }));
-    if (state.shuffle) state.queue = shuffleSongs(state.queue);
-    state.queueHistory = [...originalQueue, ...state.queue];
-    state.queueIndex = 0;
+    let recommended = additions.map((song, queueSequence) => ({ ...song, queueOrigin: 'recommendation', queueSequence }));
+    if (state.shuffle) recommended = shuffleSongs(recommended);
+    state.queue = [...originalQueue, ...recommended];
+    state.queueHistory = [...state.queue];
+    state.queueIndex = originalQueue.length;
     state.queueRevision += 1;
     state.queueMode = 'recommendations';
     state.playbackContext = null;
     state.shuffleNextIndex = -1;
     state.shuffleRemainingIndexes = [];
+    schedulePersistPlaybackSession();
     await loadCurrentTrack();
-    window.setTimeout(prefetchNextTrack, 1000);
+    window.setTimeout(prefetchNextTracks, 600);
   } catch {
     if (revision === state.queueRevision && state.queueMode === 'selection' && state.queue.length) {
       state.queueIndex = state.shuffle ? Math.floor(Math.random() * state.queue.length) : 0;
@@ -2817,7 +2910,8 @@ async function loadCurrentTrack(autoplay = true) {
       void syncHostedJamState(true);
     }
     syncSongRows();
-    prefetchNextTrack();
+    prefetchNextTracks();
+    schedulePersistPlaybackSession();
   } catch (error) {
     if (requestId !== state.trackLoadRequestId) return;
     state.preparingSourceId = '';
@@ -2847,7 +2941,7 @@ async function nextTrack(direction) {
       : Math.max(0, state.queueIndex + direction);
   }
   await loadCurrentTrack();
-  window.setTimeout(prefetchNextTrack, 1000);
+  window.setTimeout(prefetchNextTracks, 600);
 }
 
 async function refreshCurrentView() {
@@ -2874,6 +2968,7 @@ async function showApp(session) {
   $('#avatar').textContent = session.username.slice(0, 1).toUpperCase();
   $('#top-profile-name').textContent = session.username;
   $('#top-avatar').textContent = session.username.slice(0, 1).toUpperCase();
+  await restorePersistedPlaybackSession();
   startFriendPresenceHeartbeat();
   startFriendListRefresh();
   startConnectSync();
@@ -3062,6 +3157,7 @@ audio.addEventListener('play', () => {
   void syncFriendPresence(true);
   void syncHostedJamState(true);
   void syncConnectPlayback();
+  schedulePersistPlaybackSession();
 });
 audio.addEventListener('pause', () => {
   setPlayButtonIcon(false);
@@ -3069,6 +3165,7 @@ audio.addEventListener('pause', () => {
   void syncFriendPresence(true);
   void syncHostedJamState(true);
   void syncConnectPlayback();
+  schedulePersistPlaybackSession();
 });
 audio.addEventListener('ended', () => {
   reportPlaybackTelemetry('ENDED');
@@ -3100,9 +3197,11 @@ audio.addEventListener('timeupdate', () => {
     : '0';
   void syncDiscordActivity();
   void syncFriendPresence();
+  schedulePersistPlaybackSession(1500);
 });
 
 window.addEventListener('beforeunload', () => {
+  persistPlaybackSession();
   void window.nation.clearDiscordActivity();
   void window.nation.clearFriendPresence();
   if (state.currentJamCode) void window.nation.leaveJam(state.currentJamCode).catch(() => {});

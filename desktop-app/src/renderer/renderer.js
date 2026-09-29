@@ -90,6 +90,8 @@ let connectSyncTimer = null;
 let playbackTelemetrySessionId = '';
 let playbackLoadStartedAt = 0;
 let playbackSessionPersistTimer = null;
+let lastPlaybackStartIdentity = '';
+const recentPlaybackStarts = new Map();
 const lastTelemetryIncidentAt = new Map();
 
 const ICONS = {
@@ -210,7 +212,8 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     invalidateStream: async () => true,
     downloadSong: async () => true,
     isSongDownloaded: async (song) => Boolean(song.downloaded),
-    getCacheStats: async () => ({ count: 2, bytes: 12582912 }),
+    getCacheStats: async () => ({ count: 2, bytes: 12582912, limitBytes: 1073741824 }),
+    setCacheLimit: async (maxBytes) => ({ maxBytes }),
     clearCache: async () => true,
     previewSpotify: async () => ({
       spotifyId: 'demo-spotify',
@@ -1016,8 +1019,18 @@ async function renderCachePanel() {
   panel.innerHTML = '<div class="loading-state compact"><span>Calculando armazenamento...</span></div>';
   const stats = await window.nation.getCacheStats();
   const megabytes = (Number(stats.bytes) || 0) / 1024 / 1024;
-  panel.innerHTML = `<div class="floating-panel-head"><div><strong>Downloads e cache</strong><small>${Number(stats.count) || 0} música(s) · ${megabytes.toFixed(megabytes >= 10 ? 0 : 1)} MB usados</small></div><button id="cache-close" type="button">&times;</button></div><button id="clear-cache" class="cache-clear-button" type="button" ${stats.count ? '' : 'disabled'}>${icon('ban')} Limpar cache de músicas</button>`;
+  const limitBytes = Number(stats.limitBytes) || 1024 * 1024 * 1024;
+  panel.innerHTML = `<div class="floating-panel-head"><div><strong>Downloads e cache</strong><small>${Number(stats.count) || 0} música(s) · ${megabytes.toFixed(megabytes >= 10 ? 0 : 1)} MB usados</small></div><button id="cache-close" type="button">&times;</button></div>
+    <label class="cache-limit-label">Limite do cache automático<select id="cache-limit">
+      ${[[512, '512 MB'], [1024, '1 GB'], [2048, '2 GB'], [4096, '4 GB']].map(([mb, label]) => `<option value="${mb * 1024 * 1024}" ${Math.abs(limitBytes - mb * 1024 * 1024) < 1024 ? 'selected' : ''}>${label}</option>`).join('')}
+    </select></label>
+    <small class="cache-hint">As próximas faixas e as mais recentes ficam prontas; as antigas são removidas automaticamente.</small>
+    <button id="clear-cache" class="cache-clear-button" type="button" ${stats.count ? '' : 'disabled'}>${icon('ban')} Limpar cache de músicas</button>`;
   $('#cache-close')?.addEventListener('click', () => panel.classList.add('hidden'));
+  $('#cache-limit')?.addEventListener('change', async (event) => {
+    await window.nation.setCacheLimit(Number(event.target.value));
+    await renderCachePanel();
+  });
   $('#clear-cache')?.addEventListener('click', async () => {
     if (!confirm('Apagar todas as músicas armazenadas neste computador?')) return;
     await window.nation.clearCache();
@@ -2821,11 +2834,16 @@ async function continueWithDailyRecommendations() {
 function reportCurrentPlayback(completed = false) {
   const song = state.queue[state.queueIndex];
   if (!song) return;
+  const listenedSeconds = Math.max(0, Math.round(audio.currentTime || 0));
+  const durationSeconds = Number.isFinite(audio.duration) ? Math.max(0, audio.duration) : 0;
+  const skipped = !completed && listenedSeconds <= Math.max(12, durationSeconds * 0.12);
   void window.nation.reportPlayback({
     songId: song.serverId || song.id,
     sourceId: song.sourceId,
-    listenedSeconds: Math.max(0, Math.round(audio.currentTime || 0)),
+    listenedSeconds,
     completed,
+    durationSeconds,
+    outcome: completed ? 'COMPLETED' : skipped ? 'SKIPPED' : 'LISTENED',
   }).catch(() => {});
 }
 
@@ -2851,6 +2869,18 @@ function reportPlaybackTelemetry(eventType, details = {}) {
 async function loadCurrentTrack(autoplay = true) {
   const song = state.queue[state.queueIndex];
   if (!song) return;
+  const startingIdentity = songIdentity(song);
+  if (startingIdentity && startingIdentity !== lastPlaybackStartIdentity) {
+    const previousStart = recentPlaybackStarts.get(startingIdentity) || 0;
+    if (previousStart && Date.now() - previousStart < 30 * 60 * 1000) {
+      void window.nation.reportPlayback({
+        songId: song.serverId || song.id, sourceId: song.sourceId, listenedSeconds: 0,
+        completed: false, durationSeconds: 0, outcome: 'REPEATED',
+      }).catch(() => {});
+    }
+    recentPlaybackStarts.set(startingIdentity, Date.now());
+    lastPlaybackStartIdentity = startingIdentity;
+  }
   playbackTelemetrySessionId = crypto.randomUUID();
   playbackLoadStartedAt = performance.now();
   reportPlaybackTelemetry('LOAD_STARTED');
@@ -2930,8 +2960,9 @@ async function loadCurrentTrack(autoplay = true) {
   }
 }
 
-async function nextTrack(direction) {
+async function nextTrack(direction, reportCurrent = true) {
   if (!state.queue.length) return;
+  if (reportCurrent) reportCurrentPlayback(false);
   if (direction > 0 && state.queueMode === 'selection' && state.queueIndex >= state.queue.length - 1) {
     await continueWithDailyRecommendations();
     return;
@@ -3173,7 +3204,7 @@ audio.addEventListener('ended', () => {
   void window.nation.clearDiscordActivity();
   void syncFriendPresence(true);
   void syncHostedJamState(true);
-  nextTrack(1);
+  nextTrack(1, false);
 });
 audio.addEventListener('error', () => {
   reportPlaybackTelemetry('ERROR', { message: `MediaError ${audio.error?.code || 0}: ${audio.error?.message || 'erro desconhecido'}` });

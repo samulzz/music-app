@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import jakarta.annotation.PreDestroy;
 
 @Service
@@ -82,6 +83,11 @@ public class MusicService {
                     && now - checkedAt < AUDIO_VALIDATION_CACHE_MILLIS;
         }
     }
+
+    public record AudioAudit(String sourceId, boolean present, boolean playable, long bytes,
+                             Double durationSeconds, Long bitrate, String issue) {}
+
+    private record AudioProbe(Double durationSeconds, Long bitrate) {}
 
     private boolean isYoutubeTemporarilyBlocked() {
         return System.currentTimeMillis() < youtubeBlockedUntilMillis;
@@ -480,6 +486,33 @@ public class MusicService {
         return file != null && file.isFile() && file.length() >= MIN_YOUTUBE_AUDIO_BYTES;
     }
 
+    public AudioAudit auditCachedAudio(String sourceId) {
+        if (sourceId != null && (sourceId.startsWith(DEEZER_PREFIX) || sourceId.startsWith(AUDIUS_PREFIX))) {
+            return new AudioAudit(sourceId, true, true, 0, null, null, "OK");
+        }
+        File file = cachedAudioFile(sourceId);
+        if (file == null || !file.isFile()) return new AudioAudit(sourceId, false, false, 0, null, null, "MISSING");
+        long bytes = file.length();
+        if (bytes < MIN_YOUTUBE_AUDIO_BYTES) return new AudioAudit(sourceId, true, false, bytes, null, null, "TOO_SMALL");
+        AudioProbe probe = probeAudio(file);
+        if (probe == null || probe.durationSeconds() == null || !Double.isFinite(probe.durationSeconds())) {
+            return new AudioAudit(sourceId, true, false, bytes, null, probe == null ? null : probe.bitrate(), "CORRUPT");
+        }
+        if (probe.durationSeconds() < MIN_YOUTUBE_AUDIO_DURATION_SECONDS) {
+            return new AudioAudit(sourceId, true, false, bytes, probe.durationSeconds(), probe.bitrate(), "TOO_SHORT");
+        }
+        if (probe.bitrate() != null && probe.bitrate() > 0 && probe.bitrate() < 64_000) {
+            return new AudioAudit(sourceId, true, false, bytes, probe.durationSeconds(), probe.bitrate(), "LOW_BITRATE");
+        }
+        return new AudioAudit(sourceId, true, true, bytes, probe.durationSeconds(), probe.bitrate(), "OK");
+    }
+
+    public boolean invalidateCachedAudio(String sourceId) {
+        File file = cachedAudioFile(sourceId);
+        invalidateAudioValidation(sourceId);
+        return file != null && (!file.exists() || file.delete());
+    }
+
     private File cachedAudioFile(String videoId) {
         if (videoId == null || videoId.isBlank()) return null;
         if (videoId.startsWith(DEEZER_PREFIX) || videoId.startsWith(AUDIUS_PREFIX)) {
@@ -639,7 +672,7 @@ public class MusicService {
         }
 
         Double duration = probeAudioDurationSeconds(file);
-        return duration == null || duration >= MIN_YOUTUBE_AUDIO_DURATION_SECONDS;
+        return duration != null && duration >= MIN_YOUTUBE_AUDIO_DURATION_SECONDS;
     }
 
     private boolean isCachedYoutubeAudioValid(String videoId, File file) {
@@ -680,6 +713,11 @@ public class MusicService {
     }
 
     private Double probeAudioDurationSeconds(File file) {
+        AudioProbe probe = probeAudio(file);
+        return probe == null ? null : probe.durationSeconds();
+    }
+
+    private AudioProbe probeAudio(File file) {
         try {
             String ffprobeExecutable = "ffprobe";
             if (ffmpegPath != null && !ffmpegPath.isBlank()) {
@@ -699,21 +737,23 @@ public class MusicService {
                     "-v",
                     "error",
                     "-show_entries",
-                    "format=duration",
+                    "format=duration,bit_rate",
                     "-of",
-                    "default=noprint_wrappers=1:nokey=1",
+                    "json",
                     file.getAbsolutePath()
             ).redirectErrorStream(true).start();
-
-            String output;
-            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                output = reader.readLine();
-            }
-            int exitCode = process.waitFor();
-            if (exitCode != 0 || output == null || output.isBlank()) {
+            if (!process.waitFor(15, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
                 return null;
             }
-            return Double.parseDouble(output.trim());
+            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            if (process.exitValue() != 0 || output.isBlank()) return null;
+            JsonNode format = objectMapper.readTree(output).path("format");
+            String durationValue = format.path("duration").asText("");
+            String bitrateValue = format.path("bit_rate").asText("");
+            Double duration = durationValue.isBlank() ? null : Double.parseDouble(durationValue);
+            Long bitrate = bitrateValue.isBlank() ? null : Long.parseLong(bitrateValue);
+            return new AudioProbe(duration, bitrate);
         } catch (Exception e) {
             System.err.println("Não foi possível medir duração de " + file.getName() + ": " + e.getMessage());
             return null;

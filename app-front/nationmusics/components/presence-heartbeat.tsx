@@ -15,6 +15,7 @@ export function PresenceHeartbeat() {
   const progress = useProgress(5);
   const latestRef = useRef({ activeItem, isPlaying, position: progress.position });
   const inFlightRef = useRef(false);
+  const recentStartsRef = useRef(new Map<string, number>());
   const listeningRef = useRef<{
     songId?: number;
     sourceId?: string;
@@ -42,12 +43,25 @@ export function PresenceHeartbeat() {
     if (previous && previousIdentity && previousIdentity !== identity) {
       const listenedSeconds = Math.max(0, Math.round(previous.position));
       const completed = previous.duration > 0 && previous.position / previous.duration >= 0.8;
+      const skipped = !completed && listenedSeconds <= Math.max(12, previous.duration * 0.12);
       void reportPlayback({
         songId: previous.songId,
         sourceId: previous.sourceId,
         listenedSeconds,
         completed,
+        durationSeconds: previous.duration,
+        outcome: completed ? 'COMPLETED' : skipped ? 'SKIPPED' : 'LISTENED',
       }).catch(() => {});
+    }
+
+    if (identity && identity !== previousIdentity) {
+      const now = Date.now();
+      const previousStart = recentStartsRef.current.get(identity) || 0;
+      if (previousStart && now - previousStart < 30 * 60 * 1000) {
+        void reportPlayback({ songId, sourceId: sourceId || undefined, listenedSeconds: 0,
+          completed: false, durationSeconds: Math.max(0, Number(progress.duration) || 0), outcome: 'REPEATED' }).catch(() => {});
+      }
+      recentStartsRef.current.set(identity, now);
     }
 
     listeningRef.current = identity

@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('nation', {
   downloadSong: (song) => ipcRenderer.invoke('music:download', song),
   isSongDownloaded: (song) => ipcRenderer.invoke('music:is-downloaded', song),
   getCacheStats: () => ipcRenderer.invoke('music:cache-stats'),
+  setCacheLimit: (bytes) => ipcRenderer.invoke('music:set-cache-limit', bytes),
   clearCache: () => ipcRenderer.invoke('music:clear-cache'),
   previewSpotify: (url) => ipcRenderer.invoke('spotify:preview', url),
   getLibrary: () => ipcRenderer.invoke('library:list'),

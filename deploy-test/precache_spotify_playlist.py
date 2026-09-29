@@ -58,13 +58,13 @@ def contains_marker(text, marker):
     return re.search(r"(?:^|\s)" + re.escape(marker) + r"(?:$|\s)", text) is not None
 
 
-def mismatched_version(target_title, candidate_title):
+def mismatched_version(target_title, candidate_text):
     blocked_markers = (
         "ao vivo", "live", "show", "concert", "festival", "performance",
         "karaoke", "instrumental", "playback", "type beat", "beat",
         "cover", "remix", "slowed", "sped up", "nightcore", "acoustic", "acustico",
     )
-    return any(contains_marker(candidate_title, marker) and not contains_marker(target_title, marker) for marker in blocked_markers)
+    return any(contains_marker(candidate_text, marker) and not contains_marker(target_title, marker) for marker in blocked_markers)
 
 
 def candidate_score(track, candidate):
@@ -75,13 +75,16 @@ def candidate_score(track, candidate):
     coverage = token_coverage(target_tokens, candidate_tokens)
     if coverage < 0.75:
         return -1
-    if mismatched_version(target_title, candidate_title):
+    candidate_text = normalize(candidate["title"] + " " + candidate["uploader"])
+    if mismatched_version(target_title, candidate_text):
         return -1
 
     primary_artist = normalize(track["artist"].split(", ")[0])
     artist_tokens = {token for token in primary_artist.split() if len(token) > 1}
     candidate_artist_text = normalize(candidate["title"] + " " + candidate["uploader"])
     artist_coverage = token_coverage(artist_tokens, set(candidate_artist_text.split()))
+    if artist_tokens and artist_coverage < 0.5:
+        return -1
 
     expected_duration = int(track.get("durationMs") or 0) / 1000
     candidate_duration = candidate.get("duration") or 0

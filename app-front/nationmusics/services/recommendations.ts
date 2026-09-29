@@ -53,6 +53,8 @@ export function reportPlayback(payload: {
   sourceId?: string;
   listenedSeconds: number;
   completed: boolean;
+  durationSeconds?: number;
+  outcome?: 'LISTENED' | 'SKIPPED' | 'COMPLETED' | 'REPEATED';
 }) {
   return apiRequest<void>('/recommendations/listen', {
     method: 'POST',

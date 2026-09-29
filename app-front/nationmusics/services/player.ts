@@ -14,7 +14,7 @@ import { AppState, Platform } from 'react-native';
 import type { MusicSong } from '../types/music';
 import { apiRequest, getMediaHeaders } from './api';
 import { musicDownloadUrl, musicPreparePath } from './config';
-import { mergeWithOfflineLibrary } from './offline-library';
+import { mergeWithOfflineLibrary, removeOfflineSong } from './offline-library';
 import { getDailyMixSongs } from './recommendations';
 import { sortSongsAlphabetically } from './song-order';
 import { getLatestConnectState, markConnectRevisionProcessed, takeOverConnectPlayback } from './connect';
@@ -464,7 +464,7 @@ async function recoverActivePlayback() {
     if (index === null || index < 0 || index >= queue.length) return;
     const item = queue[index];
     const sourceId = mediaItemSourceId(item);
-    if (!sourceId || (item.extras && typeof item.extras === 'object' && item.extras.localUri)) return;
+    if (!sourceId) return;
     const previous = lastRecoveryAt.get(sourceId) || 0;
     if (Date.now() - previous < 15_000) return;
     lastRecoveryAt.set(sourceId, Date.now());
@@ -472,7 +472,9 @@ async function recoverActivePlayback() {
     const headers = await getMediaHeaders();
     const freshUrl = musicDownloadUrl(sourceId, String(item.title || 'Música'), String(item.artist || ''));
     const refreshed = [...queue];
-    refreshed[index] = { ...item, url: { uri: freshUrl, headers } };
+    const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
+    if (extras.localUri) await removeOfflineSong(telemetrySong(item)).catch(() => {});
+    refreshed[index] = { ...item, url: { uri: freshUrl, headers }, extras: { ...extras, localUri: undefined } };
     playbackQueueRevision += 1;
     TrackPlayer.setMediaItems(refreshed, index);
     if (position > 0) TrackPlayer.seekTo(position);

@@ -26,7 +26,9 @@ const UPDATE_TIMEOUT_MS = 8000;
 const UPDATE_DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 const MIN_DESKTOP_INSTALLER_BYTES = 20 * 1024 * 1024;
 const MIN_DESKTOP_AUDIO_BYTES = 512 * 1024;
-const MAX_DESKTOP_AUDIO_CACHE_BYTES = 1024 * 1024 * 1024;
+const DEFAULT_DESKTOP_AUDIO_CACHE_BYTES = 1024 * 1024 * 1024;
+const MIN_DESKTOP_AUDIO_CACHE_BYTES = 256 * 1024 * 1024;
+const MAX_DESKTOP_AUDIO_CACHE_BYTES = 4 * 1024 * 1024 * 1024;
 const DISCORD_ACTIVITY_UPDATE_INTERVAL_MS = 12_000;
 const DISCORD_CLIENT_ID_ENV = 'NATIONMUSICS_DISCORD_CLIENT_ID';
 const DISCORD_DEFAULT_CLIENT_ID = '1519319956796473544';
@@ -304,6 +306,14 @@ async function getSettings() {
 
 async function saveSettings(settings) {
   await writeJson(dataPath('settings.json'), settings || {});
+}
+
+async function getDesktopAudioCacheLimit() {
+  const settings = await getSettings();
+  const configured = Number(settings.audioCache?.maxBytes);
+  return Number.isFinite(configured)
+    ? Math.max(MIN_DESKTOP_AUDIO_CACHE_BYTES, Math.min(MAX_DESKTOP_AUDIO_CACHE_BYTES, configured))
+    : DEFAULT_DESKTOP_AUDIO_CACHE_BYTES;
 }
 
 async function getDiscordSettings() {
@@ -758,10 +768,11 @@ async function trimDesktopAudioCache() {
     } catch {}
   }
 
+  const limitBytes = await getDesktopAudioCacheLimit();
   let total = files.reduce((sum, file) => sum + file.size, 0);
   files.sort((left, right) => left.mtimeMs - right.mtimeMs);
   for (const file of files) {
-    if (total <= MAX_DESKTOP_AUDIO_CACHE_BYTES) break;
+    if (total <= limitBytes) break;
     try {
       await fsp.unlink(file.filePath);
       total -= file.size;
@@ -773,7 +784,11 @@ async function ensureDesktopAudioCached(song) {
   const sourceId = song.sourceId || song.id;
   if (!sourceId) return '';
   const filePath = cachedAudioFilePath(sourceId);
-  if (await hasUsableCachedAudio(filePath)) return filePath;
+  if (await hasUsableCachedAudio(filePath)) {
+    const now = new Date();
+    await fsp.utimes(filePath, now, now).catch(() => {});
+    return filePath;
+  }
   if (activeAudioCacheDownloads.has(sourceId)) return activeAudioCacheDownloads.get(sourceId);
 
   const operation = (async () => {
@@ -1137,7 +1152,15 @@ ipcMain.handle('music:cache-stats', async () => {
     if (!entry.isFile() || !entry.name.endsWith('.mp3')) continue;
     try { const stat = await fsp.stat(path.join(audioCacheDirectory(), entry.name)); count += 1; bytes += stat.size; } catch {}
   }
-  return { count, bytes };
+  return { count, bytes, limitBytes: await getDesktopAudioCacheLimit() };
+});
+ipcMain.handle('music:set-cache-limit', async (_event, rawBytes) => {
+  const maxBytes = Math.max(MIN_DESKTOP_AUDIO_CACHE_BYTES,
+    Math.min(MAX_DESKTOP_AUDIO_CACHE_BYTES, Number(rawBytes) || DEFAULT_DESKTOP_AUDIO_CACHE_BYTES));
+  const settings = await getSettings();
+  await saveSettings({ ...settings, audioCache: { ...(settings.audioCache || {}), maxBytes } });
+  await trimDesktopAudioCache();
+  return { maxBytes };
 });
 ipcMain.handle('telemetry:playback-event', async (_event, rawPayload) => {
   const payload = rawPayload && typeof rawPayload === 'object' ? rawPayload : {};

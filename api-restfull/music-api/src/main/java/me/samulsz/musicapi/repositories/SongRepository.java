@@ -19,6 +19,8 @@ public interface SongRepository extends JpaRepository<Song, Long> {
 
     Optional<Song> findFirstByTitleIgnoreCaseAndArtistIgnoreCase(String title, String artist);
 
+    List<Song> findByTitleIgnoreCaseAndArtistIgnoreCase(String title, String artist);
+
     List<Song> findTop50ByTitleContainingIgnoreCaseOrArtistContainingIgnoreCase(String title, String artist);
 
     @Query(value = """

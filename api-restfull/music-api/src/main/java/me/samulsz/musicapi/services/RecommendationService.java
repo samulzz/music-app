@@ -71,7 +71,13 @@ public class RecommendationService {
 
     @Transactional
     public void reportPlayback(String username, PlaybackReportRequest request) {
-        if (request == null || (!request.completed() && request.listenedSeconds() < 15)) return;
+        if (request == null) return;
+        String outcome = Objects.toString(request.outcome(), "").trim().toUpperCase(Locale.ROOT);
+        boolean skipped = "SKIPPED".equals(outcome)
+                || (!request.completed() && request.durationSeconds() > 0
+                && request.listenedSeconds() <= Math.max(12, request.durationSeconds() * 0.12));
+        boolean repeated = "REPEATED".equals(outcome);
+        if (!request.completed() && !skipped && !repeated && request.listenedSeconds() < 15) return;
         User user = getUser(username);
         Song song = resolveSong(request).orElse(null);
         if (song == null) return;
@@ -81,10 +87,12 @@ public class RecommendationService {
                 .orElseGet(PlaybackPreference::new);
         preference.setUser(user);
         preference.setSong(song);
-        preference.setPlayCount(preference.getPlayCount() + 1);
+        if (!repeated) preference.setPlayCount(preference.getPlayCount() + 1);
         if (request.completed()) {
             preference.setCompletedCount(preference.getCompletedCount() + 1);
         }
+        if (skipped) preference.setSkippedCount(preference.getSkippedCount() + 1);
+        if (repeated) preference.setRepeatedCount(preference.getRepeatedCount() + 1);
         long listened = Math.max(0, Math.min(request.listenedSeconds(), 60L * 60L));
         preference.setListenedSeconds(preference.getListenedSeconds() + listened);
         preference.setLastListenedAt(LocalDateTime.now(APP_ZONE));
@@ -148,7 +156,8 @@ public class RecommendationService {
         usablePreferences.forEach(item -> {
             String name = primaryArtist(item.getSong().getArtist());
             String key = normalizeArtist(name);
-            long score = Math.max(1, item.getPlayCount()) + item.getCompletedCount() * 2 + (item.isLiked() ? 12 : 0);
+            long score = Math.max(1, item.getPlayCount()) + item.getCompletedCount() * 2
+                    + item.getRepeatedCount() * 3 - item.getSkippedCount() * 2 + (item.isLiked() ? 12 : 0);
             artists.computeIfAbsent(key, ignored -> new ArtistAccumulator(name, item.getSong().getCoverUrl()))
                     .add(score, item.getSong().getCoverUrl());
         });
@@ -251,6 +260,8 @@ public class RecommendationService {
             Song song = preference.getSong();
             double strength = Math.log1p(preference.getPlayCount()) * 4.0
                     + Math.log1p(preference.getCompletedCount()) * 5.0
+                    + Math.log1p(preference.getRepeatedCount()) * 8.0
+                    - Math.log1p(preference.getSkippedCount()) * 7.0
                     + Math.min(4.0, preference.getListenedSeconds() / 1800.0);
             if (preference.isLiked()) strength += 24.0;
             final double affinityStrength = strength;

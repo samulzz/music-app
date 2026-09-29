@@ -30,6 +30,12 @@ public class PlaybackPreference {
     private long completedCount;
 
     @Column(nullable = false)
+    private long skippedCount;
+
+    @Column(nullable = false)
+    private long repeatedCount;
+
+    @Column(nullable = false)
     private long listenedSeconds;
 
     @Column(nullable = false)
@@ -50,6 +56,10 @@ public class PlaybackPreference {
     public void setPlayCount(long playCount) { this.playCount = playCount; }
     public long getCompletedCount() { return completedCount; }
     public void setCompletedCount(long completedCount) { this.completedCount = completedCount; }
+    public long getSkippedCount() { return skippedCount; }
+    public void setSkippedCount(long skippedCount) { this.skippedCount = skippedCount; }
+    public long getRepeatedCount() { return repeatedCount; }
+    public void setRepeatedCount(long repeatedCount) { this.repeatedCount = repeatedCount; }
     public long getListenedSeconds() { return listenedSeconds; }
     public void setListenedSeconds(long listenedSeconds) { this.listenedSeconds = listenedSeconds; }
     public LocalDateTime getLastListenedAt() { return lastListenedAt; }

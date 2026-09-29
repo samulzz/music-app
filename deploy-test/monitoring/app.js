@@ -55,8 +55,12 @@ function renderCatalog(data) {
     ['Fila prioritária',data.pendingImports,`${data.importedPriorities} já importadas`],
   ];
   document.querySelector('#catalog-summary').replaceChildren(...cards.map(([label,value,caption])=>{const el=document.createElement('article');el.className='card';const p=document.createElement('p');p.className='eyebrow';p.textContent=label;const strong=document.createElement('strong');strong.textContent=value;const small=document.createElement('small');small.textContent=caption;el.append(p,strong,small);return el}));
-  const job=(selector,title,item)=>{const root=document.querySelector(selector);const updated=item.updatedAt?formatDate(item.updatedAt):'Ainda não executado';root.innerHTML='';const header=document.createElement('header');const strong=document.createElement('strong');strong.textContent=title;const time=document.createElement('time');time.textContent=`${item.state} · ${updated}`;header.append(strong,time);const p=document.createElement('p');p.textContent=item.message||'Sem informações';root.append(header,p)};
-  job('#album-job','Montagem de álbuns',data.albumJob);job('#genre-job','Classificação de gêneros',data.genreJob);
+  const job=(selector,title,item={})=>{const root=document.querySelector(selector);const updated=item.updatedAt?formatDate(item.updatedAt):'Ainda não executado';root.innerHTML='';const header=document.createElement('header');const strong=document.createElement('strong');strong.textContent=title;const time=document.createElement('time');time.textContent=`${item.state||'IDLE'} · ${updated}`;header.append(strong,time);const p=document.createElement('p');p.textContent=item.message||'Sem informações';root.append(header,p)};
+  job('#album-job','Montagem de álbuns',data.albumJob);job('#genre-job','Classificação de gêneros',data.genreJob);job('#audio-job','Auditoria dos arquivos',data.audioJob);
+  const issues=document.querySelector('#audio-issues');issues.replaceChildren();
+  const labels={MISSING:'Arquivo ausente',TOO_SMALL:'Arquivo incompleto',CORRUPT:'Arquivo corrompido',TOO_SHORT:'Áudio muito curto',LOW_BITRATE:'Bitrate baixo',SUSPICIOUS_VERSION:'Versão suspeita',DUPLICATE_METADATA:'Possível duplicata'};
+  (data.audioIssues||[]).slice(0,20).forEach(item=>{const tr=document.createElement('tr');tr.append(textCell(item.title,item.artist||item.sourceId),numberCell(labels[item.issue]||item.issue),numberCell(item.durationSeconds?`${Math.round(item.durationSeconds)} s`:'—'),numberCell(item.bitrate?`${Math.round(item.bitrate/1000)} kbps`:'—'));issues.append(tr)});
+  if(!issues.children.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=4;td.className='muted';td.textContent='Nenhum alerta encontrado pela auditoria gradual.';tr.append(td);issues.append(tr)}
   document.querySelector('#catalog-updated').textContent=`Atualizado em ${formatDate(data.generatedAt)}`;
 }
 

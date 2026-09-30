@@ -50,6 +50,7 @@ class RecommendationServiceTests {
         }
 
         when(users.findByUsername("ouvinte")).thenReturn(Optional.of(user));
+        when(users.findByUsernameForUpdate("ouvinte")).thenReturn(Optional.of(user));
         when(songs.findAll()).thenReturn(catalog);
         when(songs.findMostDownloadedSongs()).thenReturn(List.of());
         when(playlists.findAll()).thenReturn(List.of());

@@ -129,7 +129,9 @@ public class RecommendationService {
 
     @Transactional
     public synchronized DailyMixResponse getDailyMix(String username) {
-        User user = getUser(username);
+        // A linha do usuário serializa a criação. O synchronized sozinho libera antes
+        // do commit do proxy transacional e permitia dois INSERTs para a mesma data.
+        User user = getUserForUpdate(username);
         LocalDate today = LocalDate.now(APP_ZONE);
         DailyMix mix = dailyMixRepository.findByUserIdAndMixDate(user.getId(), today)
                 .orElseGet(() -> createDailyMix(user, today));
@@ -365,6 +367,11 @@ public class RecommendationService {
 
     private User getUser(String username) {
         return userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalArgumentException("Usuário não encontrado."));
+    }
+
+    private User getUserForUpdate(String username) {
+        return userRepository.findByUsernameForUpdate(username)
                 .orElseThrow(() -> new IllegalArgumentException("Usuário não encontrado."));
     }
 

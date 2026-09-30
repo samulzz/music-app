@@ -89,6 +89,7 @@ let jamFollowTimer = null;
 let connectSyncTimer = null;
 let playbackTelemetrySessionId = '';
 let playbackLoadStartedAt = 0;
+let waitingTelemetryTimer = null;
 let playbackSessionPersistTimer = null;
 let lastPlaybackStartIdentity = '';
 const recentPlaybackStarts = new Map();
@@ -2866,6 +2867,22 @@ function reportPlaybackTelemetry(eventType, details = {}) {
   }).catch(() => {});
 }
 
+function clearWaitingTelemetryTimer() {
+  if (!waitingTelemetryTimer) return;
+  clearTimeout(waitingTelemetryTimer);
+  waitingTelemetryTimer = null;
+}
+
+function scheduleWaitingTelemetry() {
+  clearWaitingTelemetryTimer();
+  waitingTelemetryTimer = setTimeout(() => {
+    waitingTelemetryTimer = null;
+    if (!audio.paused && audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
+      reportPlaybackTelemetry('WAITING');
+    }
+  }, 1500);
+}
+
 async function loadCurrentTrack(autoplay = true) {
   const song = state.queue[state.queueIndex];
   if (!song) return;
@@ -3182,6 +3199,7 @@ $('#connect-takeover')?.addEventListener('click', async () => {
 
 restoreSavedVolume();
 audio.addEventListener('play', () => {
+  clearWaitingTelemetryTimer();
   setPlayButtonIcon(true);
   reportPlaybackTelemetry('PLAYING');
   void syncDiscordActivity(true);
@@ -3191,6 +3209,7 @@ audio.addEventListener('play', () => {
   schedulePersistPlaybackSession();
 });
 audio.addEventListener('pause', () => {
+  clearWaitingTelemetryTimer();
   setPlayButtonIcon(false);
   void syncDiscordActivity(true);
   void syncFriendPresence(true);
@@ -3199,6 +3218,7 @@ audio.addEventListener('pause', () => {
   schedulePersistPlaybackSession();
 });
 audio.addEventListener('ended', () => {
+  clearWaitingTelemetryTimer();
   reportPlaybackTelemetry('ENDED');
   reportCurrentPlayback(true);
   void window.nation.clearDiscordActivity();
@@ -3207,6 +3227,7 @@ audio.addEventListener('ended', () => {
   nextTrack(1, false);
 });
 audio.addEventListener('error', () => {
+  clearWaitingTelemetryTimer();
   reportPlaybackTelemetry('ERROR', { message: `MediaError ${audio.error?.code || 0}: ${audio.error?.message || 'erro desconhecido'}` });
   const song = state.queue[state.queueIndex];
   const key = songIdentity(song);
@@ -3218,7 +3239,9 @@ audio.addEventListener('error', () => {
   void window.nation.clearDiscordActivity();
   void syncFriendPresence(true);
 });
-audio.addEventListener('waiting', () => reportPlaybackTelemetry('WAITING'));
+audio.addEventListener('waiting', scheduleWaitingTelemetry);
+audio.addEventListener('playing', clearWaitingTelemetryTimer);
+audio.addEventListener('canplay', clearWaitingTelemetryTimer);
 audio.addEventListener('stalled', () => reportPlaybackTelemetry('STALLED'));
 audio.addEventListener('timeupdate', () => {
   $('#current-time').textContent = formatTime(audio.currentTime);

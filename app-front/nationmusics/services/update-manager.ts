@@ -38,9 +38,14 @@ const UPDATE_TIMEOUT_MS = 8000;
 const androidConfig = Constants.expoConfig?.android as { versionCode?: number } | undefined;
 const extraConfig = Constants.expoConfig?.extra as { androidVersionCode?: number } | undefined;
 
-export const CURRENT_APP_VERSION = Constants.expoConfig?.version || FALLBACK_APP_VERSION;
+export const CURRENT_APP_VERSION = Constants.nativeAppVersion
+  || Constants.expoConfig?.version
+  || FALLBACK_APP_VERSION;
 export const CURRENT_ANDROID_VERSION_CODE = Number(
-  androidConfig?.versionCode ?? extraConfig?.androidVersionCode ?? FALLBACK_ANDROID_VERSION_CODE,
+  Constants.nativeBuildVersion
+    ?? androidConfig?.versionCode
+    ?? extraConfig?.androidVersionCode
+    ?? FALLBACK_ANDROID_VERSION_CODE,
 );
 
 function versionParts(version: string) {

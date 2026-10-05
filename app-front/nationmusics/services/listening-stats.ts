@@ -18,9 +18,11 @@ let previous: { sourceId: string; position: number; at: number; sessionId: strin
 let writing = Promise.resolve();
 
 function enqueue(slice?: Slice) {
+  const owner = getSession();
   writing = writing.catch(() => {}).then(async () => {
-    const session = await getSession();
+    const session = await owner;
     if (!session?.username) return;
+    if ((await getSession())?.username !== session.username) return;
     const key = `nationmusics.stats.pending.${session.username}`;
     const pending: Slice[] = JSON.parse(await AsyncStorage.getItem(key) || '[]');
     if (slice) pending.push(slice);

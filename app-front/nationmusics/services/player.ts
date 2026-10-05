@@ -308,6 +308,7 @@ export function setupMusicPlayer() {
       contentType: 'music',
       handleAudioBecomingNoisy: true,
       audioMixing: 'exclusive',
+      progressSync: { intervalSeconds: 5 },
       cache: {
         maxSizeBytes: 256 * 1024 * 1024,
         preloading: { window: PREFETCH_AHEAD_COUNT },

@@ -16,6 +16,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { type MediaItem } from '@rntp/player';
 
 import GlobalMiniPlayer from '../../components/global-mini-player';
+import { CollectionLoading } from '../../components/collection-loading';
 import type { ApiLibrarySong, MusicSong } from '../../types/music';
 import { fromApiLibrarySong } from '../../types/music';
 import { apiRequest, accountCacheKey, deviceIsOffline } from '../../services/api';
@@ -188,7 +189,8 @@ export default function PlaylistDetailsScreen() {
     [params.title]
   );
   const cacheKey = `nationmusics.playlist.${playlistKind}.${playlistId}.v2`;
-  const legacyCacheKey = `nationmusics.playlist.${playlistKind}.${playlistId}.v1`;
+  const currentCacheKeyRef = useRef(cacheKey);
+  currentCacheKeyRef.current = cacheKey;
   const bottomInset = Math.max(insets.bottom, 0);
 
   const readCache = useCallback(async (): Promise<PlaylistSongsCache> => {
@@ -204,9 +206,10 @@ export default function PlaylistDetailsScreen() {
     } catch {
       return { savedAt: 0, songs: [] };
     }
-  }, [cacheKey, legacyCacheKey]);
+  }, [cacheKey]);
 
   const writeCache = useCallback(async (next: MusicSong[]) => {
+    if (currentCacheKeyRef.current !== cacheKey) return;
     const savedAt = Date.now();
     lastRefreshAtRef.current = savedAt;
     await AsyncStorage.setItem(
@@ -218,7 +221,9 @@ export default function PlaylistDetailsScreen() {
   const loadSongs = useCallback(async (showSpinner = true, force = false) => {
     if (!playlistId) return;
     if (isOfflineLibrary) {
-      setSongs(sortSongsAlphabetically(await getOfflineLibrary({ validateFiles: true })));
+      const downloaded = await getOfflineLibrary({ validateFiles: true });
+      if (currentCacheKeyRef.current !== cacheKey) return;
+      setSongs(sortSongsAlphabetically(downloaded));
       setOfflineMode(true); setLoading(false); return;
     }
     const cacheIsFresh = lastRefreshAtRef.current > 0
@@ -239,8 +244,11 @@ export default function PlaylistDetailsScreen() {
     const operation = (async () => {
 
     const cached = await readCache();
+    if (currentCacheKeyRef.current !== cacheKey) return;
     if (!isDaily && cached.songs.length) {
-      setSongs(sortSongsAlphabetically(await mergeWithOfflineLibrary(cached.songs)));
+      const downloaded = await mergeWithOfflineLibrary(cached.songs);
+      if (currentCacheKeyRef.current !== cacheKey) return;
+      setSongs(sortSongsAlphabetically(downloaded));
       lastRefreshAtRef.current = cached.savedAt;
     }
 
@@ -257,27 +265,32 @@ export default function PlaylistDetailsScreen() {
             authenticated: isPersonal || isLibrary,
           });
       const merged = await mergeWithOfflineLibrary(data.map(fromApiLibrarySong));
+      if (currentCacheKeyRef.current !== cacheKey) return;
       const next = isDaily ? merged : sortSongsAlphabetically(merged);
       setSongs(next);
       setOfflineMode(await deviceIsOffline());
       await writeCache(next);
     } catch {
+      if (currentCacheKeyRef.current !== cacheKey) return;
       setOfflineMode(true);
       if (!cached.songs.length) setSongs([]);
       else if (isDaily) setSongs(await mergeWithOfflineLibrary(cached.songs));
     } finally {
-      setLoading(false);
-      refreshInFlightRef.current = null;
+      if (currentCacheKeyRef.current === cacheKey) {
+        setLoading(false);
+        refreshInFlightRef.current = null;
+      }
     }
     })();
 
     refreshInFlightRef.current = operation;
     return operation;
-  }, [isDaily, isLibrary, isPersonal, isOfflineLibrary, playlistId, readCache, writeCache]);
+  }, [isDaily, isLibrary, isPersonal, isOfflineLibrary, playlistId, cacheKey, readCache, writeCache]);
 
   const hydrateSongs = useCallback(async () => {
     if (!playlistId) return;
     const cached = await readCache();
+    if (currentCacheKeyRef.current !== cacheKey) return;
     if (!isDaily && cached.songs.length) {
       setSongs(sortSongsAlphabetically(await mergeWithOfflineLibrary(cached.songs)));
       lastRefreshAtRef.current = cached.savedAt;
@@ -287,7 +300,7 @@ export default function PlaylistDetailsScreen() {
     }
 
     void loadSongs(true, true);
-  }, [isDaily, loadSongs, playlistId, readCache]);
+  }, [isDaily, loadSongs, playlistId, cacheKey, readCache]);
 
   useEffect(() => {
     hydratedRef.current = false;
@@ -730,9 +743,7 @@ export default function PlaylistDetailsScreen() {
         )}
 
         {loading && !songs.length ? (
-          <View style={styles.center}>
-            <ActivityIndicator size="large" color="#1db954" />
-          </View>
+          <CollectionLoading label={isDaily ? 'Preparando seu mix do dia...' : 'Carregando playlist...'} />
         ) : (
           <FlatList
             data={songs}

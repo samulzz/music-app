@@ -57,4 +57,18 @@ public class RecommendationController {
             return ResponseEntity.badRequest().body(error.getMessage());
         }
     }
+
+    @GetMapping("/feedback")
+    public ResponseEntity<?> feedbackState(Authentication auth, @RequestParam(required = false) Long songId,
+                                            @RequestParam(defaultValue = "") String sourceId) {
+        return ResponseEntity.ok(recommendationService.feedback(auth.getName(), songId, sourceId));
+    }
+
+    @GetMapping("/radio")
+    public ResponseEntity<?> radio(Authentication auth, @RequestParam(defaultValue = "") String sourceId,
+                                   @RequestParam(defaultValue = "30") int limit,
+                                   @RequestParam(defaultValue = "") String exclude) {
+        var excluded = java.util.Arrays.stream(exclude.split(",")).map(String::trim).filter(s -> !s.isBlank()).limit(200).collect(java.util.stream.Collectors.toSet());
+        return ResponseEntity.ok(recommendationService.radio(auth.getName(), sourceId, limit, excluded));
+    }
 }

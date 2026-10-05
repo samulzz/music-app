@@ -48,6 +48,16 @@ export async function getDailyMixSongs(): Promise<MusicSong[]> {
   return (mix.songs || []).map(fromApiLibrarySong);
 }
 
+export async function getRadioSongs(anchor?: Pick<MusicSong, 'sourceId'>, excluded: string[] = []): Promise<MusicSong[]> {
+  const songs = await apiRequest<ApiLibrarySong[]>(`/recommendations/radio?sourceId=${encodeURIComponent(anchor?.sourceId || '')}&limit=30&exclude=${encodeURIComponent(excluded.slice(-200).join(','))}`);
+  return songs.map(fromApiLibrarySong);
+}
+
+export function getRecommendationFeedback(song: Pick<MusicSong, 'id' | 'sourceId'>) {
+  const id = Number(song.id);
+  return apiRequest<{ liked: boolean }>(`/recommendations/feedback?sourceId=${encodeURIComponent(song.sourceId || '')}${Number.isFinite(id) ? `&songId=${id}` : ''}`);
+}
+
 export function reportPlayback(payload: {
   songId?: number;
   sourceId?: string;

@@ -15,7 +15,7 @@ import type { MusicSong } from '../types/music';
 import { apiRequest, getMediaHeaders, deviceIsOffline } from './api';
 import { musicDownloadUrl, musicPreparePath } from './config';
 import { mergeWithOfflineLibrary } from './offline-library';
-import { getDailyMixSongs } from './recommendations';
+import { getDailyMixSongs, getRadioSongs } from './recommendations';
 import { sortSongsAlphabetically } from './song-order';
 import { getLatestConnectState, markConnectRevisionProcessed, takeOverConnectPlayback, publishConnectState } from './connect';
 import type { PlaybackContext } from './connect';
@@ -434,7 +434,7 @@ async function seedRecommendationsForSingleSong(anchor: MusicSong, expectedRevis
   if (recommendationSeedInFlight) return recommendationSeedInFlight;
   recommendationSeedInFlight = (async () => {
     try {
-      const dailySongs = await mergeWithOfflineLibrary(await getDailyMixSongs());
+      const dailySongs = await mergeWithOfflineLibrary(await getRadioSongs(anchor));
       if (expectedRevision !== playbackQueueRevision || TrackPlayer.getQueue().length !== 1) return;
       const existing = new Set(TrackPlayer.getQueue().map((item) => mediaItemSourceId(item) || String(item.mediaId || '')));
       const needsNetwork = dailySongs.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
@@ -543,7 +543,9 @@ async function continueWithDailyRecommendations(expectedRevision: number) {
   recommendationAppendInFlight = (async () => {
     try {
       const endedQueue = TrackPlayer.getQueue();
-      const candidates = await mergeWithOfflineLibrary(await getDailyMixSongs());
+      const anchorItem = endedQueue[endedQueue.length - 1];
+      const candidates = await mergeWithOfflineLibrary(await deviceIsOffline()
+        ? await getDailyMixSongs() : await getRadioSongs(anchorItem ? telemetrySong(anchorItem) : undefined, endedQueue.map(item => mediaItemSourceId(item))));
       const dailySongs = await deviceIsOffline() ? candidates.filter(song => song.localUri) : candidates;
       if (expectedRevision !== playbackQueueRevision || TrackPlayer.getPlaybackState() !== PlaybackState.Ended) return;
       const existing = new Set(
@@ -560,6 +562,7 @@ async function continueWithDailyRecommendations(expectedRevision: number) {
         })
         .map((song) => toMediaItem(song, headers, 'recommendation'))
         .filter((item): item is MediaItem => item !== null);
+      if (expectedRevision !== playbackQueueRevision || TrackPlayer.getPlaybackState() !== PlaybackState.Ended) return;
       if (additions.length) {
         const arranged = lastShuffleEnabled ? shuffled(additions) : additions;
         const firstRecommendationIndex = endedQueue.length;

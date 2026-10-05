@@ -20,6 +20,7 @@ import type { ApiPlaylist, MusicSong } from '../../types/music';
 import { fromApiLibrarySong } from '../../types/music';
 import { apiRequest, OfflineError, accountCacheKey } from '../../services/api';
 import { getSession } from '../../services/auth';
+import { CollectionLoading } from '../../components/collection-loading';
 import { getPersonalizedHome, type PersonalizedHome } from '../../services/recommendations';
 import { playSongQueue, restorePausedSongQueue, seekToPosition } from '../../services/player';
 import { MUSIC_GENRES } from '../../constants/music-genres';
@@ -286,9 +287,7 @@ export default function HomePlaylistsScreen() {
         )}
 
         {loading ? (
-          <View style={styles.center}>
-            <ActivityIndicator size="large" color="#1db954" />
-          </View>
+          <CollectionLoading label="Preparando seu início..." hero />
         ) : (
           <FlatList
             data={playlists.slice(1)}

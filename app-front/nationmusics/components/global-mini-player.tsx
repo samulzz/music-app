@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import TrackPlayer, { Event, useIsPlaying, useProgress, type MediaItem } from '@rntp/player';
@@ -23,7 +23,7 @@ import {
   takeOverConnectPlayback,
   type ConnectState,
 } from '../services/connect';
-import { sendRecommendationFeedback } from '../services/recommendations';
+import { sendRecommendationFeedback, getRecommendationFeedback } from '../services/recommendations';
 
 function formatTime(value: number) {
   if (!Number.isFinite(value) || value < 0) return '0:00';
@@ -46,6 +46,8 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
   const [queueVisible, setQueueVisible] = useState(false);
   const [queue, setQueue] = useState<MediaItem[]>([]);
   const [likedTrackKey, setLikedTrackKey] = useState('');
+  const [likeBusy, setLikeBusy] = useState(false);
+  const likeRequestRef = useRef(0);
   const [connectState, setConnectState] = useState<ConnectState | null>(null);
   const [currentDeviceId, setCurrentDeviceId] = useState('');
   const [clockNow, setClockNow] = useState(() => Date.now());
@@ -80,6 +82,17 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
   const displayPosition = remote
     ? Math.max(0, Number(connectState?.positionSeconds || 0) + (connectState?.playing ? Math.max(0, (clockNow - Number(connectState.stateUpdatedAt || clockNow)) / 1000) : 0))
     : progress.position;
+  useEffect(() => {
+    let active = true;
+    const requestId = ++likeRequestRef.current;
+    setLikeBusy(false);
+    if (!displayTrack) return;
+    const extras = 'extras' in displayTrack && displayTrack.extras && typeof displayTrack.extras === 'object' ? displayTrack.extras : {};
+    const sourceId = 'sourceId' in displayTrack ? displayTrack.sourceId : extras.sourceId;
+    void getRecommendationFeedback({ id: String(extras.songId || displayTrackKey), sourceId: String(sourceId || displayTrackKey) })
+      .then(value => { if (active && requestId === likeRequestRef.current) setLikedTrackKey(value.liked ? displayTrackKey : ''); }).catch(() => {});
+    return () => { active = false; };
+  }, [displayTrackKey]);
   if (!displayTrack) return null;
 
   const progressRatio = !remote && progress.duration > 0
@@ -109,7 +122,7 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
     setQueueVisible(true);
   };
   const toggleLike = () => {
-    if (!displayTrack) return;
+    if (!displayTrack || likeBusy) return;
     const extras = 'extras' in displayTrack && displayTrack.extras && typeof displayTrack.extras === 'object' ? displayTrack.extras : {};
     const mediaId = 'mediaId' in displayTrack ? displayTrack.mediaId : ('id' in displayTrack ? displayTrack.id : '');
     const directSourceId = 'sourceId' in displayTrack ? displayTrack.sourceId : '';
@@ -118,8 +131,12 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
       sourceId: typeof extras.sourceId === 'string' ? extras.sourceId : String(directSourceId || mediaId || ''),
     };
     const nextLiked = !liked;
+    const requestId = ++likeRequestRef.current;
+    setLikeBusy(true);
     setLikedTrackKey(nextLiked ? displayTrackKey : '');
-    void sendRecommendationFeedback(song, nextLiked ? 'LIKE' : 'CLEAR').catch(() => setLikedTrackKey(nextLiked ? '' : displayTrackKey));
+    void sendRecommendationFeedback(song, nextLiked ? 'LIKE' : 'CLEAR')
+      .catch(() => { if (requestId === likeRequestRef.current) setLikedTrackKey(nextLiked ? '' : displayTrackKey); })
+      .finally(() => { if (requestId === likeRequestRef.current) setLikeBusy(false); });
   };
   return (
     <View style={[styles.player, { bottom: bottomOffset }]}>

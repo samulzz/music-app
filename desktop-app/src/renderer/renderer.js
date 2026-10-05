@@ -1,6 +1,7 @@
 const state = {
   session: null,
   view: 'home',
+  viewRequestId: 0,
   authMode: 'login',
   playlists: [],
   playlistsFetchedAt: 0,
@@ -97,12 +98,16 @@ const lastTelemetryIncidentAt = new Map();
 let statsPrevious = null;
 let statsSending = false;
 let statsRequestId = 0;
+let feedbackRequestId = 0;
+let displayedFeedbackKey = '';
+const recommendationListening = createListeningTracker();
 
 function sampleListeningStats(force = false) {
   const now = Date.now();
   const song = state.queue[state.queueIndex];
   const sourceId = song?.sourceId || '';
   const playing = !audio.paused && !audio.ended && !(state.connectState && !state.connectState.currentDeviceActive);
+  recommendationListening.sample(songIdentity(song), audio.currentTime || 0, playing, now);
   if (statsPrevious && statsPrevious.sourceId === sourceId) {
     const delta = audio.currentTime - statsPrevious.position;
     const elapsed = (now - statsPrevious.at) / 1000;
@@ -306,6 +311,8 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     ],
     getPlaylistSongs: async () => demoSongs,
     getDailyMix: async () => ({ songs: demoSongs }),
+    getRadio: async () => demoSongs,
+    getRecommendationFeedback: async () => ({ liked: false }),
     getPersonalizedHome: async () => ({
       continueListening: null,
       recentSongs: demoSongs,
@@ -714,7 +721,7 @@ async function seedRecommendationsForSingleSong(anchor, revision) {
   if (state.recommendationSeedingInFlight) return;
   state.recommendationSeedingInFlight = true;
   try {
-    const mix = await window.nation.getDailyMix();
+    const mix = { songs: await window.nation.getRadio(anchor) };
     if (revision !== state.queueRevision || state.queue.length !== 1 || state.queueMode !== 'selection') return;
     const existing = new Set(state.queue.map(songIdentity));
     const additions = (mix.songs || [])
@@ -1040,6 +1047,16 @@ function renderConnectState() {
   $('#connect-takeover')?.classList.toggle('hidden', !connect || connect.currentDeviceActive);
   $('#connect-button')?.classList.toggle('active', Boolean(connect && !connect.currentDeviceActive));
   if (!connect?.currentDeviceActive && connect?.song) {
+    const key = songIdentity(connect.song);
+    if (key !== displayedFeedbackKey) {
+      displayedFeedbackKey = key;
+      const requestId = ++feedbackRequestId;
+      $('#like-button')?.classList.remove('active');
+      if ($('#like-button')) $('#like-button').disabled = false;
+      void window.nation.getRecommendationFeedback(connect.song).then(value => {
+        if (requestId === feedbackRequestId && key === displayedFeedbackKey) $('#like-button')?.classList.toggle('active', Boolean(value.liked));
+      }).catch(() => {});
+    }
     $('#player-title').textContent = connect.song.title || 'Reproduzindo';
     const activeName = connect.devices?.find((device) => device.active)?.deviceName || 'outro dispositivo';
     $('#player-artist').textContent = `${connect.song.artist || ''} - em ${activeName}`;
@@ -1105,15 +1122,21 @@ async function renderCachePanel() {
 }
 
 function toggleCurrentLike() {
-  const song = state.queue[state.queueIndex];
+  const song = state.connectState?.song && !state.connectState.currentDeviceActive ? state.connectState.song : state.queue[state.queueIndex];
   if (!song) return;
   const button = $('#like-button');
+  if (button?.disabled) return;
+  const key = songIdentity(song);
+  const requestId = ++feedbackRequestId;
   const active = button?.classList.contains('active');
   const action = active ? 'CLEAR' : 'LIKE';
+  if (button) button.disabled = true;
   void window.nation.sendRecommendationFeedback({ songId: song.serverId || song.id, sourceId: song.sourceId, action }).then(() => {
+    if (requestId !== feedbackRequestId || key !== displayedFeedbackKey) return;
     button?.classList.toggle('active', action === 'LIKE');
     if (button) button.title = action === 'LIKE' ? 'Curtida — clique para desfazer' : 'Curtir';
-  }).catch((error) => showBanner(error.message || 'Não foi possível salvar sua preferência.', true));
+  }).catch((error) => showBanner(error.message || 'Não foi possível salvar sua preferência.', true))
+    .finally(() => { if (requestId === feedbackRequestId && button) button.disabled = false; });
 }
 
 async function executeConnectCommand(connect) {
@@ -1763,7 +1786,7 @@ function renderFriendsPanel() {
 }
 
 async function refreshFriendsPanel(showLoading = true) {
-  state.view = 'friends';
+  const viewRequest = beginView('friends');
   setPageHeader('AMIGOS', 'Quem esta online agora.');
   if (showLoading && !state.friends.length) setLoading('Carregando amigos...');
 
@@ -1772,11 +1795,13 @@ async function refreshFriendsPanel(showLoading = true) {
       window.nation.getFriends(),
       window.nation.getFriendRequests(),
     ]);
+    if (!currentView(viewRequest)) return;
     state.friends = Array.isArray(friends) ? friends : [];
     state.friendRequests = requests || { incoming: [], outgoing: [] };
     state.friendsFetchedAt = Date.now();
     renderFriendsPanel();
   } catch (error) {
+    if (!currentView(viewRequest)) return;
     if (await handleAuthenticationError(error)) return;
     contentView.innerHTML = `<div class="empty-state"><b>Amigos indisponiveis</b><span>${escapeHtml(error.message)}</span></div>`;
   }
@@ -1943,11 +1968,22 @@ async function resolvePlayableSong(song) {
   return song;
 }
 
+function beginView(view) {
+  state.view = view;
+  document.querySelector('.song-context-menu')?.remove();
+  return { view, id: ++state.viewRequestId };
+}
+
+function currentView(request) {
+  return state.view === request.view && state.viewRequestId === request.id;
+}
+
 function setLoading(message = 'Carregando...') {
   contentView.innerHTML = `
-    <div class="loading-state">
-      <div class="spinner"></div>
-      <span>${escapeHtml(message)}</span>
+    <div class="collection-loading" role="status" aria-live="polite" aria-busy="true">
+      <span class="loading-label">${escapeHtml(message)}</span>
+      <div aria-hidden="true" class="skeleton-hero"></div>
+      ${Array.from({ length: 5 }, () => '<div class="skeleton-row"><i></i><div><b></b><span></span></div></div>').join('')}
     </div>
   `;
 }
@@ -2077,7 +2113,12 @@ function bindSongActions(playlist = null) {
       if (!song) return;
       const menu = document.createElement('div');
       menu.className = 'song-context-menu';
-      menu.innerHTML = `<strong>${escapeHtml(song.title)}</strong><button type="button" data-song-menu="queue">${icon('playlist')} Adicionar à fila</button><button type="button" data-song-menu="play">${icon('play')} Reproduzir agora</button>`;
+      const row = button.closest('.song-row');
+      const rowActions = ['save-song', 'add-to-playlist', 'remove-playlist-song', 'remove-song']
+        .map(action => ({ action, target: row?.querySelector(`.${action}`) })).filter(item => item.target);
+      menu.innerHTML = `<strong>${escapeHtml(song.title)}</strong><button type="button" data-song-menu="queue">${icon('playlist')} Adicionar à fila</button><button type="button" data-song-menu="play">${icon('play')} Reproduzir agora</button>
+        <button type="button" data-song-menu="download">${icon('download')} ${song.downloaded ? 'Disponível offline' : 'Baixar offline'}</button>
+        ${rowActions.map(item => `<button type="button" data-song-menu="${item.action}">${icon(item.action.startsWith('remove') ? 'close' : 'plus')} ${escapeHtml(item.target.title)}</button>`).join('')}`;
       document.querySelector('.song-context-menu')?.remove();
       document.body.appendChild(menu);
       const bounds = button.getBoundingClientRect();
@@ -2087,8 +2128,13 @@ function bindSongActions(playlist = null) {
         const action = event.target.closest('[data-song-menu]')?.dataset.songMenu;
         if (action === 'queue') addSongToPlaybackQueue(song);
         if (action === 'play') playQueue(state.visibleSongs, Number(button.dataset.index), context);
+        if (action === 'download' && !song.downloaded) void window.nation.downloadSong(song).then(() => {
+          song.downloaded = true; syncSongRows();
+        }).catch(error => showBanner(error.message || 'Não foi possível baixar.', true));
+        rowActions.find(item => item.action === action)?.target.click();
         menu.remove();
       });
+      menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.remove(); button.focus(); } });
       const dismiss = (event) => {
         if (!menu.contains(event.target) && event.target !== button) menu.remove();
         document.removeEventListener('pointerdown', dismiss);
@@ -2261,7 +2307,7 @@ async function restoreHomePlaybackPaused(resume) {
 }
 
 async function renderHome(force = false) {
-  state.view = 'home';
+  const viewRequest = beginView('home');
   state.searchRequestId += 1;
   setPageHeader('BEM-VINDO DE VOLTA', 'Sua música, do seu jeito.');
   const cacheIsFresh = state.playlists.length && state.homeData
@@ -2272,11 +2318,11 @@ async function renderHome(force = false) {
     return;
   }
 
-  if (state.playlists.length) renderHomeContent();
+  if (state.playlists.length && state.homeData) renderHomeContent();
   else setLoading('Carregando playlists...');
   try {
     const [playlists, home] = await Promise.all([window.nation.getPlaylists(), window.nation.getPersonalizedHome()]);
-    if (state.view !== 'home') return;
+    if (!currentView(viewRequest)) return;
     state.playlists = playlists;
     state.homeData = home;
     state.playlistsFetchedAt = Date.now();
@@ -2284,6 +2330,7 @@ async function renderHome(force = false) {
     renderHomeContent();
     void restoreHomePlaybackPaused(home?.continueListening);
   } catch (error) {
+    if (!currentView(viewRequest)) return;
     if (await handleAuthenticationError(error)) return;
     if (state.playlists.length) {
       showBanner(error.message, true);
@@ -2363,7 +2410,7 @@ async function deletePersonalPlaylist(playlist) {
 }
 
 async function openPlaylist(playlist) {
-  state.view = playlist.library ? 'library-detail' : 'playlist-detail';
+  const viewRequest = beginView(playlist.library ? 'library-detail' : 'playlist-detail');
   setPageHeader(playlist.library ? 'BIBLIOTECA' : 'PLAYLIST', playlist.name);
   const cacheKey = playlistDetailsCacheKey(playlist);
   const cached = playlistDetailsCache.get(cacheKey);
@@ -2377,10 +2424,12 @@ async function openPlaylist(playlist) {
   if (cached) renderPlaylistSongsContent(playlist, cached.songs);
   else setLoading('Abrindo playlist...');
   try {
-    const library = await window.nation.getLibrary();
-    const songs = playlist.library
-      ? library
-      : await (playlist.personal ? window.nation.getPersonalPlaylistSongs(playlist.id) : window.nation.getPlaylistSongs(playlist.id));
+    const [library, playlistSongs] = await Promise.all([
+      window.nation.getLibrary(),
+      playlist.library ? Promise.resolve(null) : playlist.personal ? window.nation.getPersonalPlaylistSongs(playlist.id) : window.nation.getPlaylistSongs(playlist.id),
+    ]);
+    if (!currentView(viewRequest)) return;
+    const songs = playlist.library ? library : playlistSongs;
     const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
     const merged = songs.map((song) => savedBySource.has(song.sourceId)
       ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
@@ -2388,9 +2437,11 @@ async function openPlaylist(playlist) {
     await Promise.all(merged.map(async (song) => {
       song.downloaded = await window.nation.isSongDownloaded(song);
     }));
+    if (!currentView(viewRequest)) return;
     playlistDetailsCache.set(cacheKey, { savedAt: Date.now(), songs: merged });
     renderPlaylistSongsContent(playlist, merged);
   } catch (error) {
+    if (!currentView(viewRequest)) return;
     if (await handleAuthenticationError(error)) return;
     showBanner(error.message, true);
     if (cached) return;
@@ -2424,7 +2475,7 @@ function renderPersonalPlaylistsContent(playlists = state.personalPlaylists) {
 }
 
 async function renderPersonalPlaylists(force = false) {
-  state.view = 'personal-playlists';
+  const viewRequest = beginView('personal-playlists');
   setPageHeader('SUAS PLAYLISTS', 'Crie coleções do seu jeito.');
   const cacheIsFresh = state.personalPlaylists.length
     && Date.now() - state.personalPlaylistsFetchedAt < VIEW_CACHE_TTL_MS;
@@ -2437,6 +2488,7 @@ async function renderPersonalPlaylists(force = false) {
   else setLoading('Carregando suas playlists...');
   try {
     const playlists = await window.nation.getPersonalPlaylists();
+    if (!currentView(viewRequest)) return;
     state.personalPlaylists = playlists;
     state.personalPlaylistsFetchedAt = Date.now();
     contentView.innerHTML = `
@@ -2462,6 +2514,7 @@ async function renderPersonalPlaylists(force = false) {
       card.addEventListener('click', () => openPlaylist({ ...playlists[Number(card.dataset.personalPlaylistIndex)], personal: true }));
     });
   } catch (error) {
+    if (!currentView(viewRequest)) return;
     if (await handleAuthenticationError(error)) return;
     if (state.personalPlaylists.length) {
       showBanner(error.message, true);
@@ -2505,7 +2558,7 @@ async function addSongToPlaylist(song) {
 }
 
 async function renderSearch(query = '', exactGenre = false) {
-  state.view = 'search';
+  const viewRequest = beginView('search');
   const requestId = state.searchRequestId + 1;
   state.searchRequestId = requestId;
   setPageHeader('ENCONTRE ALGO NOVO', query ? `Resultados para “${query}”` : 'O que vai ouvir hoje?');
@@ -2523,7 +2576,7 @@ async function renderSearch(query = '', exactGenre = false) {
         : window.nation.smartSearch(query.trim()),
       window.nation.getLibrary(),
     ]);
-    if (requestId !== state.searchRequestId || state.view !== 'search') return;
+    if (!currentView(viewRequest) || requestId !== state.searchRequestId) return;
     const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
     const merged = (discovery.songs || []).map((song) => savedBySource.has(song.sourceId)
       ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
@@ -2560,7 +2613,7 @@ async function renderSearch(query = '', exactGenre = false) {
     });
     bindSongActions();
   } catch (error) {
-    if (requestId !== state.searchRequestId || state.view !== 'search') return;
+    if (!currentView(viewRequest) || requestId !== state.searchRequestId) return;
     if (await handleAuthenticationError(error)) return;
     contentView.innerHTML = `<div class="empty-state"><b>Erro na busca</b><span>${escapeHtml(error.message)}</span></div>`;
   }
@@ -2569,14 +2622,14 @@ async function renderSearch(query = '', exactGenre = false) {
 async function renderArtist(artistName) {
   const name = String(artistName || '').trim();
   if (!name) return;
-  state.view = 'artist';
+  const viewRequest = beginView('artist');
   state.artistName = name;
   state.searchRequestId += 1;
   setPageHeader('ARTISTA', name);
   setLoading('Carregando músicas do artista...');
   try {
     const [songs, library] = await Promise.all([window.nation.getArtistSongs(name), window.nation.getLibrary()]);
-    if (state.view !== 'artist' || state.artistName !== name) return;
+    if (!currentView(viewRequest) || state.artistName !== name) return;
     const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
     const merged = songs.map((song) => savedBySource.has(song.sourceId) ? { ...song, ...savedBySource.get(song.sourceId), saved: true } : song);
     const artwork = merged.find((song) => song.artworkUrl)?.artworkUrl;
@@ -2584,6 +2637,7 @@ async function renderArtist(artistName) {
     if (merged.length) bindQueueControls(merged);
     bindSongActions();
   } catch (error) {
+    if (!currentView(viewRequest)) return;
     if (await handleAuthenticationError(error)) return;
     contentView.innerHTML = `<div class="empty-state"><b>Não foi possível carregar o artista</b><span>${escapeHtml(error.message)}</span></div>`;
   }
@@ -2591,7 +2645,7 @@ async function renderArtist(artistName) {
 
 async function renderAlbum(album) {
   if (!album?.name) return;
-  state.view = 'album';
+  const viewRequest = beginView('album');
   state.albumName = album.name;
   state.albumSummary = album;
   state.searchRequestId += 1;
@@ -2599,7 +2653,7 @@ async function renderAlbum(album) {
   setLoading('Carregando álbum...');
   try {
     const [songs, library] = await Promise.all([window.nation.getAlbumSongs(album), window.nation.getLibrary()]);
-    if (state.view !== 'album' || state.albumName !== album.name) return;
+    if (!currentView(viewRequest) || state.albumName !== album.name) return;
     const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
     const merged = songs.map((song) => savedBySource.has(song.sourceId) ? { ...song, ...savedBySource.get(song.sourceId), saved: true } : song);
     const artwork = album.coverUrl || merged.find((song) => song.artworkUrl)?.artworkUrl;
@@ -2607,6 +2661,7 @@ async function renderAlbum(album) {
     if (merged.length) bindQueueControls(merged, { type: 'album', id: String(album.playlistId || album.name), name: album.name });
     bindSongActions();
   } catch (error) {
+    if (!currentView(viewRequest)) return;
     if (await handleAuthenticationError(error)) return;
     contentView.innerHTML = `<div class="empty-state"><b>Não foi possível carregar o álbum</b><span>${escapeHtml(error.message)}</span></div>`;
   }
@@ -2748,7 +2803,7 @@ async function saveSpotifyVisibleSongs() {
 }
 
 async function renderLibrary() {
-  state.view = 'library';
+  const viewRequest = beginView('library');
   setPageHeader('SUA COLEÇÃO', 'Biblioteca');
   setLoading('Carregando biblioteca...');
   try {
@@ -2756,6 +2811,7 @@ async function renderLibrary() {
       window.nation.getLibrary(),
       window.nation.getPersonalPlaylists(),
     ]);
+    if (!currentView(viewRequest)) return;
     state.library = library;
     state.personalPlaylists = playlists;
     state.personalPlaylistsFetchedAt = Date.now();
@@ -2793,16 +2849,17 @@ async function renderLibrary() {
       card.addEventListener('click', () => openPlaylist({ ...playlists[Number(card.dataset.personalPlaylistIndex)], personal: true }));
     });
   } catch (error) {
+    if (!currentView(viewRequest)) return;
     if (await handleAuthenticationError(error)) return;
     contentView.innerHTML = `<div class="empty-state"><b>Biblioteca indisponível</b><span>${escapeHtml(error.message)}</span></div>`;
   }
 }
 
 async function renderOfflineLibrary() {
-  state.view = 'offline';
+  const viewRequest = beginView('offline');
   setPageHeader('NESTE COMPUTADOR', 'Músicas offline');
   const songs = (await window.nation.getOfflineSongs()).map(song => ({ ...song, downloaded: true, saved: false }));
-  if (state.view !== 'offline') return;
+  if (!currentView(viewRequest)) return;
   contentView.innerHTML = `${queueControlsMarkup(songs.length, 'Tocar baixadas', false)}${songRows(songs, 'Nenhuma música baixada ainda.')}
     <section class="stats-card"><h3>Gerenciar downloads</h3>${songs.map(song => `<button class="secondary-button remove-offline-download" data-source="${escapeHtml(song.sourceId)}">Remover download: ${escapeHtml(song.title)}</button>`).join('')}</section>`;
   bindQueueControls(state.visibleSongs, { type: 'offline', name: 'Baixadas neste computador' });
@@ -2835,6 +2892,7 @@ async function saveSong(song) {
 
 function playQueue(songs, index, context = null, options = {}) {
   reportCurrentPlayback(false);
+  recommendationListening.reset();
   const playable = songs.filter((song) => song.sourceId || song.spotifyId || song.title);
   const selected = songs[index];
   const selectedIdentity = songIdentity(selected);
@@ -2875,13 +2933,14 @@ function playQueue(songs, index, context = null, options = {}) {
 }
 
 async function continueWithDailyRecommendations() {
-  if (state.queueMode !== 'selection' || state.recommendationContinuationInFlight) return;
+  if (!['selection', 'recommendations'].includes(state.queueMode) || state.recommendationContinuationInFlight) return;
   const revision = state.queueRevision;
   const originalQueue = [...state.queue];
   state.recommendationContinuationInFlight = true;
   try {
-    const mix = await window.nation.getDailyMix();
-    if (revision !== state.queueRevision || state.queueMode !== 'selection') return;
+    const anchor = originalQueue[state.queueIndex];
+    const mix = { songs: await window.nation.getRadio(anchor, originalQueue.map(song => song.sourceId).filter(Boolean)) };
+    if (revision !== state.queueRevision || !['selection', 'recommendations'].includes(state.queueMode)) return;
     const existing = new Set(originalQueue.map(songIdentity));
     const additions = (mix.songs || []).filter((song) => {
       const identity = songIdentity(song);
@@ -2890,9 +2949,7 @@ async function continueWithDailyRecommendations() {
       return true;
     });
     if (!additions.length) {
-      state.queueIndex = state.shuffle ? Math.floor(Math.random() * state.queue.length) : 0;
-      resetShuffleRemainingIndexes();
-      await loadCurrentTrack();
+      audio.pause();
       return;
     }
     let recommended = additions.map((song, queueSequence) => ({ ...song, queueOrigin: 'recommendation', queueSequence }));
@@ -2909,11 +2966,7 @@ async function continueWithDailyRecommendations() {
     await loadCurrentTrack();
     window.setTimeout(prefetchNextTracks, 600);
   } catch {
-    if (revision === state.queueRevision && state.queueMode === 'selection' && state.queue.length) {
-      state.queueIndex = state.shuffle ? Math.floor(Math.random() * state.queue.length) : 0;
-      resetShuffleRemainingIndexes();
-      await loadCurrentTrack();
-    }
+    if (revision === state.queueRevision) audio.pause();
   } finally {
     state.recommendationContinuationInFlight = false;
   }
@@ -2921,9 +2974,12 @@ async function continueWithDailyRecommendations() {
 
 function reportCurrentPlayback(completed = false) {
   const song = state.queue[state.queueIndex];
-  if (!song) return;
-  const listenedSeconds = Math.max(0, Math.round(audio.currentTime || 0));
+  if (!song || (state.connectState && !state.connectState.currentDeviceActive)) return;
+  sampleListeningStats();
+  const listenedSeconds = recommendationListening.take(songIdentity(song));
+  if (listenedSeconds === null || listenedSeconds < 2) return;
   const durationSeconds = Number.isFinite(audio.duration) ? Math.max(0, audio.duration) : 0;
+  completed = durationSeconds > 0 && listenedSeconds >= durationSeconds * 0.8;
   const skipped = !completed && listenedSeconds <= Math.max(12, durationSeconds * 0.12);
   void window.nation.reportPlayback({
     songId: song.serverId || song.id,
@@ -2993,6 +3049,7 @@ async function loadCurrentTrack(autoplay = true) {
   const song = state.queue[state.queueIndex];
   if (!song) return;
   const startingIdentity = songIdentity(song);
+  if (startingIdentity !== lastPlaybackStartIdentity) recommendationListening.reset();
   if (startingIdentity && startingIdentity !== lastPlaybackStartIdentity) {
     const previousStart = recentPlaybackStarts.get(startingIdentity) || 0;
     if (previousStart && Date.now() - previousStart < 30 * 60 * 1000) {
@@ -3010,6 +3067,14 @@ async function loadCurrentTrack(autoplay = true) {
   $('#like-button')?.classList.remove('active');
   if ($('#like-button')) $('#like-button').title = 'Curtir';
   const requestId = ++state.trackLoadRequestId;
+  const likeRequest = ++feedbackRequestId;
+  displayedFeedbackKey = songIdentity(song);
+  if ($('#like-button')) $('#like-button').disabled = false;
+  void window.nation.getRecommendationFeedback(song).then(feedback => {
+    if (likeRequest !== feedbackRequestId || requestId !== state.trackLoadRequestId) return;
+    $('#like-button')?.classList.toggle('active', Boolean(feedback.liked));
+    if ($('#like-button')) $('#like-button').title = feedback.liked ? 'Curtida — clique para desfazer' : 'Curtir';
+  }).catch(() => {});
   audio.pause();
   audio.removeAttribute('src');
   audio.load();
@@ -3093,7 +3158,8 @@ async function nextTrack(direction, reportCurrent = true) {
     audio.pause(); return;
   }
   if (reportCurrent) reportCurrentPlayback(false);
-  if (direction > 0 && state.queueMode === 'selection' && state.queueIndex >= state.queue.length - 1) {
+  recommendationListening.reset();
+  if (direction > 0 && ['selection', 'recommendations'].includes(state.queueMode) && state.queueIndex >= state.queue.length - 1) {
     await continueWithDailyRecommendations();
     return;
   } else {

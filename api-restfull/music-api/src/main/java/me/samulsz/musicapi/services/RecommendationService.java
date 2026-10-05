@@ -78,7 +78,8 @@ public class RecommendationService {
                 && request.listenedSeconds() <= Math.max(12, request.durationSeconds() * 0.12));
         boolean repeated = "REPEATED".equals(outcome);
         if (!request.completed() && !skipped && !repeated && request.listenedSeconds() < 15) return;
-        User user = getUser(username);
+        if (skipped && request.listenedSeconds() < 2) return;
+        User user = getUserForUpdate(username);
         Song song = resolveSong(request).orElse(null);
         if (song == null) return;
 
@@ -102,7 +103,7 @@ public class RecommendationService {
     @Transactional
     public void setFeedback(String username, RecommendationFeedbackRequest request) {
         if (request == null) throw new IllegalArgumentException("Feedback inválido.");
-        User user = getUser(username);
+        User user = getUserForUpdate(username);
         Song song = resolveSong(request.songId(), request.sourceId())
                 .orElseThrow(() -> new IllegalArgumentException("Música não encontrada."));
         PlaybackPreference preference = preferenceRepository.findByUserIdAndSongId(user.getId(), song.getId())
@@ -124,7 +125,58 @@ public class RecommendationService {
         }
         if (preference.getLastListenedAt() == null) preference.setLastListenedAt(LocalDateTime.now(APP_ZONE));
         preferenceRepository.save(preference);
-        dailyMixRepository.findByUserIdAndMixDate(user.getId(), LocalDate.now(APP_ZONE)).ifPresent(dailyMixRepository::delete);
+        // Keep today's mix stable; new likes immediately affect radio and tomorrow's mix.
+        if ("DISLIKE".equals(action)) dailyMixRepository.findByUserIdAndMixDate(user.getId(), LocalDate.now(APP_ZONE)).ifPresent(dailyMixRepository::delete);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Boolean> feedback(String username, Long songId, String sourceId) {
+        User user = getUser(username);
+        return Map.of("liked", resolveSong(songId, sourceId).flatMap(song -> preferenceRepository
+                .findByUserIdAndSongId(user.getId(), song.getId())).map(PlaybackPreference::isLiked).orElse(false));
+    }
+
+    @Transactional(readOnly = true)
+    public List<Song> radio(String username, String sourceId, int requestedLimit) {
+        return radio(username, sourceId, requestedLimit, Set.of());
+    }
+
+    @Transactional(readOnly = true)
+    public List<Song> radio(String username, String sourceId, int requestedLimit, Set<String> excluded) {
+        User user = getUser(username);
+        Song anchor = resolveSong(null, sourceId).orElse(null);
+        var preferences = preferenceRepository.findByUserIdOrderByLastListenedAtDesc(user.getId());
+        var byId = preferences.stream().filter(p -> p.getSong() != null).collect(Collectors.toMap(p -> p.getSong().getId(), Function.identity(), (a,b) -> a));
+        var artists = new HashMap<String, Double>();
+        var genres = new HashMap<String, Double>();
+        LocalDateTime now = LocalDateTime.now(APP_ZONE);
+        preferences.stream().filter(p -> p.getSong() != null).forEach(p -> {
+            double value = RecommendationRanking.strength(p, now);
+            artists.merge(RecommendationRanking.artist(p.getSong()), value, Double::sum);
+            p.getSong().getGenres().forEach(g -> genres.merge(normalizeGenre(g), Math.max(-2, value), Double::sum));
+        });
+        user.getDownloadedSongs().forEach(song -> {
+            artists.merge(RecommendationRanking.artist(song), 2.0, Double::sum);
+            song.getGenres().forEach(g -> genres.merge(normalizeGenre(g), 1.0, Double::sum));
+        });
+        var catalog = CatalogIdentity.unique(songRepository.findAll().stream()
+                .filter(s -> s.getSourceId() != null && !s.getSourceId().isBlank())
+                .filter(s -> musicService.hasPrecachedAudio(s.getSourceId()))
+                .filter(s -> anchor == null || !Objects.equals(s.getId(), anchor.getId()))
+                .filter(s -> !excluded.contains(s.getSourceId()))
+                .filter(s -> !byId.containsKey(s.getId()) || !byId.get(s.getId()).isDoNotRecommend()).toList());
+        // Seed stays stable within the day, not randomly reshuffled on every request.
+        long seed = user.getId() * 31 + LocalDate.now(APP_ZONE).toEpochDay();
+        catalog.sort(Comparator.comparingDouble((Song song) -> {
+            var p = byId.get(song.getId());
+            double personal = Math.max(-10, Math.min(20, artists.getOrDefault(RecommendationRanking.artist(song), 0.0) * 0.5))
+                    + Math.max(-4, Math.min(15, song.getGenres().stream().mapToDouble(g -> genres.getOrDefault(normalizeGenre(g), 0.0)).sum() * 0.2));
+            double own = p == null ? 3 : RecommendationRanking.strength(p, now) * 0.3;
+            double recent = p != null && p.getLastListenedAt() != null && p.getLastListenedAt().isAfter(now.minusHours(8)) ? 9 : 0;
+            return RecommendationRanking.context(anchor, song) + personal + own - recent
+                    + new Random(seed ^ song.getId()).nextDouble() * 2;
+        }).reversed().thenComparing(Song::getId));
+        return RecommendationRanking.diversify(catalog, Math.max(1, Math.min(50, requestedLimit)), 4);
     }
 
     @Transactional
@@ -144,6 +196,7 @@ public class RecommendationService {
         List<PlaybackPreference> preferences = preferenceRepository.findByUserIdOrderByLastListenedAtDesc(user.getId());
         List<PlaybackPreference> usablePreferences = preferences.stream()
                 .filter(item -> item.getSong() != null)
+                .filter(item -> !item.isDoNotRecommend())
                 .filter(item -> item.getSong().getSourceId() != null && !item.getSong().getSourceId().isBlank())
                 .filter(item -> musicService.hasPrecachedAudio(item.getSong().getSourceId()))
                 .toList();
@@ -158,12 +211,12 @@ public class RecommendationService {
         usablePreferences.forEach(item -> {
             String name = primaryArtist(item.getSong().getArtist());
             String key = normalizeArtist(name);
-            long score = Math.max(1, item.getPlayCount()) + item.getCompletedCount() * 2
-                    + item.getRepeatedCount() * 3 - item.getSkippedCount() * 2 + (item.isLiked() ? 12 : 0);
+            long score = Math.round(RecommendationRanking.strength(item, LocalDateTime.now(APP_ZONE)));
             artists.computeIfAbsent(key, ignored -> new ArtistAccumulator(name, item.getSong().getCoverUrl()))
                     .add(score, item.getSong().getCoverUrl());
         });
         List<PersonalizedHomeResponse.ArtistSummary> topArtists = artists.values().stream()
+                .filter(item -> item.score() > 0)
                 .sorted(Comparator.comparingLong(ArtistAccumulator::score).reversed())
                 .limit(10)
                 .map(ArtistAccumulator::response)
@@ -244,7 +297,7 @@ public class RecommendationService {
                 preferenceRepository.findByUserIdOrderByLastListenedAtDesc(user.getId());
         Set<Long> blockedIds = preferences.stream().filter(PlaybackPreference::isDoNotRecommend)
                 .map(item -> item.getSong().getId()).collect(Collectors.toSet());
-        catalog = catalog.stream().filter(song -> !blockedIds.contains(song.getId())).toList();
+        catalog = CatalogIdentity.unique(catalog.stream().filter(song -> !blockedIds.contains(song.getId())).toList());
         Set<Long> libraryIds = user.getDownloadedSongs().stream()
                 .map(Song::getId)
                 .filter(Objects::nonNull)
@@ -260,20 +313,15 @@ public class RecommendationService {
         Map<Long, Double> score = new HashMap<>();
         preferences.forEach(preference -> {
             Song song = preference.getSong();
-            double strength = Math.log1p(preference.getPlayCount()) * 4.0
-                    + Math.log1p(preference.getCompletedCount()) * 5.0
-                    + Math.log1p(preference.getRepeatedCount()) * 8.0
-                    - Math.log1p(preference.getSkippedCount()) * 7.0
-                    + Math.min(4.0, preference.getListenedSeconds() / 1800.0);
-            if (preference.isLiked()) strength += 24.0;
+            double strength = RecommendationRanking.strength(preference, LocalDateTime.now(APP_ZONE));
             final double affinityStrength = strength;
             score.merge(song.getId(), strength * 1.5, Double::sum);
-            artistAffinity.merge(normalizeArtist(song.getArtist()), strength, Double::sum);
-            song.getGenres().forEach(genre -> genreAffinity.merge(normalizeGenre(genre), affinityStrength, Double::sum));
+            artistAffinity.merge(RecommendationRanking.artist(song), strength, Double::sum);
+            song.getGenres().forEach(genre -> genreAffinity.merge(normalizeGenre(genre), Math.max(-2, affinityStrength), Double::sum));
         });
         user.getDownloadedSongs().forEach(song -> {
             score.merge(song.getId(), 5.0, Double::sum);
-            artistAffinity.merge(normalizeArtist(song.getArtist()), 3.0, Double::sum);
+            artistAffinity.merge(RecommendationRanking.artist(song), 3.0, Double::sum);
             song.getGenres().forEach(genre -> genreAffinity.merge(normalizeGenre(genre), 3.0, Double::sum));
         });
 
@@ -286,7 +334,7 @@ public class RecommendationService {
             List<Song> songs = new ArrayList<>(playlist.getSongs());
             long anchorMatches = songs.stream().filter(song -> anchors.contains(song.getId())).count();
             double artistMatches = songs.stream()
-                    .map(song -> artistAffinity.getOrDefault(normalizeArtist(song.getArtist()), 0.0))
+                    .map(song -> artistAffinity.getOrDefault(RecommendationRanking.artist(song), 0.0))
                     .filter(value -> value > 0)
                     .mapToDouble(value -> Math.min(2.0, value / 5.0))
                     .sum();
@@ -309,7 +357,7 @@ public class RecommendationService {
         List<Song> ranked = new ArrayList<>(catalog);
         ranked.sort(Comparator
                 .comparingDouble((Song song) -> {
-                    double affinity = artistAffinity.getOrDefault(normalizeArtist(song.getArtist()), 0.0);
+                    double affinity = artistAffinity.getOrDefault(RecommendationRanking.artist(song), 0.0);
                     double genreScore = song.getGenres().stream()
                             .mapToDouble(genre -> genreAffinity.getOrDefault(normalizeGenre(genre), 0.0))
                             .sum();
@@ -323,7 +371,7 @@ public class RecommendationService {
                 .reversed()
                 .thenComparing(Song::getId));
 
-        List<Song> selected = selectWithArtistDiversity(ranked, DAILY_SIZE);
+        List<Song> selected = RecommendationRanking.diversify(ranked, DAILY_SIZE, 7);
         DailyMix mix = new DailyMix();
         mix.setUser(user);
         mix.setMixDate(today);

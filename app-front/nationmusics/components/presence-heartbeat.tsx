@@ -6,6 +6,7 @@ import { getCurrentJamCode, mediaItemToJamSong } from '../services/jam';
 import { clearFriendPresence, updateFriendPresence } from '../services/friends';
 import { useSyncedActiveMediaItem } from '../services/player-state';
 import { reportPlayback } from '../services/recommendations';
+import { createListeningTracker } from '../services/listening-tracker';
 
 const HEARTBEAT_MS = 20_000;
 
@@ -16,6 +17,7 @@ export function PresenceHeartbeat() {
   const latestRef = useRef({ activeItem, isPlaying, position: progress.position });
   const inFlightRef = useRef(false);
   const recentStartsRef = useRef(new Map<string, number>());
+  const trackerRef = useRef(createListeningTracker());
   const listeningRef = useRef<{
     songId?: number;
     sourceId?: string;
@@ -41,10 +43,10 @@ export function PresenceHeartbeat() {
     const previousIdentity = previous?.sourceId || (previous?.songId ? String(previous.songId) : '');
 
     if (previous && previousIdentity && previousIdentity !== identity) {
-      const listenedSeconds = Math.max(0, Math.round(previous.position));
-      const completed = previous.duration > 0 && previous.position / previous.duration >= 0.8;
+      const listenedSeconds = trackerRef.current.take(previousIdentity) || 0;
+      const completed = previous.duration > 0 && listenedSeconds / previous.duration >= 0.8;
       const skipped = !completed && listenedSeconds <= Math.max(12, previous.duration * 0.12);
-      void reportPlayback({
+      if (listenedSeconds >= 2) void reportPlayback({
         songId: previous.songId,
         sourceId: previous.sourceId,
         listenedSeconds,
@@ -72,7 +74,8 @@ export function PresenceHeartbeat() {
           duration: Math.max(0, Number(progress.duration) || 0),
         }
       : null;
-  }, [activeItem, progress.duration, progress.position]);
+    trackerRef.current.sample(identity, Math.max(0, Number(progress.position) || 0), Boolean(isPlaying));
+  }, [activeItem, progress.duration, progress.position, isPlaying]);
 
   useEffect(() => {
     let mounted = true;

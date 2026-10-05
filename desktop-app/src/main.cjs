@@ -1296,6 +1296,12 @@ ipcMain.handle('recommendations:daily', async () => {
   const mix = await apiRequest('/recommendations/daily');
   return { ...mix, songs: (mix.songs || []).map((song) => normalizeSong(song, false)) };
 });
+ipcMain.handle('recommendations:radio', async (_event, song, excluded = []) => {
+  const exclude = Array.isArray(excluded) ? excluded.slice(-200).join(',') : '';
+  const songs = await apiRequest(`/recommendations/radio?sourceId=${encodeURIComponent(song?.sourceId || '')}&limit=30&exclude=${encodeURIComponent(exclude)}`);
+  return songs.map(song => normalizeSong(song, false));
+});
+ipcMain.handle('recommendations:feedback-state', (_event, song) => apiRequest(`/recommendations/feedback?sourceId=${encodeURIComponent(song?.sourceId || '')}&songId=${Number(song?.serverId || song?.id) || ''}`));
 ipcMain.handle('recommendations:home', async () => {
   const home = await apiRequest('/recommendations/home');
   return {

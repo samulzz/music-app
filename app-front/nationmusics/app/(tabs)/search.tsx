@@ -18,6 +18,7 @@ import type { AlbumSummary, ApiPlaylist, ApiSearchSong, MusicSong, SmartSearchRe
 import { fromApiSearchSong } from '../../types/music';
 import { apiRequest } from '../../services/api';
 import { getSession } from '../../services/auth';
+import { CollectionLoading } from '../../components/collection-loading';
 import { downloadSong } from '../../services/offline-library';
 import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
 
@@ -93,12 +94,14 @@ export default function SearchScreen() {
   const [genreResults, setGenreResults] = useState<SmartSearchResponse['genres']>([]);
   const [correctedQuery, setCorrectedQuery] = useState('');
   const [searching, setSearching] = useState(false);
+  const [resultsForQuery, setResultsForQuery] = useState('');
   const [searchError, setSearchError] = useState('');
   const [username, setUsername] = useState('');
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
   const searchRequestId = useRef(0);
-  const visibleAlbums = query.trim() ? albumResults : featuredAlbums;
+  const resultsReady = resultsForQuery === query.trim();
+  const visibleAlbums = query.trim() ? (resultsReady ? albumResults : []) : featuredAlbums;
 
   useEffect(() => {
     getSession().then((session) => setUsername(session?.username || '')).catch(() => {});
@@ -140,6 +143,7 @@ export default function SearchScreen() {
         ? await apiRequest<ApiSearchSong[]>(`/songs/genre?genre=${encodeURIComponent(genreValue)}`)
         : smart?.songs || [];
       if (requestId !== searchRequestId.current) return;
+      setResultsForQuery(value);
       const songs = data.map(fromApiSearchSong);
       setResults(songs);
       setPlaylistResults(smart?.playlists || []);
@@ -173,6 +177,9 @@ export default function SearchScreen() {
   }, [query, searchCatalog]);
 
   const changeQuery = useCallback((value: string) => {
+    searchRequestId.current += 1;
+    setSearching(Boolean(value.trim()));
+    setSearchError('');
     setSelectedGenre('');
     setQuery(value);
     if (!value.trim()) {
@@ -189,6 +196,8 @@ export default function SearchScreen() {
   }, []);
 
   const chooseGenre = useCallback((value: string) => {
+    searchRequestId.current += 1;
+    setSearching(true);
     setSelectedGenre(value);
     setQuery(value);
   }, []);
@@ -293,7 +302,7 @@ export default function SearchScreen() {
         )}
 
         <FlatList
-          data={results}
+          data={resultsReady ? results : []}
           keyExtractor={(item) => item.sourceId || item.id}
           renderItem={({ item }) => {
             const identity = item.sourceId || item.id;
@@ -320,7 +329,7 @@ export default function SearchScreen() {
           removeClippedSubviews
           ListHeaderComponent={
             <View>
-              {genreResults.length > 0 && <><Text style={styles.genreTitle}>Gêneros</Text>
+              {resultsReady && genreResults.length > 0 && <><Text style={styles.genreTitle}>Gêneros</Text>
               <View style={styles.genreGrid}>
                 {genreResults.map((item) => (
                   <TouchableOpacity
@@ -334,7 +343,7 @@ export default function SearchScreen() {
                   </TouchableOpacity>
                 ))}
               </View></>}
-              {artistResults.length > 0 && (
+              {resultsReady && artistResults.length > 0 && (
                 <View style={styles.playlistSection}>
                   <Text style={styles.genreTitle}>Artistas</Text>
                   {artistResults.map((artist) => (
@@ -358,7 +367,7 @@ export default function SearchScreen() {
                   ))}
                 </View>
               )}
-              {playlistResults.length > 0 && (
+              {resultsReady && playlistResults.length > 0 && (
                 <View style={styles.playlistSection}>
                   <Text style={styles.genreTitle}>Playlists</Text>
                   {playlistResults.map((playlist) => (
@@ -389,13 +398,13 @@ export default function SearchScreen() {
             </View>
           }
           ListEmptyComponent={
-            !searching ? (
+            searching ? <CollectionLoading label="Buscando no catálogo..." /> : resultsReady && (artistResults.length || playlistResults.length || albumResults.length) ? null : (
               <View style={[styles.empty, !query.trim() && styles.emptyCompact]}>
                 <Ionicons name="headset-outline" size={52} color="#444" />
                 <Text style={styles.emptyTitle}>Encontre e baixe suas músicas</Text>
                 <Text style={styles.emptyText}>Toque no resultado para ouvir ou use a seta para salvar offline.</Text>
               </View>
-            ) : null
+            )
           }
         />
       </View>

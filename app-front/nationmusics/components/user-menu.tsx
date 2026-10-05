@@ -222,6 +222,10 @@ export function UserMenu() {
               </View>
             ) : null}
 
+            <TouchableOpacity style={styles.profileRow} onPress={() => { closeMenu(); router.push('/listening-stats'); }}>
+              <Ionicons name="stats-chart" size={22} color="#1db954" />
+              <Text style={styles.username}>Sua cápsula sonora</Text>
+            </TouchableOpacity>
             {showSettings ? (
               <View style={styles.settingsPanel}>
                 <View style={styles.settingsHeader}>

@@ -1277,10 +1277,14 @@ ipcMain.handle('recommendations:listen', async (_event, payload) => {
       sourceId: String(payload?.sourceId || '').trim() || null,
       listenedSeconds: Math.max(0, Math.round(Number(payload?.listenedSeconds) || 0)),
       completed: Boolean(payload?.completed),
+      durationSeconds: Math.max(0, Number(payload?.durationSeconds) || 0),
+      outcome: String(payload?.outcome || ''),
     },
   });
   return true;
 });
+ipcMain.handle('stats:monthly', (_event, month) => apiRequest(`/listening-stats${month ? `?month=${encodeURIComponent(String(month))}` : ''}`));
+ipcMain.handle('stats:record', (_event, payload) => apiRequest('/listening-stats', { method: 'POST', body: payload }));
 ipcMain.handle('recommendations:feedback', async (_event, payload) => {
   await apiRequest('/recommendations/feedback', {
     method: 'PUT',

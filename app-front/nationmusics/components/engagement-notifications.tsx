@@ -8,6 +8,7 @@ import {
   DAILY_MIX_NOTIFICATION_KIND,
   UPDATE_NOTIFICATION_KIND,
   CATALOG_NOTIFICATION_KIND,
+  MONTHLY_CAPSULE_NOTIFICATION_KIND,
   checkDiscoveryNotifications,
   scheduleDailyMixNotification,
 } from '../services/engagement-notifications';
@@ -15,6 +16,10 @@ import { checkForRequiredUpdate, openUpdateDownload } from '../services/update-m
 
 function openNotification(response: Notifications.NotificationResponse | null) {
   const kind = response?.notification.request.content.data?.kind;
+  if (kind === MONTHLY_CAPSULE_NOTIFICATION_KIND) {
+    router.push({ pathname: '/listening-stats', params: { month: String(response?.notification.request.content.data?.month || '') } });
+    return;
+  }
   if (kind === UPDATE_NOTIFICATION_KIND) {
     void checkForRequiredUpdate().then(openUpdateDownload).catch(() => {});
     return;

@@ -19,6 +19,7 @@ import { getDailyMixSongs } from './recommendations';
 import { sortSongsAlphabetically } from './song-order';
 import { getLatestConnectState, markConnectRevisionProcessed, takeOverConnectPlayback } from './connect';
 import type { PlaybackContext } from './connect';
+import { sampleListening, flushPendingListening } from './listening-stats';
 
 let initialized = false;
 const OFFLINE_INDEX_KEY = 'nationmusics.offline-library.v2';
@@ -367,6 +368,16 @@ export function setupMusicPlayer() {
     void recoverActivePlayback();
   });
   initialized = true;
+  const sampleStats = () => {
+    const item = TrackPlayer.getActiveMediaItem();
+    sampleListening(item ? mediaItemSourceId(item) : '', TrackPlayer.getProgress().position, TrackPlayer.isPlaying());
+  };
+  TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, sampleStats);
+  TrackPlayer.addEventListener(Event.PlaybackStateChanged, sampleStats);
+  TrackPlayer.addEventListener(Event.MediaItemTransition, sampleStats);
+  setInterval(sampleStats, 5_000);
+  setInterval(flushPendingListening, 60_000);
+  flushPendingListening();
   const restoreRevision = playbackQueueRevision;
   void restorePersistedPlaybackSession(restoreRevision);
   AppState.addEventListener('change', (nextState) => {

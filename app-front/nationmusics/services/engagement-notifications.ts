@@ -4,11 +4,13 @@ import * as Notifications from 'expo-notifications';
 import { apiRequest } from './api';
 import { getSession } from './auth';
 import { checkForRequiredUpdate } from './update-manager';
+import { getListeningCapsule } from './listening-stats';
 
 const STORAGE_KEY = 'nationmusics.engagement.dailyNotificationId';
 export const DAILY_MIX_NOTIFICATION_KIND = 'daily-mix-ready';
 export const UPDATE_NOTIFICATION_KIND = 'app-update';
 export const CATALOG_NOTIFICATION_KIND = 'catalog-growth';
+export const MONTHLY_CAPSULE_NOTIFICATION_KIND = 'monthly-capsule';
 const CATALOG_BASELINE_KEY = 'nationmusics.notifications.catalogBaseline';
 const UPDATE_SEEN_KEY = 'nationmusics.notifications.updateSeen';
 const LARGE_CATALOG_BATCH = 50;
@@ -83,6 +85,24 @@ export async function checkDiscoveryNotifications() {
   lastDiscoveryCheck = Date.now();
   if (!(await ensurePermission())) return;
   await prepareDiscoveryChannel();
+
+  const previousMonth = new Date();
+  previousMonth.setDate(1); previousMonth.setMonth(previousMonth.getMonth() - 1);
+  const month = `${previousMonth.getFullYear()}-${String(previousMonth.getMonth() + 1).padStart(2, '0')}`;
+  const capsuleKey = `nationmusics.capsule.seen.${session.username}`;
+  if (await AsyncStorage.getItem(capsuleKey) !== month) {
+    try {
+      const capsule = await getListeningCapsule(month);
+      if (capsule.seconds > 0) {
+        await Notifications.scheduleNotificationAsync({ content: {
+          title: 'Sua cápsula sonora chegou 🎧',
+          body: `${capsule.minutes} minutos de música em ${capsule.label}. Confira seus favoritos!`,
+          data: { kind: MONTHLY_CAPSULE_NOTIFICATION_KIND, month },
+        }, trigger: null });
+      }
+      await AsyncStorage.setItem(capsuleKey, month);
+    } catch {}
+  }
 
   const update = await checkForRequiredUpdate();
   if (update.required && update.target) {

@@ -94,6 +94,71 @@ let playbackSessionPersistTimer = null;
 let lastPlaybackStartIdentity = '';
 const recentPlaybackStarts = new Map();
 const lastTelemetryIncidentAt = new Map();
+let statsPrevious = null;
+let statsSending = false;
+let statsRequestId = 0;
+
+function sampleListeningStats(force = false) {
+  const now = Date.now();
+  const song = state.queue[state.queueIndex];
+  const sourceId = song?.sourceId || '';
+  const playing = !audio.paused && !audio.ended && !(state.connectState && !state.connectState.currentDeviceActive);
+  if (statsPrevious && statsPrevious.sourceId === sourceId) {
+    const delta = audio.currentTime - statsPrevious.position;
+    const elapsed = (now - statsPrevious.at) / 1000;
+    if (statsPrevious.playing && delta > 0 && delta <= elapsed + 1.5) statsPrevious.seconds += Math.min(delta, elapsed);
+  }
+  if (statsPrevious && (force || sourceId !== statsPrevious.sourceId || !playing || statsPrevious.seconds >= 30)) {
+    const seconds = Math.min(60, Math.floor(statsPrevious.seconds));
+    if (seconds > 0 && state.session?.username) {
+      const key = `nationmusics.stats.pending.${state.session.username}`;
+      const pending = JSON.parse(localStorage.getItem(key) || '[]');
+      pending.push({ eventId: crypto.randomUUID(), sessionId: statsPrevious.sessionId, sourceId: statsPrevious.sourceId,
+        seconds, occurredAt: statsPrevious.at });
+      localStorage.setItem(key, JSON.stringify(pending));
+      void flushListeningStats();
+    }
+    statsPrevious.seconds -= seconds;
+  }
+  if (!sourceId) { statsPrevious = null; return; }
+  if (!statsPrevious || statsPrevious.sourceId !== sourceId) statsPrevious = { sourceId, position: audio.currentTime,
+    at: now, seconds: 0, sessionId: crypto.randomUUID(), playing };
+  statsPrevious.position = audio.currentTime; statsPrevious.at = now; statsPrevious.playing = playing;
+}
+
+async function flushListeningStats() {
+  if (statsSending || !state.session?.username) return;
+  const username = state.session.username;
+  const key = `nationmusics.stats.pending.${username}`;
+  statsSending = true;
+  try {
+    while (state.session?.username === username) {
+      const pending = JSON.parse(localStorage.getItem(key) || '[]');
+      if (!pending.length) break;
+      await window.nation.reportListeningStats(pending[0]);
+      const latest = JSON.parse(localStorage.getItem(key) || '[]');
+      localStorage.setItem(key, JSON.stringify(latest.filter(item => item.eventId !== pending[0].eventId)));
+    }
+  } catch {} finally { statsSending = false; }
+}
+
+async function renderListeningStats(month = '') {
+  const requestId = ++statsRequestId;
+  state.view = 'stats';
+  const view = $('#content-view');
+  view.innerHTML = '<div class="empty-state"><h2>Carregando sua cápsula...</h2></div>';
+  try {
+    const data = await window.nation.getListeningStats(month);
+    if (state.view !== 'stats' || requestId !== statsRequestId) return;
+    const rank = (title, items) => `<section class="stats-card"><h2>${title}</h2>${items.map((item, index) =>
+      `<div class="stats-row"><b>${index + 1}</b><div><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.subtitle || '')}</small></div><span>${item.minutes || '&lt;1'} min</span></div>`).join('')}</section>`;
+    view.innerHTML = `<div class="stats-capsule"><div class="stats-heading"><h1>Sua cápsula sonora</h1><select id="stats-month">${data.availableMonths.map(value => `<option value="${value}" ${value === data.month ? 'selected' : ''}>${new Date(`${value}-15T12:00:00`).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</option>`).join('')}</select></div>
+      <section class="stats-hero"><small>${data.complete ? 'SEU MÊS EM MÚSICA' : 'MÊS EM ANDAMENTO'}</small><h2>${escapeHtml(data.label)}</h2><strong>${data.minutes.toLocaleString('pt-BR')}</strong><p>minutos ouvindo</p><div>${data.songs} músicas · ${data.artists} artistas · ${data.activeDays} dias ouvindo</div></section>
+      ${data.seconds ? `<div class="stats-grid">${rank('Seus artistas', data.topArtists)}${rank('Músicas em destaque', data.topSongs)}${rank('Seu ritmo: gêneros', data.topGenres)}</div>` : '<section class="stats-card"><h2>Sua história começa com o próximo play</h2><p>Ouça músicas para preencher sua cápsula deste mês.</p></section>'}
+      <p class="stats-note">Só conta o tempo efetivamente reproduzido. O mês encerrado permanece no histórico. Os dados detalhados começam nesta atualização.</p></div>`;
+    $('#stats-month')?.addEventListener('change', event => renderListeningStats(event.target.value));
+  } catch { if (state.view !== 'stats' || requestId !== statsRequestId) return; view.innerHTML = '<div class="empty-state"><h2>Não foi possível carregar sua cápsula</h2><button id="stats-retry">Tentar novamente</button></div>'; $('#stats-retry')?.addEventListener('click', () => renderListeningStats(month)); }
+}
 
 const ICONS = {
   home: '<path d="M3 10.8 12 4l9 6.8" /><path d="M5.5 10v9h13v-9" /><path d="M10 19v-5h4v5" />',
@@ -3209,6 +3274,7 @@ audio.addEventListener('play', () => {
   schedulePersistPlaybackSession();
 });
 audio.addEventListener('pause', () => {
+  sampleListeningStats();
   clearWaitingTelemetryTimer();
   setPlayButtonIcon(false);
   void syncDiscordActivity(true);
@@ -3244,6 +3310,7 @@ audio.addEventListener('playing', clearWaitingTelemetryTimer);
 audio.addEventListener('canplay', clearWaitingTelemetryTimer);
 audio.addEventListener('stalled', () => reportPlaybackTelemetry('STALLED'));
 audio.addEventListener('timeupdate', () => {
+  sampleListeningStats();
   $('#current-time').textContent = formatTime(audio.currentTime);
   $('#duration').textContent = formatTime(audio.duration);
   $('#seek').value = Number.isFinite(audio.duration) && audio.duration > 0
@@ -3255,6 +3322,7 @@ audio.addEventListener('timeupdate', () => {
 });
 
 window.addEventListener('beforeunload', () => {
+  sampleListeningStats(true);
   persistPlaybackSession();
   void window.nation.clearDiscordActivity();
   void window.nation.clearFriendPresence();
@@ -3262,6 +3330,8 @@ window.addEventListener('beforeunload', () => {
 });
 
 window.addEventListener('DOMContentLoaded', async () => {
+  $('#listening-stats-button')?.addEventListener('click', () => renderListeningStats());
+  setInterval(() => { sampleListeningStats(); void flushListeningStats(); }, 5_000);
   renderIconSlots();
   setPlayButtonIcon(false);
   $('#player-cover').innerHTML = icon('music');

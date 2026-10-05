@@ -120,6 +120,8 @@ public class PlaylistAdminService {
         }
 
         String sourceId = safeTrim(request.getSourceId());
+        if (request.getExpectedDurationMs() != null && (request.getExpectedDurationMs() < 1000 || request.getExpectedDurationMs() > 3_600_000))
+            throw new IllegalArgumentException("Duração de referência inválida.");
         String title = safeTrim(request.getTitle());
         String artist = safeTrim(request.getArtist());
 
@@ -152,6 +154,7 @@ public class PlaylistAdminService {
         if (uri != null) song.setUri(uri);
 
         if (sourceId != null) song.setSourceId(sourceId);
+        if (request.getExpectedDurationMs() != null) song.setExpectedDurationMs(request.getExpectedDurationMs());
 
         if (request.getGenres() != null) {
             Set<String> genres = new LinkedHashSet<>(song.getGenres());

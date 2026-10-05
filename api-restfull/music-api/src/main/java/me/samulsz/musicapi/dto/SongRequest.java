@@ -11,6 +11,9 @@ public class SongRequest {
     private String coverUrl;
     private String sourceId;
     private Set<String> genres;
+    private Integer expectedDurationMs;
+    public Integer getExpectedDurationMs() { return expectedDurationMs; }
+    public void setExpectedDurationMs(Integer value) { this.expectedDurationMs = value; }
 
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }

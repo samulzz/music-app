@@ -18,12 +18,13 @@ import { type MediaItem } from '@rntp/player';
 import GlobalMiniPlayer from '../../components/global-mini-player';
 import type { ApiLibrarySong, MusicSong } from '../../types/music';
 import { fromApiLibrarySong } from '../../types/music';
-import { apiRequest } from '../../services/api';
+import { apiRequest, accountCacheKey, deviceIsOffline } from '../../services/api';
 import {
   canUseNativeBackgroundDownloads,
   downloadSong,
   downloadSongsWithNativeService,
   mergeWithOfflineLibrary,
+  getOfflineLibrary,
 } from '../../services/offline-library';
 import { ensureSourceId } from '../../services/music-resolver';
 import { addSongsToPlaybackQueue, playSongQueue, setShuffleEnabled, subscribeShuffleEnabled } from '../../services/player';
@@ -180,6 +181,7 @@ export default function PlaylistDetailsScreen() {
   const isPersonal = playlistKind === 'personal';
   const isLibrary = playlistKind === 'library';
   const isDaily = playlistKind === 'daily';
+  const isOfflineLibrary = playlistKind === 'offline';
   const selectionMode = selectedIds.size > 0;
   const title = useMemo(
     () => typeof params.title === 'string' && params.title.trim() ? params.title : 'Playlist',
@@ -190,7 +192,7 @@ export default function PlaylistDetailsScreen() {
   const bottomInset = Math.max(insets.bottom, 0);
 
   const readCache = useCallback(async (): Promise<PlaylistSongsCache> => {
-    const raw = await AsyncStorage.getItem(cacheKey) || await AsyncStorage.getItem(legacyCacheKey);
+    const raw = await AsyncStorage.getItem(await accountCacheKey(cacheKey));
     if (!raw) return { savedAt: 0, songs: [] };
     try {
       const parsed = JSON.parse(raw) as PlaylistSongsCache | MusicSong[];
@@ -208,13 +210,17 @@ export default function PlaylistDetailsScreen() {
     const savedAt = Date.now();
     lastRefreshAtRef.current = savedAt;
     await AsyncStorage.setItem(
-      cacheKey,
+      await accountCacheKey(cacheKey),
       JSON.stringify({ savedAt, songs: next.map(({ localUri, ...song }) => song) })
     );
   }, [cacheKey]);
 
   const loadSongs = useCallback(async (showSpinner = true, force = false) => {
     if (!playlistId) return;
+    if (isOfflineLibrary) {
+      setSongs(sortSongsAlphabetically(await getOfflineLibrary({ validateFiles: true })));
+      setOfflineMode(true); setLoading(false); return;
+    }
     const cacheIsFresh = lastRefreshAtRef.current > 0
       && Date.now() - lastRefreshAtRef.current < PLAYLIST_CACHE_TTL_MS;
 
@@ -253,7 +259,7 @@ export default function PlaylistDetailsScreen() {
       const merged = await mergeWithOfflineLibrary(data.map(fromApiLibrarySong));
       const next = isDaily ? merged : sortSongsAlphabetically(merged);
       setSongs(next);
-      setOfflineMode(false);
+      setOfflineMode(await deviceIsOffline());
       await writeCache(next);
     } catch {
       setOfflineMode(true);
@@ -267,7 +273,7 @@ export default function PlaylistDetailsScreen() {
 
     refreshInFlightRef.current = operation;
     return operation;
-  }, [isDaily, isLibrary, isPersonal, playlistId, readCache, writeCache]);
+  }, [isDaily, isLibrary, isPersonal, isOfflineLibrary, playlistId, readCache, writeCache]);
 
   const hydrateSongs = useCallback(async () => {
     if (!playlistId) return;
@@ -314,13 +320,14 @@ export default function PlaylistDetailsScreen() {
   useEffect(() => subscribeShuffleEnabled(setShuffle), []);
 
   const play = useCallback(async (song: MusicSong) => {
-    const index = songs.findIndex((candidate) => identity(candidate) === identity(song));
+    const queue = offlineMode ? songs.filter(candidate => candidate.localUri) : songs;
+    const index = queue.findIndex((candidate) => identity(candidate) === identity(song));
     try {
-      await playSongQueue(songs, index, 'playlist', { type: playlistKind, id: playlistId, name: title });
+      await playSongQueue(queue, index, 'playlist', { type: playlistKind, id: playlistId, name: title });
     } catch (error) {
       Alert.alert('Não foi possível reproduzir', error instanceof Error ? error.message : 'Tente novamente.');
     }
-  }, [playlistId, playlistKind, songs, title]);
+  }, [playlistId, playlistKind, songs, title, offlineMode]);
 
   const playAll = async () => {
     const playable = offlineMode

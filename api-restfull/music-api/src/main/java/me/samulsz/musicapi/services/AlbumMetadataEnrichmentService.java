@@ -69,11 +69,12 @@ public class AlbumMetadataEnrichmentService {
         for (JsonNode item : data) {
             String candidateTitle = comparableTitle(item.path("title").asText(""));
             String candidateArtist = normalize(item.path("artist").path("name").asText(""));
-            if (!sameEnough(expectedTitle, candidateTitle) || !sameEnough(expectedArtist, candidateArtist)) continue;
+            if (expectedTitle.isBlank() || !expectedTitle.equals(candidateTitle) || expectedArtist.isBlank() || !expectedArtist.equals(candidateArtist)) continue;
             JsonNode album = item.path("album");
             String albumName = album.path("title").asText("").trim();
             if (albumName.isBlank()) continue;
             song.setAlbum(albumName);
+            if (item.path("duration").asInt(0) > 0) song.setExpectedDurationMs(item.path("duration").asInt() * 1000);
             song.setAlbumArtist(item.path("artist").path("name").asText(primaryArtist(song.getArtist())).trim());
             String cover = album.path("cover_xl").asText(album.path("cover_big").asText(""));
             if (!cover.isBlank()) song.setCoverUrl(cover);
@@ -88,8 +89,7 @@ public class AlbumMetadataEnrichmentService {
     }
 
     private String comparableTitle(String value) {
-        return normalize(value).replaceAll("\\b(?:ao vivo|live|official|oficial|audio|video|remaster(?:ed)?)\\b", " ")
-                .replaceAll("\\s+", " ").trim();
+        return CatalogIdentity.title(value);
     }
 
     private String primaryArtist(String value) {

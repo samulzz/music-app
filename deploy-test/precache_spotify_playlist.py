@@ -265,6 +265,19 @@ def download_track(yt_dlp, ffmpeg_path, output_dir, track):
             last_error = f"Arquivo MP3 não encontrado para {video_id}"
             continue
 
+        probe_binary = Path(ffmpeg_path) / ("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        probe = subprocess.run([str(probe_binary), "-v", "error", "-show_entries", "format=duration", "-of", "json", str(audio_path)],
+                               capture_output=True, text=True, timeout=30)
+        try:
+            actual_duration = float(json.loads(probe.stdout)["format"]["duration"])
+        except (ValueError, KeyError, TypeError):
+            last_error = f"Áudio inválido ou incompleto: {video_id}"
+            continue
+        expected_duration = int(track.get("durationMs") or 0) / 1000
+        if probe.returncode != 0 or actual_duration <= 0 or (expected_duration and abs(actual_duration - expected_duration) > max(18, expected_duration * 0.12)):
+            last_error = f"Duração incompatível: {actual_duration:.0f}s, esperado {expected_duration:.0f}s"
+            continue
+
         return {
             "spotifyId": track["spotifyId"],
             "sourceId": video_id,
@@ -272,6 +285,7 @@ def download_track(yt_dlp, ffmpeg_path, output_dir, track):
             "artist": track["artist"],
             "album": track.get("album") or "",
             "albumArtist": track.get("albumArtist") or "",
+            "durationMs": track.get("durationMs") or 0,
             "coverUrl": thumbnail,
             "fileName": audio_path.name,
             "size": audio_path.stat().st_size,

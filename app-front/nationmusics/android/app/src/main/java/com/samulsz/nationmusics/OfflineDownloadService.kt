@@ -166,6 +166,18 @@ class OfflineDownloadService : Service() {
   }
 
   private fun downloadSong(taskId: String, song: JSONObject, headers: JSONObject, index: Int, total: Int): File {
+    var failure: Exception? = null
+    repeat(3) { attempt ->
+      try { return downloadSongAttempt(taskId, song, headers, index, total) }
+      catch (error: Exception) {
+        failure = error
+        if (attempt < 2) Thread.sleep(1000L * (attempt + 1))
+      }
+    }
+    throw failure ?: IllegalStateException("Não foi possível baixar.")
+  }
+
+  private fun downloadSongAttempt(taskId: String, song: JSONObject, headers: JSONObject, index: Int, total: Int): File {
     val url = song.getString("url")
     val title = song.optString("title", "Música")
     val fileName = sanitizeFileName(song.optString("fileName", song.optString("sourceId", title)))
@@ -174,14 +186,16 @@ class OfflineDownloadService : Service() {
 
     val destination = File(outputDirectory, "$fileName.mp3")
     val partial = File(outputDirectory, "$fileName.mp3.part")
-    if (partial.exists()) partial.delete()
+    val resume = File(outputDirectory, "$fileName.mp3.part.resume")
+    val saved = try { JSONObject(resume.readText()) } catch (_: Exception) { JSONObject() }
+    var offset = if (saved.optString("url") == url && saved.optString("validator").isNotBlank()) partial.length() else 0L
 
     updateProgress(taskId, song, index, total, 0, title, true)
 
     val connection = (URL(url).openConnection() as HttpURLConnection).apply {
       instanceFollowRedirects = true
       connectTimeout = 30_000
-      readTimeout = 10 * 60_000
+      readTimeout = 30_000
       val keys = headers.keys()
       while (keys.hasNext()) {
         val key = keys.next()
@@ -189,22 +203,36 @@ class OfflineDownloadService : Service() {
         if (value.isNotBlank()) setRequestProperty(key, value)
       }
       setRequestProperty("Accept", "audio/mpeg,audio/*")
+      if (offset > 0) {
+        setRequestProperty("Range", "bytes=$offset-")
+        setRequestProperty("If-Range", saved.getString("validator"))
+      }
     }
 
     try {
       val status = connection.responseCode
+      if (status == 416) resume.delete()
       if (status !in 200..299) {
         val details = connection.errorStream?.bufferedReader()?.use { it.readText() }?.take(400)
         throw IllegalStateException(details ?: "Servidor respondeu $status.")
       }
 
-      val totalBytes = connection.contentLengthLong
-      var readBytes = 0L
+      val range = Regex("bytes (\\d+)-(\\d+)/(\\d+)").matchEntire(connection.getHeaderField("Content-Range") ?: "")
+      val append = offset > 0 && status == 206 && range?.groupValues?.get(1)?.toLongOrNull() == offset
+      if (status == 206 && !append) {
+        resume.delete()
+        throw IllegalStateException("Resposta parcial inválida. Tente novamente.")
+      }
+      if (!append) offset = 0L
+      val totalBytes = if (append) range!!.groupValues[3].toLong() else connection.contentLengthLong
+      val validator = connection.getHeaderField("ETag") ?: connection.getHeaderField("Last-Modified") ?: ""
+      resume.writeText(JSONObject().put("url", url).put("validator", validator).toString())
+      var readBytes = offset
       var lastNotificationAt = 0L
       val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
 
       connection.inputStream.use { input ->
-        FileOutputStream(partial).use { output ->
+        FileOutputStream(partial, append).use { output ->
           while (true) {
             val read = input.read(buffer)
             if (read < 0) break
@@ -229,7 +257,16 @@ class OfflineDownloadService : Service() {
         throw IllegalStateException("Download incompleto. Tente novamente.")
       }
       if (readBytes < MIN_OFFLINE_AUDIO_BYTES) {
+        resume.delete()
         throw IllegalStateException("Arquivo de audio incompleto. Tente novamente.")
+      }
+      val audioHeader = ByteArray(3)
+      partial.inputStream().use { it.read(audioHeader) }
+      val id3 = String(audioHeader, Charsets.US_ASCII) == "ID3"
+      val mpeg = (audioHeader[0].toInt() and 0xff) == 0xff && (audioHeader[1].toInt() and 0xe0) == 0xe0
+      if (!id3 && !mpeg) {
+        resume.delete()
+        throw IllegalStateException("O arquivo recebido não é áudio MP3 válido.")
       }
 
       if (destination.exists()) destination.delete()
@@ -243,10 +280,11 @@ class OfflineDownloadService : Service() {
       }
 
       updateProgress(taskId, song, index + 1, total, 100, title, false)
+      resume.delete()
       return destination
     } finally {
       connection.disconnect()
-      if (partial.exists()) partial.delete()
+      // Keep an interrupted transfer for the next attempt or app launch.
     }
   }
 

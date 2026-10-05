@@ -698,6 +698,7 @@ def import_songs_to_catalog(
             "coverUrl": entry.get("coverUrl") or "",
             "sourceId": entry["sourceId"],
             "genres": entry.get("genres") or [],
+            "expectedDurationMs": int(entry.get("durationMs") or 0) or None,
         }
         song = request_json(
             config.api_base,

@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-04T22:55:00-03:00",
+  "generatedAt": "2026-10-05T00:15:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.36",
-    "versionCode": 38,
-    "minimumVersion": "1.1.36",
-    "minimumVersionCode": 38,
-    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.36.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.36.apk",
+    "version": "1.1.37",
+    "versionCode": 39,
+    "minimumVersion": "1.1.37",
+    "minimumVersionCode": 39,
+    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.37.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.37.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Sua cápsula sonora: minutos, músicas, artistas e gêneros mais ouvidos por mês."
+    "releaseNotes": "Player mais estável, catálogo organizado e biblioteca offline com downloads retomáveis."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.40",
-    "minimumVersion": "1.2.40",
-    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.40.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.40.exe",
+    "version": "1.2.41",
+    "minimumVersion": "1.2.41",
+    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.41.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.41.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Sua cápsula sonora: minutos, músicas, artistas e gêneros mais ouvidos por mês."
+    "releaseNotes": "Player mais estável, catálogo organizado e biblioteca offline com downloads retomáveis."
   }
 }

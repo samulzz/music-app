@@ -12,12 +12,12 @@ import Constants from 'expo-constants';
 import { AppState, Platform } from 'react-native';
 
 import type { MusicSong } from '../types/music';
-import { apiRequest, getMediaHeaders } from './api';
+import { apiRequest, getMediaHeaders, deviceIsOffline } from './api';
 import { musicDownloadUrl, musicPreparePath } from './config';
-import { mergeWithOfflineLibrary, removeOfflineSong } from './offline-library';
+import { mergeWithOfflineLibrary } from './offline-library';
 import { getDailyMixSongs } from './recommendations';
 import { sortSongsAlphabetically } from './song-order';
-import { getLatestConnectState, markConnectRevisionProcessed, takeOverConnectPlayback } from './connect';
+import { getLatestConnectState, markConnectRevisionProcessed, takeOverConnectPlayback, publishConnectState } from './connect';
 import type { PlaybackContext } from './connect';
 import { sampleListening, flushPendingListening } from './listening-stats';
 
@@ -471,6 +471,7 @@ async function seedRecommendationsForSingleSong(anchor: MusicSong, expectedRevis
 async function recoverActivePlayback() {
   if (playbackRecoveryInFlight) return playbackRecoveryInFlight;
   playbackRecoveryInFlight = (async () => {
+    const revision = playbackQueueRevision;
     const index = TrackPlayer.getActiveMediaItemIndex();
     const queue = TrackPlayer.getQueue();
     if (index === null || index < 0 || index >= queue.length) return;
@@ -482,11 +483,13 @@ async function recoverActivePlayback() {
     lastRecoveryAt.set(sourceId, Date.now());
     const position = TrackPlayer.getProgress().position;
     const headers = await getMediaHeaders();
+    const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
+    const offlineLocal = extras.localUri && await deviceIsOffline() ? String(extras.localUri) : '';
+    if (revision !== playbackQueueRevision || mediaItemSourceId(TrackPlayer.getActiveMediaItem()) !== sourceId) return;
     const freshUrl = musicDownloadUrl(sourceId, String(item.title || 'Música'), String(item.artist || ''));
     const refreshed = [...queue];
-    const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
-    if (extras.localUri) await removeOfflineSong(telemetrySong(item)).catch(() => {});
-    refreshed[index] = { ...item, url: { uri: freshUrl, headers }, extras: { ...extras, localUri: undefined } };
+    // A transient playback error must not delete a user's explicit download.
+    refreshed[index] = { ...item, url: offlineLocal || { uri: freshUrl, headers }, extras: { ...extras, localUri: offlineLocal || undefined } };
     playbackQueueRevision += 1;
     TrackPlayer.setMediaItems(refreshed, index);
     if (position > 0) TrackPlayer.seekTo(position);
@@ -540,7 +543,8 @@ async function continueWithDailyRecommendations(expectedRevision: number) {
   recommendationAppendInFlight = (async () => {
     try {
       const endedQueue = TrackPlayer.getQueue();
-      const dailySongs = await mergeWithOfflineLibrary(await getDailyMixSongs());
+      const candidates = await mergeWithOfflineLibrary(await getDailyMixSongs());
+      const dailySongs = await deviceIsOffline() ? candidates.filter(song => song.localUri) : candidates;
       if (expectedRevision !== playbackQueueRevision || TrackPlayer.getPlaybackState() !== PlaybackState.Ended) return;
       const existing = new Set(
         endedQueue.map((item) => mediaItemSourceId(item) || String(item.mediaId || ''))
@@ -591,19 +595,26 @@ export async function playSongQueue(
   context: PlaybackContext | null = null,
 ) {
   setupMusicPlayer();
+  const requestRevision = ++playbackQueueRevision;
+  const requested = songs[requestedIndex];
+  const requestedIdentity = requested?.sourceId || requested?.id;
+  if (await deviceIsOffline()) publishConnectState(null);
   if (getLatestConnectState() && !getLatestConnectState()?.currentDeviceActive) {
     try {
       const state = await takeOverConnectPlayback();
       markConnectRevisionProcessed(state.commandRevision);
     } catch {}
   }
-  const playableSongs = await mergeWithOfflineLibrary(songs);
+  const mergedSongs = await mergeWithOfflineLibrary(songs);
+  const offline = await deviceIsOffline();
+  const playableSongs = offline ? mergedSongs.filter(song => song.localUri) : mergedSongs;
 
   const needsNetwork = playableSongs.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
   let headers: Record<string, string> | undefined;
   if (needsNetwork) {
     headers = await getMediaHeaders();
   }
+  if (requestRevision !== playbackQueueRevision) return TrackPlayer.getActiveMediaItemIndex() ?? 0;
 
   const queue: MediaItem[] = [];
   let queueIndex = -1;
@@ -612,7 +623,7 @@ export async function playSongQueue(
     if (!song.localUri && !headers) return;
     const item = toMediaItem(song, headers, origin);
     if (!item) return;
-    if (index === requestedIndex) queueIndex = queue.length;
+    if ((song.sourceId || song.id) === requestedIdentity) queueIndex = queue.length;
     item.extras = { ...item.extras, queueSequence: index };
     queue.push(item);
   });
@@ -621,7 +632,6 @@ export async function playSongQueue(
     throw new Error('Esta música não está disponível sem internet. Baixe-a antes de sair da rede.');
   }
 
-  playbackQueueRevision += 1;
   playbackContext = context;
   const ordered = lastShuffleEnabled
     ? [queue[queueIndex], ...shuffled(queue.filter((_item, index) => index !== queueIndex))]
@@ -631,7 +641,7 @@ export async function playSongQueue(
   TrackPlayer.play();
   prefetchNextInQueue(startIndex);
   schedulePersistPlaybackSession();
-  if (queue.length === 1) void seedRecommendationsForSingleSong(playableSongs[requestedIndex], playbackQueueRevision);
+  if (queue.length === 1 && !offline && requested) void seedRecommendationsForSingleSong(requested, playbackQueueRevision);
   return startIndex;
 }
 
@@ -718,6 +728,7 @@ export function playQueueIndex(index: number) {
 export async function togglePlayback() {
   setupMusicPlayer();
   if (TrackPlayer.isPlaying()) {
+    playbackQueueRevision += 1;
     TrackPlayer.pause();
   } else if (TrackPlayer.getPlaybackState() === PlaybackState.Error) {
     await recoverActivePlayback();

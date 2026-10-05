@@ -54,11 +54,10 @@ public class CatalogDiscoveryService {
                         .thenComparing(item -> normalize(item.song().getTitle())))
                 .toList();
 
-        List<Song> songResults = rankedSongs.stream()
+        List<Song> songResults = CatalogIdentity.unique(rankedSongs.stream()
                 .map(ScoredSong::song)
                 .filter(song -> music.hasPrecachedAudio(song.getSourceId()))
-                .limit(50)
-                .toList();
+                .toList()).stream().limit(50).toList();
 
         Map<String, ArtistAccumulator> artistMap = new LinkedHashMap<>();
         rankedSongs.stream().limit(250).forEach(item -> splitArtists(item.song().getArtist()).forEach(name -> {
@@ -148,9 +147,9 @@ public class CatalogDiscoveryService {
         } else {
             stream = songs.findCatalogSongsByAlbum(Objects.toString(name, "").trim(), Objects.toString(artist, "").trim()).stream();
         }
-        return stream.filter(song -> music.hasPrecachedAudio(song.getSourceId()))
+        return CatalogIdentity.unique(stream.filter(song -> music.hasPrecachedAudio(song.getSourceId()))
                 .sorted(Comparator.comparing(song -> normalize(song.getTitle())))
-                .toList();
+                .toList());
     }
 
     private int songScore(Song song, String query) {

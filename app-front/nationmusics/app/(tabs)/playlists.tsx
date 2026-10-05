@@ -18,7 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import type { ApiPlaylist } from '../../types/music';
-import { apiRequest } from '../../services/api';
+import { apiRequest, accountCacheKey } from '../../services/api';
 import { getDailyMix } from '../../services/recommendations';
 
 const CACHE_KEY = 'nationmusics.personal-playlists.v1';
@@ -80,7 +80,7 @@ export default function PersonalPlaylistsScreen() {
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
 
   const readCache = useCallback(async (): Promise<PersonalPlaylistsCache> => {
-    const raw = await AsyncStorage.getItem(CACHE_KEY);
+    const raw = await AsyncStorage.getItem(await accountCacheKey(CACHE_KEY));
     if (!raw) return { savedAt: 0, playlists: [] };
     try {
       const parsed = JSON.parse(raw) as PersonalPlaylistsCache;
@@ -96,7 +96,7 @@ export default function PersonalPlaylistsScreen() {
   const writeCache = useCallback(async (next: ApiPlaylist[]) => {
     const savedAt = Date.now();
     lastRefreshAtRef.current = savedAt;
-    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt, playlists: next }));
+    await AsyncStorage.setItem(await accountCacheKey(CACHE_KEY), JSON.stringify({ savedAt, playlists: next }));
   }, []);
 
   const loadPlaylists = useCallback(async (showSpinner = true, force = false) => {
@@ -286,6 +286,10 @@ export default function PersonalPlaylistsScreen() {
             contentContainerStyle={styles.list}
             ListHeaderComponent={
               <View>
+                <TouchableOpacity style={styles.card} onPress={() => router.push({ pathname: '/playlist/[id]', params: { id: 'offline', title: 'Baixadas neste celular', kind: 'offline' } })}>
+                  <Ionicons name="download-outline" size={25} color="#1db954" />
+                  <Text style={styles.title}>Baixadas neste celular</Text>
+                </TouchableOpacity>
                 <TouchableOpacity style={styles.libraryCard} onPress={openLibrary} activeOpacity={0.86}>
                   <View style={styles.libraryCover}>
                     <Ionicons name="heart" size={30} color="#fff" />

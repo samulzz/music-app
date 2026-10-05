@@ -5,6 +5,7 @@ import {
   getProcessedConnectRevision,
   markConnectRevisionProcessed,
   sendConnectHeartbeat,
+  publishConnectState,
   type ConnectSong,
   type ConnectState,
 } from '../services/connect';
@@ -68,6 +69,7 @@ export function ConnectSync() {
         if (!state.currentDeviceActive && isPlayerPlayingSafely()) TrackPlayer.pause();
         await applyCommand(state);
       } catch {
+        publishConnectState(null);
         // A reprodução local continua normalmente quando a conexão estiver offline.
       } finally {
         busy = false;

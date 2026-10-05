@@ -2,7 +2,8 @@ const { app, BrowserWindow, clipboard, ipcMain, protocol, shell } = require('ele
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { randomUUID, createHash } = require('node:crypto');
+const { downloadAudio } = require('./resumable-download.cjs');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const { Readable } = require('node:stream');
@@ -39,6 +40,34 @@ let audioCacheServerPort = 0;
 const audioCacheServerToken = randomUUID();
 const activePreparations = new Map();
 const activeAudioCacheDownloads = new Map();
+const protectedAudio = new Map();
+let offlineIndexWrites = Promise.resolve();
+
+async function pinOfflineSong(song) {
+  const owner = await getSession();
+  if (!owner?.username) throw new Error('Entre na sua conta para baixar.');
+  offlineIndexWrites = offlineIndexWrites.catch(() => {}).then(async () => {
+    const index = await readJson(dataPath('offline-downloads.json'), {});
+    const rows = index[owner.username] || [];
+    index[owner.username] = [...rows.filter(item => item.sourceId !== song.sourceId), song];
+    await writeJson(dataPath('offline-downloads.json'), index);
+  });
+  await offlineIndexWrites;
+}
+
+async function offlineSongs() {
+  const owner = await getSession();
+  const index = await readJson(dataPath('offline-downloads.json'), {});
+  const rows = index[owner?.username] || [];
+  const available = [];
+  for (const row of rows) if (await hasUsableCachedAudio(cachedAudioFilePath(row.sourceId))) available.push(row);
+  return available;
+}
+
+async function pinnedSources() {
+  const index = await readJson(dataPath('offline-downloads.json'), {});
+  return new Set(Object.values(index).flat().map(song => song.sourceId));
+}
 let discordClient = null;
 let discordClientId = '';
 let discordConnecting = null;
@@ -641,6 +670,8 @@ function normalizeSong(song, saved = false) {
     artist: String(song.artist ?? song.artista ?? 'Artista desconhecido'),
     album: String(song.album ?? ''),
     albumArtist: String(song.albumArtist ?? ''),
+    genres: Array.isArray(song.genres) ? song.genres : [],
+    downloaded: Boolean(song.downloaded),
     artworkUrl: song.artworkUrl ?? song.coverUrl ?? song.capa ?? '',
     serverId: Number.isFinite(Number(song.id)) ? Number(song.id) : undefined,
     saved,
@@ -649,6 +680,8 @@ function normalizeSong(song, saved = false) {
 
 async function apiRequest(endpoint, options = {}) {
   const session = await getSession();
+  const cacheable = (!options.method || options.method === 'GET') && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(home|daily))(?:[/?]|$)/.test(endpoint);
+  const cachePath = cacheable ? dataPath(`metadata/${createHash('sha256').update(`${session?.username || 'public'}:${endpoint}`).digest('hex')}.json`) : '';
   const headers = {
     Accept: 'application/json',
     'X-API-KEY': API_KEY,
@@ -664,8 +697,15 @@ async function apiRequest(endpoint, options = {}) {
       method: options.method || 'GET',
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
+      signal: AbortSignal.timeout(cacheable ? 6000 : 20_000),
     });
   } catch {
+    if (cachePath) {
+      const cached = await readJson(cachePath, null);
+      if (cached) return cached.data;
+      if (endpoint === '/songs/my-library') return offlineSongs();
+      if (endpoint === '/playlists/personal') return [];
+    }
     throw new Error('Não foi possível conectar ao servidor.');
   }
 
@@ -676,6 +716,10 @@ async function apiRequest(endpoint, options = {}) {
   } catch {}
 
   if (!response.ok) {
+    if (cachePath && response.status >= 500) {
+      const cached = await readJson(cachePath, null);
+      if (cached) return cached.data;
+    }
     const message = body && typeof body === 'object' && body.message
       ? body.message
       : String(body || '').trim();
@@ -687,6 +731,7 @@ async function apiRequest(endpoint, options = {}) {
 
     throw new Error(message || `Erro do servidor (${response.status}).`);
   }
+  if (cachePath) await writeJson(cachePath, { data: body, savedAt: Date.now() }).catch(() => {});
   return body;
 }
 
@@ -769,9 +814,13 @@ async function trimDesktopAudioCache() {
   }
 
   const limitBytes = await getDesktopAudioCacheLimit();
-  let total = files.reduce((sum, file) => sum + file.size, 0);
+  const pinned = await pinnedSources();
+  const protectedPaths = new Set([...pinned, ...[...protectedAudio].filter(([, at]) => Date.now() - at < 5 * 60_000).map(([id]) => id)].map(cachedAudioFilePath));
+  const automatic = files.filter(file => !protectedPaths.has(file.filePath));
+  let total = automatic.reduce((sum, file) => sum + file.size, 0);
   files.sort((left, right) => left.mtimeMs - right.mtimeMs);
   for (const file of files) {
+    if (protectedPaths.has(file.filePath)) continue;
     if (total <= limitBytes) break;
     try {
       await fsp.unlink(file.filePath);
@@ -793,50 +842,17 @@ async function ensureDesktopAudioCached(song) {
 
   const operation = (async () => {
     await fsp.mkdir(audioCacheDirectory(), { recursive: true });
-    const temporary = `${filePath}.${process.pid}.part`;
     const session = await getSession();
     if (!session?.token) throw new Error('Sessao expirada.');
-
-    try {
-      await fsp.rm(temporary, { force: true });
-      const response = await fetch(
+    await downloadAudio(
         `${API_BASE_URL}/musicas/baixar/${encodeURIComponent(sourceId)}?titulo=${encodeURIComponent(song.title || 'Musica')}&artista=${encodeURIComponent(song.artist || '')}`,
-        {
-          headers: {
+        filePath, {
             Accept: 'audio/mpeg',
             'X-API-KEY': API_KEY,
             Authorization: `Bearer ${session.token}`,
-          },
-        }
-      );
-      if (!response.ok) {
-        const details = await response.text().catch(() => '');
-        throw new Error(details.trim() || `Download falhou (${response.status}).`);
-      }
-
-      if (response.body) {
-        await pipeline(Readable.fromWeb(response.body), fs.createWriteStream(temporary));
-      } else {
-        await fsp.writeFile(temporary, Buffer.from(await response.arrayBuffer()));
-      }
-
-      const stat = await fsp.stat(temporary);
-      if (!stat.isFile() || stat.size < MIN_DESKTOP_AUDIO_BYTES) {
-        throw new Error('Arquivo de audio incompleto.');
-      }
-      const expectedBytes = Number(response.headers.get('content-length'));
-      if (Number.isFinite(expectedBytes) && expectedBytes > 0 && stat.size !== expectedBytes) {
-        throw new Error(`Arquivo de audio incompleto (${stat.size}/${expectedBytes} bytes).`);
-      }
-
-      await fsp.rm(filePath, { force: true });
-      await fsp.rename(temporary, filePath);
-      void trimDesktopAudioCache();
-      return filePath;
-    } catch (error) {
-      await fsp.rm(temporary, { force: true }).catch(() => {});
-      throw error;
-    }
+        }, hasUsableCachedAudio);
+    void trimDesktopAudioCache();
+    return filePath;
   })().finally(() => activeAudioCacheDownloads.delete(sourceId));
 
   activeAudioCacheDownloads.set(sourceId, operation);
@@ -917,6 +933,7 @@ async function serveCachedAudio(request, response) {
     }
 
     const sourceId = decodeURIComponent(parts[1]);
+    protectedAudio.set(sourceId, Date.now());
     const filePath = cachedAudioFilePath(sourceId);
     if (!(await hasUsableCachedAudio(filePath))) {
       response.writeHead(404).end();
@@ -1115,6 +1132,8 @@ ipcMain.handle('catalog:album-songs', async (_event, album) => {
 ipcMain.handle('music:prepare-stream', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) throw new Error('Esta música não possui uma origem válida.');
+  protectedAudio.set(song.sourceId, Date.now());
+  if (await hasUsableCachedAudio(cachedAudioFilePath(song.sourceId))) return streamUrl(song);
   await waitUntilPrepared(song);
   // Dá uma pequena vantagem ao cache local, mas não prende o Play esperando o
   // arquivo inteiro. Se ainda estiver baixando, o protocolo autenticado começa
@@ -1134,13 +1153,20 @@ ipcMain.handle('music:invalidate-stream', async (_event, rawSong) => {
 ipcMain.handle('music:download', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) throw new Error('Esta música não possui uma origem válida.');
-  await waitUntilPrepared(song);
-  await ensureDesktopAudioCached(song);
+  protectedAudio.set(song.sourceId, Date.now());
+  if (!(await hasUsableCachedAudio(cachedAudioFilePath(song.sourceId)))) {
+    await waitUntilPrepared(song);
+    await ensureDesktopAudioCached(song);
+  }
+  await pinOfflineSong(song);
   return true;
 });
 ipcMain.handle('music:is-downloaded', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) return false;
+  const owner = await getSession();
+  const index = await readJson(dataPath('offline-downloads.json'), {});
+  if (!(index[owner?.username] || []).some(item => item.sourceId === song.sourceId)) return false;
   return hasUsableCachedAudio(cachedAudioFilePath(song.sourceId));
 });
 ipcMain.handle('music:cache-stats', async () => {
@@ -1152,7 +1178,7 @@ ipcMain.handle('music:cache-stats', async () => {
     if (!entry.isFile() || !entry.name.endsWith('.mp3')) continue;
     try { const stat = await fsp.stat(path.join(audioCacheDirectory(), entry.name)); count += 1; bytes += stat.size; } catch {}
   }
-  return { count, bytes, limitBytes: await getDesktopAudioCacheLimit() };
+  return { count, bytes, offlineCount: (await offlineSongs()).length, limitBytes: await getDesktopAudioCacheLimit() };
 });
 ipcMain.handle('music:set-cache-limit', async (_event, rawBytes) => {
   const maxBytes = Math.max(MIN_DESKTOP_AUDIO_CACHE_BYTES,
@@ -1186,7 +1212,22 @@ ipcMain.handle('telemetry:playback-event', async (_event, rawPayload) => {
 ipcMain.handle('music:clear-cache', async () => {
   let entries = [];
   try { entries = await fsp.readdir(audioCacheDirectory(), { withFileTypes: true }); } catch { return true; }
-  await Promise.all(entries.filter((entry) => entry.isFile()).map((entry) => fsp.rm(path.join(audioCacheDirectory(), entry.name), { force: true })));
+  const active = [...protectedAudio].filter(([, at]) => Date.now() - at < 5 * 60_000).map(([id]) => id);
+  const pinned = new Set([...(await pinnedSources()), ...active].map(id => `${safeAudioCacheName(id)}.mp3`));
+  await Promise.all(entries.filter((entry) => entry.isFile() && entry.name.endsWith('.mp3') && !pinned.has(entry.name))
+    .map((entry) => fsp.rm(path.join(audioCacheDirectory(), entry.name), { force: true })));
+  return true;
+});
+ipcMain.handle('music:offline-list', () => offlineSongs());
+ipcMain.handle('music:remove-offline', async (_event, sourceId) => {
+  const owner = await getSession();
+  offlineIndexWrites = offlineIndexWrites.catch(() => {}).then(async () => {
+    const index = await readJson(dataPath('offline-downloads.json'), {});
+    index[owner?.username] = (index[owner?.username] || []).filter(song => song.sourceId !== sourceId);
+    await writeJson(dataPath('offline-downloads.json'), index);
+  });
+  await offlineIndexWrites;
+  // The shared audio stays in the automatic cache; another account may have pinned it.
   return true;
 });
 ipcMain.handle('spotify:preview', async (_event, url) => {

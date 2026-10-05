@@ -79,6 +79,7 @@ public class CatalogAlbumCurationService {
             Optional<Song> existing = catalog.stream().filter(song -> songMatches(song, title, trackArtist)).findFirst();
             if (existing.isPresent()) {
                 Song song = existing.get(); song.setAlbum(name); song.setAlbumArtist(artist);
+                if (track.path("duration").asInt(0) > 0) song.setExpectedDurationMs(track.path("duration").asInt() * 1000);
                 if (!cover.isBlank()) song.setCoverUrl(cover); song.setAlbumMetadataChecked(true); songs.save(song); available++;
             } else {
                 String trackId = "deezer:track:" + track.path("id").asText();
@@ -115,12 +116,12 @@ public class CatalogAlbumCurationService {
             if (normalize(item.path("name").asText("")).equals(expected)
                     && (exact == null || item.path("nb_fan").asLong(0) > exact.path("nb_fan").asLong(0))) exact = item;
         }
-        return exact != null ? exact : fallback;
+        return exact;
     }
     private boolean songMatches(Song song, String title, String artist) {
         String left = comparableTitle(song.getTitle()), right = comparableTitle(title);
         String songArtist = normalize(primaryArtist(song.getArtist())), expectedArtist = normalize(primaryArtist(artist));
-        return (left.equals(right) || left.contains(right) || right.contains(left)) && (songArtist.equals(expectedArtist) || songArtist.contains(expectedArtist) || expectedArtist.contains(songArtist));
+        return !left.isBlank() && left.equals(right) && !songArtist.isBlank() && songArtist.equals(expectedArtist);
     }
     private JsonNode get(String url) throws Exception {
         HttpRequest request = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(15)).header("User-Agent", "NationMusics/1.0").GET().build();
@@ -129,7 +130,7 @@ public class CatalogAlbumCurationService {
         return mapper.readTree(response.body());
     }
     private String primaryArtist(String value) { return value == null ? "" : value.split("(?i)\\s*(?:,|feat\\.?|ft\\.?|&)\\s*")[0].trim(); }
-    private String comparableTitle(String value) { return normalize(value).replaceAll("\\b(?:ao vivo|live|official|oficial|audio|video|remaster(?:ed)?)\\b", " ").replaceAll("\\s+", " ").trim(); }
+    private String comparableTitle(String value) { return CatalogIdentity.title(value); }
     private String normalize(String value) { return value == null ? "" : Normalizer.normalize(value, Normalizer.Form.NFD).replaceAll("\\p{M}", "").toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]+", " ").trim(); }
     private String encode(String value) { return URLEncoder.encode(value, StandardCharsets.UTF_8); }
     private String shortMessage(Exception error) { String message = Objects.toString(error.getMessage(), error.getClass().getSimpleName()); return message.length() > 240 ? message.substring(0, 240) : message; }

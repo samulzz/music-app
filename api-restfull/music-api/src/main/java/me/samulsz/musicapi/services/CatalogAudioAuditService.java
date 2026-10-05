@@ -56,6 +56,11 @@ public class CatalogAudioAuditService {
     private boolean audit(Song song) {
         MusicService.AudioAudit result = music.auditCachedAudio(song.getSourceId());
         String issue = result.issue();
+        if ("OK".equals(issue) && song.getExpectedDurationMs() != null && song.getExpectedDurationMs() > 0
+                && result.durationSeconds() != null) {
+            double expected = song.getExpectedDurationMs() / 1000.0;
+            if (Math.abs(expected - result.durationSeconds()) > Math.max(20, expected * 0.15)) issue = "DURATION_MISMATCH";
+        }
         if ("OK".equals(issue) && suspicious(song.getTitle())) issue = "SUSPICIOUS_VERSION";
         if ("OK".equals(issue) && duplicate(song)) issue = "DUPLICATE_METADATA";
         if ("OK".equals(issue)) return false;
@@ -68,6 +73,7 @@ public class CatalogAudioAuditService {
             music.invalidateCachedAudio(song.getSourceId());
             prioritizeRepair(song, result);
         }
+        if ("DURATION_MISMATCH".equals(issue)) prioritizeRepair(song, result);
         return true;
     }
 
@@ -93,8 +99,8 @@ public class CatalogAudioAuditService {
         priority.setAlbum(song.getAlbum());
         priority.setAlbumArtist(song.getAlbumArtist());
         priority.setCoverUrl(song.getCoverUrl());
-        if (result.durationSeconds() != null) priority.setDurationMs((int) Math.round(result.durationSeconds() * 1000));
-        priority.setReason("Reparar áudio: " + result.issue());
+        if (song.getExpectedDurationMs() != null) priority.setDurationMs(song.getExpectedDurationMs());
+        priority.setReason("Revisar áudio e duração: " + result.issue());
         priority.setPriority(250);
         if (priority.getCreatedAt() == 0) priority.setCreatedAt(now);
         priority.setStatus("PENDING");

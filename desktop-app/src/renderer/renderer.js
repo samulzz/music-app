@@ -1090,7 +1090,7 @@ async function renderCachePanel() {
     <label class="cache-limit-label">Limite do cache automático<select id="cache-limit">
       ${[[512, '512 MB'], [1024, '1 GB'], [2048, '2 GB'], [4096, '4 GB']].map(([mb, label]) => `<option value="${mb * 1024 * 1024}" ${Math.abs(limitBytes - mb * 1024 * 1024) < 1024 ? 'selected' : ''}>${label}</option>`).join('')}
     </select></label>
-    <small class="cache-hint">As próximas faixas e as mais recentes ficam prontas; as antigas são removidas automaticamente.</small>
+    <small class="cache-hint">${Number(stats.offlineCount) || 0} downloads offline protegidos. O limite e a limpeza afetam apenas o cache automático.</small>
     <button id="clear-cache" class="cache-clear-button" type="button" ${stats.count ? '' : 'disabled'}>${icon('ban')} Limpar cache de músicas</button>`;
   $('#cache-close')?.addEventListener('click', () => panel.classList.add('hidden'));
   $('#cache-limit')?.addEventListener('change', async (event) => {
@@ -1098,7 +1098,7 @@ async function renderCachePanel() {
     await renderCachePanel();
   });
   $('#clear-cache')?.addEventListener('click', async () => {
-    if (!confirm('Apagar todas as músicas armazenadas neste computador?')) return;
+    if (!confirm('Limpar o cache automático? Seus downloads offline serão preservados.')) return;
     await window.nation.clearCache();
     await renderCachePanel();
   });
@@ -1167,6 +1167,7 @@ async function syncConnectPlayback() {
     void syncDiscordActivity();
   } catch (error) {
     if (isAuthenticationError(error)) await handleAuthenticationError(error);
+    else { state.connectState = null; renderConnectState(); }
   } finally {
     state.connectSyncInFlight = false;
   }
@@ -2069,7 +2070,7 @@ function bindSongActions(playlist = null) {
     type: playlist.library ? 'library' : playlist.personal ? 'personal' : playlist.daily ? 'daily' : String(playlist.id) === 'most-downloaded' ? 'most-downloaded' : 'global',
     id: String(playlist.id || ''),
     name: playlist.name || '',
-  } : null;
+  } : state.view === 'offline' ? { type: 'offline', name: 'Baixadas neste computador' } : null;
   document.querySelectorAll('.song-more').forEach((button) => {
     button.addEventListener('click', () => {
       const song = state.visibleSongs[Number(button.dataset.index)];
@@ -2759,6 +2760,7 @@ async function renderLibrary() {
     state.personalPlaylists = playlists;
     state.personalPlaylistsFetchedAt = Date.now();
     contentView.innerHTML = `
+      <button class="secondary-button" id="open-offline-library">${icon('download')} Baixadas neste computador</button>
       <article class="library-feature" id="open-saved-library">
         <div class="library-feature-cover">${icon('music')}</div>
         <div class="library-feature-copy">
@@ -2785,6 +2787,7 @@ async function renderLibrary() {
       ${playlists.length ? '' : '<div class="empty-state compact-empty"><b>Nenhuma playlist pessoal</b><span>Crie uma playlist para organizar suas músicas.</span></div>'}
     `;
     $('#open-saved-library')?.addEventListener('click', () => openPlaylist({ id: 'library', name: 'Minhas Músicas', library: true }));
+    $('#open-offline-library')?.addEventListener('click', renderOfflineLibrary);
     $('#create-personal-playlist')?.addEventListener('click', createPersonalPlaylist);
     document.querySelectorAll('.playlist-card[data-personal-playlist-index]').forEach((card) => {
       card.addEventListener('click', () => openPlaylist({ ...playlists[Number(card.dataset.personalPlaylistIndex)], personal: true }));
@@ -2793,6 +2796,22 @@ async function renderLibrary() {
     if (await handleAuthenticationError(error)) return;
     contentView.innerHTML = `<div class="empty-state"><b>Biblioteca indisponível</b><span>${escapeHtml(error.message)}</span></div>`;
   }
+}
+
+async function renderOfflineLibrary() {
+  state.view = 'offline';
+  setPageHeader('NESTE COMPUTADOR', 'Músicas offline');
+  const songs = (await window.nation.getOfflineSongs()).map(song => ({ ...song, downloaded: true, saved: false }));
+  if (state.view !== 'offline') return;
+  contentView.innerHTML = `${queueControlsMarkup(songs.length, 'Tocar baixadas', false)}${songRows(songs, 'Nenhuma música baixada ainda.')}
+    <section class="stats-card"><h3>Gerenciar downloads</h3>${songs.map(song => `<button class="secondary-button remove-offline-download" data-source="${escapeHtml(song.sourceId)}">Remover download: ${escapeHtml(song.title)}</button>`).join('')}</section>`;
+  bindQueueControls(state.visibleSongs, { type: 'offline', name: 'Baixadas neste computador' });
+  bindSongActions();
+  document.querySelectorAll('.remove-offline-download').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Remover este download da seleção offline? Ele continuará na sua conta.')) return;
+    await window.nation.removeOfflineSong(button.dataset.source);
+    await renderOfflineLibrary();
+  }));
 }
 
 function setPageHeader(eyebrow, title) {
@@ -2840,13 +2859,16 @@ function playQueue(songs, index, context = null, options = {}) {
   state.shuffleNextIndex = -1;
   resetShuffleRemainingIndexes();
   schedulePersistPlaybackSession();
+  const revision = state.queueRevision;
+  if (context?.type === 'offline') state.connectState = null;
   void (async () => {
     if (!options.passive && state.connectState && !state.connectState.currentDeviceActive) {
       const connect = await controlConnectPlayback('SYNC');
       if (connect) rememberConnectRevision(connect.commandRevision);
     }
+    if (revision !== state.queueRevision) return;
     await loadCurrentTrack(options.autoplay !== false);
-    if (isSingle) void seedRecommendationsForSingleSong(state.queue[0], state.queueRevision);
+    if (isSingle && context?.type !== 'offline') void seedRecommendationsForSingleSong(state.queue[0], state.queueRevision);
     window.setTimeout(prefetchNextTracks, 600);
     void syncConnectPlayback();
   })();
@@ -2944,8 +2966,27 @@ function scheduleWaitingTelemetry() {
     waitingTelemetryTimer = null;
     if (!audio.paused && audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) {
       reportPlaybackTelemetry('WAITING');
+      const revision = state.trackLoadRequestId;
+      waitingTelemetryTimer = setTimeout(() => {
+        if (revision === state.trackLoadRequestId && !audio.paused && audio.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) void recoverDesktopPlayback(false);
+      }, 10_000);
     }
   }, 1500);
+}
+
+async function recoverDesktopPlayback(invalidate = true) {
+  const song = state.queue[state.queueIndex];
+  const key = songIdentity(song);
+  if (!song || !key || state.recoveredSourceIds.has(key) || (state.connectState && !state.connectState.currentDeviceActive)) return;
+  state.recoveredSourceIds.add(key);
+  const revision = state.trackLoadRequestId;
+  const position = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+  const autoplay = !audio.paused;
+  preparedStreamUrls.delete(key);
+  if (invalidate) await window.nation.invalidateStream(song).catch(() => {});
+  if (revision !== state.trackLoadRequestId || songIdentity(state.queue[state.queueIndex]) !== key) return;
+  state.pendingResumePosition = position;
+  await loadCurrentTrack(autoplay);
 }
 
 async function loadCurrentTrack(autoplay = true) {
@@ -2969,6 +3010,9 @@ async function loadCurrentTrack(autoplay = true) {
   $('#like-button')?.classList.remove('active');
   if ($('#like-button')) $('#like-button').title = 'Curtir';
   const requestId = ++state.trackLoadRequestId;
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
   let key = songIdentity(song);
   const alreadyPrepared = isPrepared(song);
 
@@ -3012,6 +3056,7 @@ async function loadCurrentTrack(autoplay = true) {
       audio.pause();
       setPlayButtonIcon(false);
     }
+    if (requestId !== state.trackLoadRequestId) return;
     if (state.pendingResumePosition > 0) {
       audio.currentTime = Math.min(state.pendingResumePosition, Number.isFinite(audio.duration) ? Math.max(0, audio.duration - 1) : state.pendingResumePosition);
       state.pendingResumePosition = 0;
@@ -3044,6 +3089,9 @@ async function loadCurrentTrack(autoplay = true) {
 
 async function nextTrack(direction, reportCurrent = true) {
   if (!state.queue.length) return;
+  if (direction > 0 && state.playbackContext?.type === 'offline' && state.queueIndex >= state.queue.length - 1) {
+    audio.pause(); return;
+  }
   if (reportCurrent) reportCurrentPlayback(false);
   if (direction > 0 && state.queueMode === 'selection' && state.queueIndex >= state.queue.length - 1) {
     await continueWithDailyRecommendations();
@@ -3191,8 +3239,9 @@ $('#play-button').addEventListener('click', () => {
     void controlConnectPlayback(state.connectState.playing ? 'PAUSE' : 'PLAY');
     return;
   }
-  if (!audio.src) return;
-  if (audio.paused) audio.play(); else audio.pause();
+  if (!audio.src) { if (!state.preparingSourceId) void loadCurrentTrack(true); return; }
+  if (audio.paused) void audio.play().catch(() => recoverDesktopPlayback(false));
+  else { state.trackLoadRequestId += 1; audio.pause(); }
 });
 $('#shuffle-button')?.addEventListener('click', () => {
   toggleShuffleMode();
@@ -3298,9 +3347,7 @@ audio.addEventListener('error', () => {
   const song = state.queue[state.queueIndex];
   const key = songIdentity(song);
   if (audio.src && song && key && !state.recoveredSourceIds.has(key)) {
-    state.recoveredSourceIds.add(key);
-    preparedStreamUrls.delete(key);
-    void window.nation.invalidateStream(song).catch(() => {}).then(() => loadCurrentTrack(true));
+    void recoverDesktopPlayback(audio.error?.code === 3);
   } else if (audio.src) showBanner('O streaming foi interrompido. Tente novamente.', true);
   void window.nation.clearDiscordActivity();
   void syncFriendPresence(true);

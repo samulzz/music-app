@@ -21,6 +21,9 @@ public class Song {
     private String uri;
     private String coverUrl;
     private String sourceId;
+    private Integer expectedDurationMs;
+    public Integer getExpectedDurationMs() { return expectedDurationMs; }
+    public void setExpectedDurationMs(Integer expectedDurationMs) { this.expectedDurationMs = expectedDurationMs; }
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "song_genres", joinColumns = @JoinColumn(name = "song_id"))

@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('nation', {
   getCacheStats: () => ipcRenderer.invoke('music:cache-stats'),
   setCacheLimit: (bytes) => ipcRenderer.invoke('music:set-cache-limit', bytes),
   clearCache: () => ipcRenderer.invoke('music:clear-cache'),
+  getOfflineSongs: () => ipcRenderer.invoke('music:offline-list'),
+  removeOfflineSong: (sourceId) => ipcRenderer.invoke('music:remove-offline', sourceId),
   previewSpotify: (url) => ipcRenderer.invoke('spotify:preview', url),
   getLibrary: () => ipcRenderer.invoke('library:list'),
   saveToLibrary: (song) => ipcRenderer.invoke('library:save', song),

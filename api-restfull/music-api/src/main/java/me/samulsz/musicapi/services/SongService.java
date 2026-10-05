@@ -64,36 +64,34 @@ public class SongService {
 
     public java.util.List<Song> searchPrecachedCatalog(String query) {
         String safeQuery = query == null ? "" : query.trim();
-        return songRepository.searchCatalogSongs(safeQuery).stream()
+        return CatalogIdentity.unique(songRepository.searchCatalogSongs(safeQuery).stream()
                 .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
-                .limit(50)
-                .toList();
+                .toList()).stream().limit(50).toList();
     }
 
     public java.util.List<Song> findByGenre(String genre) {
         String normalized = normalizeGenre(genre);
         if (normalized == null) return java.util.List.of();
-        return songRepository.findByExactGenre(normalized).stream()
+        return CatalogIdentity.unique(songRepository.findByExactGenre(normalized).stream()
                 .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
-                .limit(100)
-                .toList();
+                .toList()).stream().limit(100).toList();
     }
 
     public java.util.List<Song> findByArtist(String artist) {
         String name = artist == null ? "" : artist.trim();
         if (name.isBlank() || name.length() > 120) return java.util.List.of();
-        return songRepository.findCatalogSongsByArtist(name).stream()
+        return CatalogIdentity.unique(songRepository.findCatalogSongsByArtist(name).stream()
                 .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
-                .toList();
+                .toList());
     }
 
     public java.util.List<Song> findByAlbum(String album, String artist) {
         String name = album == null ? "" : album.trim();
         String albumArtist = artist == null ? "" : artist.trim();
         if (name.isBlank() || name.length() > 180 || albumArtist.length() > 180) return java.util.List.of();
-        return songRepository.findCatalogSongsByAlbum(name, albumArtist).stream()
+        return CatalogIdentity.unique(songRepository.findCatalogSongsByAlbum(name, albumArtist).stream()
                 .filter(song -> musicService.hasPrecachedAudio(song.getSourceId()))
-                .toList();
+                .toList());
     }
 
     private void mergeGenres(Song song, java.util.Set<String> incoming) {

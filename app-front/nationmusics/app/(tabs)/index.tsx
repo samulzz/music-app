@@ -18,7 +18,7 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 import type { ApiPlaylist, MusicSong } from '../../types/music';
 import { fromApiLibrarySong } from '../../types/music';
-import { apiRequest, OfflineError } from '../../services/api';
+import { apiRequest, OfflineError, accountCacheKey } from '../../services/api';
 import { getSession } from '../../services/auth';
 import { getPersonalizedHome, type PersonalizedHome } from '../../services/recommendations';
 import { playSongQueue, restorePausedSongQueue, seekToPosition } from '../../services/player';
@@ -88,7 +88,7 @@ export default function HomePlaylistsScreen() {
   }, []);
 
   const readCache = useCallback(async (): Promise<HomePlaylistsCache> => {
-    const raw = await AsyncStorage.getItem(CACHE_KEY) || await AsyncStorage.getItem(LEGACY_CACHE_KEY);
+    const raw = await AsyncStorage.getItem(await accountCacheKey(CACHE_KEY));
     if (!raw) return { savedAt: 0, playlists: [], personalized: null };
     try {
       const parsed = JSON.parse(raw) as HomePlaylistsCache | HomePlaylist[];
@@ -105,7 +105,7 @@ export default function HomePlaylistsScreen() {
   const writeCache = useCallback(async (next: HomePlaylist[], home: PersonalizedHome | null) => {
     const savedAt = Date.now();
     lastRefreshAtRef.current = savedAt;
-    await AsyncStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt, playlists: next, personalized: home }));
+    await AsyncStorage.setItem(await accountCacheKey(CACHE_KEY), JSON.stringify({ savedAt, playlists: next, personalized: home }));
   }, []);
 
   const loadHome = useCallback(async (showSpinner = true, force = false) => {

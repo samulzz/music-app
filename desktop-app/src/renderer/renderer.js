@@ -2370,7 +2370,7 @@ function renderPlaylistSongsContent(playlist, songs) {
         ${queueControlsMarkup(songs.length, 'Tocar playlist')}
       </div>
     </div>
-    ${songRows(songs, 'Esta playlist esta vazia.', { removalMode: playlist.personal ? 'personal' : playlist.library ? 'library' : '' })}
+    ${songRows(songs, (playlist.pendingTracks || []).length ? 'As músicas estão aguardando importação.' : 'Esta playlist esta vazia.', { removalMode: playlist.personal ? 'personal' : playlist.library ? 'library' : '' })}
     ${(playlist.pendingTracks || []).length ? `<section class="pending-playlist-tracks"><h3>Aguardando importação · ${playlist.pendingTracks.length}</h3>${playlist.pendingTracks.map(track => `<article class="song-row"><div class="song-main"><strong>${escapeHtml(track.title)}</strong><span>${escapeHtml(track.artist)} · Ainda não disponível</span></div></article>`).join('')}</section>` : ''}
   `;
   bindSongActions(playlist);

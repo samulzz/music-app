@@ -781,8 +781,8 @@ export default function PlaylistDetailsScreen() {
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Ionicons name="cloud-offline-outline" size={48} color="#555" />
-                <Text style={styles.emptyTitle}>{isLibrary ? 'Nenhuma música salva' : 'Playlist indisponível offline'}</Text>
-                <Text style={styles.emptyText}>{isLibrary ? 'Salve músicas pela busca para encontrá-las aqui.' : 'Abra esta playlist uma vez com internet para armazenar a lista.'}</Text>
+                <Text style={styles.emptyTitle}>{pendingTracks.length ? 'Aguardando músicas' : isLibrary ? 'Nenhuma música salva' : 'Playlist indisponível offline'}</Text>
+                <Text style={styles.emptyText}>{pendingTracks.length ? 'As faixas abaixo estão priorizadas no importador e ficarão disponíveis após o envio.' : isLibrary ? 'Salve músicas pela busca para encontrá-las aqui.' : 'Abra esta playlist uma vez com internet para armazenar a lista.'}</Text>
               </View>
             }
           />

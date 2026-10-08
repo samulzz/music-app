@@ -5,6 +5,7 @@ import TrackPlayer, { Event, useIsPlaying, useProgress, type MediaItem } from '@
 
 import { JamControlSheet } from './jam-control-sheet';
 import { FullPlayerModal } from './full-player-modal';
+import { addSongToPlaylist } from './playlist-picker';
 import {
   playNext,
   getPlaybackQueue,
@@ -291,6 +292,12 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
         onToggleShuffle={toggleShuffle}
         onSeek={(position) => remote ? void sendConnectControl('SEEK', position).catch(() => {}) : seekToPosition(position)}
         onOpenQueue={openQueue}
+        onAddToPlaylist={() => {
+          const extras = 'extras' in displayTrack && displayTrack.extras && typeof displayTrack.extras === 'object' ? displayTrack.extras : {};
+          addSongToPlaylist({ id: String(extras.songId || ('id' in displayTrack ? displayTrack.id : displayTrackKey)),
+            sourceId: String(('sourceId' in displayTrack ? displayTrack.sourceId : extras.sourceId) || displayTrackKey),
+            title: String(displayTrack.title || ''), artist: String(displayTrack.artist || '') });
+        }}
         onOpenDevices={() => setConnectVisible(true)}
         onOpenJam={() => setJamSheetVisible(true)}
       />

@@ -21,6 +21,10 @@ import { getSession } from '../../services/auth';
 import { CollectionLoading } from '../../components/collection-loading';
 import { downloadSong } from '../../services/offline-library';
 import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
+import { addSongToPlaylist } from '../../components/playlist-picker';
+import { useFocusEffect } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { accountCacheKey } from '../../services/api';
 
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -87,6 +91,21 @@ export default function SearchScreen() {
   const [query, setQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
   const [results, setResults] = useState<MusicSong[]>([]);
+  const [recentSongs, setRecentSongs] = useState<MusicSong[]>([]);
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void (async () => {
+      const key = await accountCacheKey('search-recent.v1');
+      try { const cached = JSON.parse(await AsyncStorage.getItem(key) || '[]'); if (active) setRecentSongs(cached); } catch {}
+      try {
+        const data = await apiRequest<ApiSearchSong[]>('/search/recent');
+        const next = data.map(fromApiSearchSong);
+        if (active) setRecentSongs(next);
+        await AsyncStorage.setItem(key, JSON.stringify(next));
+      } catch {}
+    })();
+    return () => { active = false; };
+  }, []));
   const [playlistResults, setPlaylistResults] = useState<ApiPlaylist[]>([]);
   const [albumResults, setAlbumResults] = useState<AlbumSummary[]>([]);
   const [featuredAlbums, setFeaturedAlbums] = useState<AlbumSummary[]>([]);
@@ -204,6 +223,8 @@ export default function SearchScreen() {
 
   const play = useCallback(async (song: MusicSong) => {
     try {
+      void apiRequest(`/search/recent/${encodeURIComponent(song.id)}`, { method: 'POST' }).catch(() => {});
+      setRecentSongs(current => [song, ...current.filter(item => item.id !== song.id)].slice(0, 20));
       await playSongQueue([song], 0, 'manual');
     } catch (error) {
       Alert.alert('Não foi possível reproduzir', error instanceof Error ? error.message : 'Tente novamente.');
@@ -302,7 +323,7 @@ export default function SearchScreen() {
         )}
 
         <FlatList
-          data={resultsReady ? results : []}
+          data={!query.trim() ? recentSongs : resultsReady ? results : []}
           keyExtractor={(item) => item.sourceId || item.id}
           renderItem={({ item }) => {
             const identity = item.sourceId || item.id;
@@ -315,7 +336,7 @@ export default function SearchScreen() {
                 onDownload={download}
                 onOptions={(song) => Alert.alert(song.title, 'O que deseja fazer?', [
                   { text: 'Adicionar à fila', onPress: () => { void addSongsToPlaybackQueue([song]); } },
-                  { text: 'Baixar offline', onPress: () => { void download(song); } },
+                  { text: 'Adicionar à playlist', onPress: () => addSongToPlaylist(song) },
                   { text: 'Cancelar', style: 'cancel' },
                 ])}
               />
@@ -329,6 +350,7 @@ export default function SearchScreen() {
           removeClippedSubviews
           ListHeaderComponent={
             <View>
+              {!query.trim() && <Text style={styles.genreTitle}>Pesquisadas recentemente</Text>}
               {resultsReady && genreResults.length > 0 && <><Text style={styles.genreTitle}>Gêneros</Text>
               <View style={styles.genreGrid}>
                 {genreResults.map((item) => (

@@ -33,7 +33,7 @@ public class SpotifyPlaylistService {
             "<script[^>]+id=[\"']__NEXT_DATA__[\"'][^>]*>(.*?)</script>",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL
     );
-    private static final int MAX_TRACKS = 200;
+    private static final int MAX_TRACKS = 1000;
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -165,27 +165,25 @@ public class SpotifyPlaylistService {
         }
 
         try {
+            File outputFile = File.createTempFile("nationmusics-spotify-", ".json");
+            try {
             Process process = new ProcessBuilder(
                     "python3",
                     helper.getAbsolutePath(),
                     spotifyUrl,
                     String.valueOf(MAX_TRACKS)
-            ).redirectErrorStream(true).start();
-
-            StringBuilder output = new StringBuilder();
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8))) {
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    output.append(line);
-                }
+            ).redirectErrorStream(true).redirectOutput(outputFile).start();
+            if (!process.waitFor(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new IllegalArgumentException("O Spotify demorou para responder. Tente importar novamente.");
             }
-            int exitCode = process.waitFor();
-            JsonNode json = objectMapper.readTree(output.toString());
+            int exitCode = process.exitValue();
+            JsonNode json = objectMapper.readTree(java.nio.file.Files.readString(outputFile.toPath(), StandardCharsets.UTF_8));
             if (exitCode != 0 || json.has("error")) {
                 throw new IllegalArgumentException("Não foi possível ler todas as faixas deste link.");
             }
             return objectMapper.treeToValue(json, SpotifyPlaylistResponse.class);
+            } finally { java.nio.file.Files.deleteIfExists(outputFile.toPath()); }
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {

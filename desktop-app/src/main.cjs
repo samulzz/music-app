@@ -697,7 +697,7 @@ async function apiRequest(endpoint, options = {}) {
       method: options.method || 'GET',
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: AbortSignal.timeout(cacheable ? 6000 : 20_000),
+      signal: AbortSignal.timeout(options.timeoutMs || (cacheable ? 6000 : 20_000)),
     });
   } catch {
     if (cachePath) {
@@ -1123,6 +1123,9 @@ ipcMain.handle('catalog:search', async (_event, query) => {
   return { ...result, songs: (result.songs || []).map((song) => normalizeSong(song, false)) };
 });
 ipcMain.handle('catalog:albums', async () => apiRequest('/catalog/albums'));
+ipcMain.handle('search:recent', async () => (await apiRequest('/search/recent')).map(song => normalizeSong(song, false)));
+ipcMain.handle('search:record', async (_event, songId) => apiRequest(`/search/recent/${encodeURIComponent(songId)}`, { method: 'POST' }));
+ipcMain.handle('spotify:import', async (_event, url) => apiRequest('/spotify/import', { method: 'POST', timeoutMs: 90000, body: { url } }));
 ipcMain.handle('catalog:album-songs', async (_event, album) => {
   const query = new URLSearchParams({ name: String(album?.name || ''), artist: String(album?.artist || '') });
   if (album?.playlistId) query.set('playlistId', String(album.playlistId));
@@ -1381,6 +1384,7 @@ ipcMain.handle('personal-playlists:add-song', async (_event, playlistId, songId)
     method: 'POST',
   });
 });
+ipcMain.handle('personal-playlists:details', async (_event, id) => apiRequest(`/playlists/personal/${encodeURIComponent(id)}`));
 ipcMain.handle('personal-playlists:remove-song', async (_event, playlistId, songId) => {
   return apiRequest(`/playlists/personal/${encodeURIComponent(playlistId)}/songs/${encodeURIComponent(songId)}`, {
     method: 'DELETE',

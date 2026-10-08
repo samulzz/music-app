@@ -45,6 +45,7 @@ type Props = {
   onToggleShuffle: () => void;
   onSeek: (position: number) => void;
   onOpenQueue: () => void;
+  onAddToPlaylist: () => void;
   onOpenDevices: () => void;
   onOpenJam: () => void;
 };
@@ -159,6 +160,7 @@ export function FullPlayerModal(props: Props) {
               <View style={styles.sheetHandle} />
               <Text style={styles.sheetTitle}>Opções</Text>
               <View style={styles.menuRow}>
+                <TouchableOpacity style={styles.menuItem} onPress={() => openFromMenu(props.onAddToPlaylist)}><Ionicons name="add-circle-outline" size={23} color="#fff" /><Text style={styles.menuText}>Playlist</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} onPress={() => openFromMenu(props.onOpenQueue)}><Ionicons name="list" size={23} color="#fff" /><Text style={styles.menuText}>Fila</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} onPress={() => openFromMenu(props.onOpenDevices)}><Ionicons name="phone-portrait-outline" size={23} color="#fff" /><Text style={styles.menuText}>Dispositivos</Text></TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} onPress={() => openFromMenu(props.onOpenJam)}><Ionicons name="radio-outline" size={23} color="#fff" /><Text style={styles.menuText}>JAM</Text></TouchableOpacity>

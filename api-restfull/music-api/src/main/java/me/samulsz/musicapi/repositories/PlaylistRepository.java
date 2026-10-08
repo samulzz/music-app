@@ -15,4 +15,8 @@ public interface PlaylistRepository extends JpaRepository<Playlist, Long> {
     Optional<Playlist> findFirstByGlobalPlaylistTrueAndName(String name);
 
     List<Playlist> findByOwnerUsernameOrderByIdDesc(String username);
+    @org.springframework.data.jpa.repository.Query("select p from Playlist p where p.pendingTracks is not empty")
+    List<Playlist> findPendingPlaylists(org.springframework.data.domain.Pageable pageable);
+    @org.springframework.data.jpa.repository.Query("select count(p) from Playlist p where p.pendingTracks is not empty")
+    long countPendingPlaylists();
 }

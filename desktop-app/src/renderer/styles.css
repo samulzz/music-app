@@ -2526,3 +2526,10 @@ button:disabled { cursor: default; opacity: .65; }
   .player { padding-inline: 16px; gap: 12px; }
   #volume-value { display: none; }
 }
+
+.playlist-picker { background: #202020; color: #fff; border: 1px solid #444; border-radius: 20px; padding: 24px; width: min(480px, 85vw); max-height: 80vh; overflow: auto; }
+.playlist-picker::backdrop { background: #000b; }
+.playlist-picker > div { display: grid; gap: 10px; margin-bottom: 18px; }
+.playlist-picker input { width: 100%; padding: 14px; background: #111; color: #fff; border: 1px solid #555; border-radius: 10px; }
+.playlist-picker p { color: #aaa; }
+.pending-playlist-tracks { padding: 20px; opacity: .55; }

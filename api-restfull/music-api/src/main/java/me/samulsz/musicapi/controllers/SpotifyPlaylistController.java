@@ -15,9 +15,17 @@ import java.util.Map;
 public class SpotifyPlaylistController {
 
     private final SpotifyPlaylistService spotifyPlaylistService;
+    private final me.samulsz.musicapi.services.UserSpotifyImportService imports;
 
-    public SpotifyPlaylistController(SpotifyPlaylistService spotifyPlaylistService) {
+    public SpotifyPlaylistController(SpotifyPlaylistService spotifyPlaylistService, me.samulsz.musicapi.services.UserSpotifyImportService imports) {
         this.spotifyPlaylistService = spotifyPlaylistService;
+        this.imports = imports;
+    }
+
+    @PostMapping("/import")
+    public ResponseEntity<?> importPlaylist(org.springframework.security.core.Authentication auth, @RequestBody SpotifyPlaylistRequest request) {
+        try { return ResponseEntity.ok(imports.importPlaylist(auth.getName(), request.url())); }
+        catch (IllegalArgumentException error) { return ResponseEntity.badRequest().body(Map.of("message", error.getMessage())); }
     }
 
     @PostMapping({"/import/preview", "/playlist/preview"})

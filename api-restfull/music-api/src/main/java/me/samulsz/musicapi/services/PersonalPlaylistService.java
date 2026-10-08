@@ -63,6 +63,7 @@ public class PersonalPlaylistService {
         return SongOrder.alphabetically(getOwnedPlaylist(username, playlistId).getSongs());
     }
 
+    @org.springframework.transaction.annotation.Transactional
     public Playlist addSongs(String username, Long playlistId, List<Long> songIds) {
         Playlist playlist = getOwnedPlaylist(username, playlistId);
         if (songIds == null || songIds.isEmpty()) return playlist;
@@ -75,15 +76,14 @@ public class PersonalPlaylistService {
 
         Set<Song> merged = new LinkedHashSet<>(playlist.getSongs());
         for (Long songId : songIds) {
-            if (!libraryIds.contains(songId)) {
-                throw new RuntimeException("Adicione a música à sua biblioteca antes de colocá-la em uma playlist.");
-            }
             Song song = songRepository.findById(songId)
                     .orElseThrow(() -> new RuntimeException("Música não encontrada: " + songId));
             merged.add(song);
+            if (!libraryIds.contains(songId)) owner.getDownloadedSongs().add(song);
         }
 
         playlist.setSongs(merged);
+        userRepository.save(owner);
         return playlistRepository.save(playlist);
     }
 

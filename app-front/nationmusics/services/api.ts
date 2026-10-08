@@ -70,6 +70,7 @@ export async function getMediaHeaders(): Promise<Record<string, string>> {
 type ApiRequestOptions = RequestInit & {
   authenticated?: boolean;
   json?: boolean;
+  timeoutMs?: number;
 };
 
 export async function apiRequest<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
@@ -77,6 +78,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     authenticated = true,
     json = false,
     headers: requestHeaders,
+    timeoutMs,
     ...request
   } = options;
 
@@ -105,7 +107,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), cacheable ? 6000 : 20_000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs || (cacheable ? 6000 : 20_000));
     try {
       response = await fetch(`${API_BASE_URL}${path}`, {
         ...request,

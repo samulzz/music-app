@@ -19,9 +19,12 @@ export function MandatoryUpdateGate({ children }: Props) {
 
   const runCheck = useCallback(async () => {
     setChecking(true);
-    const nextResult = await checkForRequiredUpdate('android');
-    setResult(nextResult);
-    setChecking(false);
+    try {
+      const nextResult = await checkForRequiredUpdate('android');
+      setResult(nextResult);
+    } catch {
+      // No connectivity must never lock access to local downloads.
+    } finally { setChecking(false); }
   }, []);
 
   useEffect(() => {

@@ -235,7 +235,8 @@ def run(
     priority_tracks: list[dict[str, Any]] = []
     try:
         api_key = importer.get_remote_api_key(base_config)
-        pending = importer.request_json(base_config.api_base, f"/catalog/import-priorities?limit={min(max_total, 100)}", api_key=api_key, timeout=60)
+        priority_admin_token = importer.login_admin_from_remote(base_config, api_key)
+        pending = importer.request_json(base_config.api_base, f"/admin/import-priorities?limit={min(max_total, 100)}", api_key=api_key, admin_token=priority_admin_token, timeout=60)
         if isinstance(pending, list):
             priority_tracks = [
                 {
@@ -318,7 +319,7 @@ def run(
                 if source.url == "backend-priority":
                     for external_id in imported_ids:
                         try:
-                            importer.request_json(base_config.api_base, "/catalog/import-priorities/" + urllib.parse.quote(external_id, safe="") + "/done", method="POST", api_key=api_key)
+                            importer.request_json(base_config.api_base, "/admin/import-priorities/" + urllib.parse.quote(external_id, safe="") + "/done", method="POST", api_key=api_key, admin_token=priority_admin_token)
                         except Exception as exc:
                             logger(f"Aviso: faixa importada, mas prioridade não foi confirmada no backend: {exc}")
                 imported_total += len(imported_ids)

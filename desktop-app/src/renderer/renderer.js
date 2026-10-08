@@ -331,6 +331,10 @@ if (!window.nation && location.hostname === '127.0.0.1') {
     updatePersonalPlaylist: async (playlistId, playlist) => ({ id: playlistId, ...playlist }),
     deletePersonalPlaylist: async () => true,
     addSongToPersonalPlaylist: async () => true,
+    getRecentSearchSongs: async () => demoSongs.slice(0, 3),
+    recordRecentSearchSong: async () => true,
+    getPersonalPlaylist: async (id) => ({ id, pendingTracks: [] }),
+    importSpotifyPlaylist: async () => ({ id: 999, name: 'Importação de demonstração' }),
     removeSongFromPersonalPlaylist: async () => true,
     getFriends: async () => [
       {
@@ -1999,7 +2003,7 @@ function coverMarkup(song, className = 'song-cover') {
 }
 
 function songRows(songs, emptyText = 'Nada por aqui ainda.', options = {}) {
-  const orderedSongs = sortSongsAlphabetically(songs);
+  const orderedSongs = options.preserveOrder ? [...songs] : sortSongsAlphabetically(songs);
   state.visibleSongs = orderedSongs;
   if (!orderedSongs.length) {
     return `
@@ -2029,8 +2033,9 @@ function songRows(songs, emptyText = 'Nada por aqui ainda.', options = {}) {
               <button class="icon-button primary play-song" title="Reproduzir online" data-index="${index}">
                 ${preparing ? '<span class="mini-loader"></span>' : icon('play')}
               </button>
+              <button class="icon-button add-to-playlist" title="Adicionar a playlist" data-index="${index}">${icon('playlist')}</button>
               ${song.saved
-                ? `<button class="icon-button add-to-playlist" title="Adicionar a playlist" data-index="${index}">${icon('playlist')}</button>
+                ? `
                    ${options.removalMode === 'personal'
                      ? `<button class="icon-button remove-playlist-song" title="Remover desta playlist" data-index="${index}">${icon('close')}</button>`
                      : `<button class="icon-button remove-song" title="Remover de Minhas Musicas" data-index="${index}">${icon('close')}</button>`}`
@@ -2143,7 +2148,11 @@ function bindSongActions(playlist = null) {
     });
   });
   document.querySelectorAll('.play-song').forEach((button) => {
-    button.addEventListener('click', () => playQueue(state.visibleSongs, Number(button.dataset.index), context));
+    button.addEventListener('click', () => {
+      const song = state.visibleSongs[Number(button.dataset.index)];
+      if (state.view === 'search' && song) void window.nation.recordRecentSearchSong?.(song.serverId || song.id).catch(() => {});
+      playQueue(state.visibleSongs, Number(button.dataset.index), context);
+    });
   });
   document.querySelectorAll('.save-song').forEach((button) => {
     button.addEventListener('click', () => saveSong(state.visibleSongs[Number(button.dataset.index)]));
@@ -2362,6 +2371,7 @@ function renderPlaylistSongsContent(playlist, songs) {
       </div>
     </div>
     ${songRows(songs, 'Esta playlist esta vazia.', { removalMode: playlist.personal ? 'personal' : playlist.library ? 'library' : '' })}
+    ${(playlist.pendingTracks || []).length ? `<section class="pending-playlist-tracks"><h3>Aguardando importação · ${playlist.pendingTracks.length}</h3>${playlist.pendingTracks.map(track => `<article class="song-row"><div class="song-main"><strong>${escapeHtml(track.title)}</strong><span>${escapeHtml(track.artist)} · Ainda não disponível</span></div></article>`).join('')}</section>` : ''}
   `;
   bindSongActions(playlist);
   const context = {
@@ -2414,7 +2424,8 @@ async function openPlaylist(playlist) {
   setPageHeader(playlist.library ? 'BIBLIOTECA' : 'PLAYLIST', playlist.name);
   const cacheKey = playlistDetailsCacheKey(playlist);
   const cached = playlistDetailsCache.get(cacheKey);
-  const cacheIsFresh = cached && Date.now() - cached.savedAt < VIEW_CACHE_TTL_MS;
+  const cacheIsFresh = cached && Date.now() - cached.savedAt < VIEW_CACHE_TTL_MS
+    && !(playlist.personal && ((playlist.pendingTracks || []).length || (Array.isArray(playlist.songs) && playlist.songs.length !== cached.songs.length)));
 
   if (cacheIsFresh) {
     renderPlaylistSongsContent(playlist, cached.songs);
@@ -2430,6 +2441,11 @@ async function openPlaylist(playlist) {
     ]);
     if (!currentView(viewRequest)) return;
     const songs = playlist.library ? library : playlistSongs;
+    if (playlist.personal) {
+      const details = await window.nation.getPersonalPlaylist(playlist.id);
+      if (!currentView(viewRequest)) return;
+      playlist = { ...playlist, pendingTracks: details.pendingTracks || [] };
+    }
     const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
     const merged = songs.map((song) => savedBySource.has(song.sourceId)
       ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
@@ -2538,6 +2554,22 @@ async function createPersonalPlaylist() {
   }
 }
 
+function importSpotifyPlaylist() {
+  const dialog = document.createElement('dialog'); dialog.className = 'playlist-picker';
+  dialog.innerHTML = `<h3>Importar playlist do Spotify</h3><p>As músicas ausentes ficam pendentes e prioritárias no importador.</p><input type="url" aria-label="Link da playlist" placeholder="https://open.spotify.com/playlist/..." /><p data-error></p><button class="primary-button" data-import>Importar</button><button class="secondary-button" data-cancel>Cancelar</button>`;
+  document.body.appendChild(dialog);
+  const close = () => { dialog.close(); dialog.remove(); };
+  dialog.querySelector('[data-cancel]').onclick = close;
+  dialog.addEventListener('cancel', close);
+  dialog.querySelector('[data-import]').onclick = async (event) => {
+    const url = dialog.querySelector('input').value.trim(); if (!url) return;
+    event.currentTarget.disabled = true;
+    try { await window.nation.importSpotifyPlaylist(url); close(); await renderLibrary(); }
+    catch (error) { dialog.querySelector('[data-error]').textContent = error.message; dialog.querySelector('[data-import]').disabled = false; }
+  };
+  dialog.showModal();
+}
+
 async function addSongToPlaylist(song) {
   try {
     const playlists = await window.nation.getPersonalPlaylists();
@@ -2545,12 +2577,22 @@ async function addSongToPlaylist(song) {
       showBanner('Crie uma playlist pessoal primeiro.', true);
       return;
     }
-    const names = playlists.map((playlist, index) => `${index + 1}. ${playlist.name}`).join('\n');
-    const choice = Number(prompt(`Adicionar em qual playlist?\n${names}`));
-    const playlist = playlists[choice - 1];
-    if (!playlist) return;
-    await window.nation.addSongToPersonalPlaylist(playlist.id, song.serverId || song.id);
-    showBanner(`Música adicionada em "${playlist.name}".`);
+    const dialog = document.createElement('dialog');
+    dialog.className = 'playlist-picker';
+    dialog.innerHTML = `<h3>Adicionar à playlist</h3><p>${escapeHtml(song.title)}</p><div>${playlists.map(playlist => `<button type="button" class="secondary-button" data-pick-playlist="${playlist.id}">${escapeHtml(playlist.name)}</button>`).join('')}</div><button type="button" class="secondary-button" data-cancel>Cancelar</button>`;
+    document.body.appendChild(dialog);
+    const close = () => { dialog.close(); dialog.remove(); };
+    dialog.querySelector('[data-cancel]').onclick = close;
+    dialog.addEventListener('cancel', close);
+    dialog.querySelectorAll('[data-pick-playlist]').forEach(button => button.onclick = async () => {
+      button.disabled = true;
+      try {
+        await window.nation.addSongToPersonalPlaylist(button.dataset.pickPlaylist, song.serverId || song.id);
+        playlistDetailsCache.clear();
+        showBanner('Música adicionada à playlist.'); close();
+      } catch (error) { button.disabled = false; showBanner(error.message, true); }
+    });
+    dialog.showModal();
   } catch (error) {
     if (await handleAuthenticationError(error)) return;
     showBanner(error.message, true);
@@ -2563,9 +2605,19 @@ async function renderSearch(query = '', exactGenre = false) {
   state.searchRequestId = requestId;
   setPageHeader('ENCONTRE ALGO NOVO', query ? `Resultados para “${query}”` : 'O que vai ouvir hoje?');
   if (!query.trim()) {
-    contentView.innerHTML = `
-      <div class="empty-state"><b>Busque uma música, artista, álbum, playlist ou gênero</b><span>A busca entende acentos, palavras fora de ordem e pequenos erros de digitação.</span></div>
-    `;
+    const cacheKey = `recent-search:${state.session?.username || ''}`;
+    let recent = [];
+    try { recent = JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch {}
+    const renderRecent = (songs) => {
+      if (!currentView(viewRequest) || state.searchRequestId !== requestId) return;
+      contentView.innerHTML = `<h3>Pesquisadas recentemente</h3>${songRows(songs, 'As músicas que você abrir pela busca aparecem aqui e nos seus outros dispositivos.', { preserveOrder: true })}`;
+      bindSongActions();
+    };
+    renderRecent(recent);
+    try {
+      recent = await window.nation.getRecentSearchSongs();
+      localStorage.setItem(cacheKey, JSON.stringify(recent)); renderRecent(recent);
+    } catch {}
     return;
   }
   setLoading('Buscando músicas...');
@@ -2829,6 +2881,7 @@ async function renderLibrary() {
       </article>
       <div class="section-heading library-section-heading">
         <div class="section-title-stack"><h2>Suas playlists</h2><span>${playlists.length} ${playlists.length === 1 ? 'coleção' : 'coleções'}</span></div>
+        <button class="secondary-button compact" id="import-spotify-playlist" title="Importar playlist do Spotify">${icon('plus')} Importar do Spotify</button>
         <button class="primary-button compact" id="create-personal-playlist">Nova playlist</button>
       </div>
       <div class="playlist-grid library-playlist-grid">
@@ -2844,6 +2897,7 @@ async function renderLibrary() {
     `;
     $('#open-saved-library')?.addEventListener('click', () => openPlaylist({ id: 'library', name: 'Minhas Músicas', library: true }));
     $('#open-offline-library')?.addEventListener('click', renderOfflineLibrary);
+    $('#import-spotify-playlist')?.addEventListener('click', importSpotifyPlaylist);
     $('#create-personal-playlist')?.addEventListener('click', createPersonalPlaylist);
     document.querySelectorAll('.playlist-card[data-personal-playlist-index]').forEach((card) => {
       card.addEventListener('click', () => openPlaylist({ ...playlists[Number(card.dataset.personalPlaylistIndex)], personal: true }));

@@ -17,6 +17,7 @@ import { type MediaItem } from '@rntp/player';
 
 import GlobalMiniPlayer from '../../components/global-mini-player';
 import { CollectionLoading } from '../../components/collection-loading';
+import { addSongToPlaylist } from '../../components/playlist-picker';
 import type { ApiLibrarySong, MusicSong } from '../../types/music';
 import { fromApiLibrarySong } from '../../types/music';
 import { apiRequest, accountCacheKey, deviceIsOffline } from '../../services/api';
@@ -165,6 +166,7 @@ export default function PlaylistDetailsScreen() {
   const insets = useSafeAreaInsets();
   const activeItem = useSyncedActiveMediaItem();
   const [songs, setSongs] = useState<MusicSong[]>([]);
+  const [pendingTracks, setPendingTracks] = useState<Array<{spotifyId: string; title: string; artist: string}>>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
@@ -265,6 +267,10 @@ export default function PlaylistDetailsScreen() {
             authenticated: isPersonal || isLibrary,
           });
       const merged = await mergeWithOfflineLibrary(data.map(fromApiLibrarySong));
+      if (isPersonal) {
+        const details = await apiRequest<{pendingTracks?: Array<{spotifyId: string; title: string; artist: string}>}>(`/playlists/personal/${encodeURIComponent(playlistId)}`);
+        if (currentCacheKeyRef.current === cacheKey) setPendingTracks(details.pendingTracks || []);
+      }
       if (currentCacheKeyRef.current !== cacheKey) return;
       const next = isDaily ? merged : sortSongsAlphabetically(merged);
       setSongs(next);
@@ -766,6 +772,12 @@ export default function PlaylistDetailsScreen() {
             initialNumToRender={10}
             windowSize={7}
             removeClippedSubviews
+            ListFooterComponent={pendingTracks.length ? <View style={{ padding: 18 }}>
+              <Text style={{ color: '#aaa', marginBottom: 12 }}>Aguardando importação · {pendingTracks.length}</Text>
+              {pendingTracks.map(track => <View key={track.spotifyId} style={{ paddingVertical: 12, opacity: 0.5 }}>
+                <Text style={{ color: '#fff' }}>{track.title}</Text><Text style={{ color: '#aaa' }}>{track.artist} · Ainda não disponível</Text>
+              </View>)}
+            </View> : null}
             ListEmptyComponent={
               <View style={styles.empty}>
                 <Ionicons name="cloud-offline-outline" size={48} color="#555" />
@@ -792,6 +804,9 @@ export default function PlaylistDetailsScreen() {
             <TouchableOpacity style={styles.selectionAction} onPress={() => { void enqueueSelected(); }}>
               <Ionicons name="list" size={20} color="#1db954" />
               <Text style={styles.selectionActionText}>Fila</Text>
+            </TouchableOpacity>
+            <TouchableOpacity accessibilityLabel="Adicionar músicas a uma playlist" style={styles.selectionAction} onPress={() => addSongToPlaylist(selectedSongs)}>
+              <Ionicons name="add-circle-outline" size={20} color="#1db954" />
             </TouchableOpacity>
             {(isPersonal || isLibrary) && (
               <TouchableOpacity style={styles.selectionAction} onPress={removeSelected} disabled={removingSelection}>

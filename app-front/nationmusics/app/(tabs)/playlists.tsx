@@ -73,6 +73,8 @@ export default function PersonalPlaylistsScreen() {
   const [description, setDescription] = useState('');
   const [iconUrl, setIconUrl] = useState('');
   const [saving, setSaving] = useState(false);
+  const [spotifyUrl, setSpotifyUrl] = useState('');
+  const [importingSpotify, setImportingSpotify] = useState(false);
   const [editingPlaylist, setEditingPlaylist] = useState<ApiPlaylist | null>(null);
   const [dailyMixName, setDailyMixName] = useState('Seu mix diário');
   const hydratedRef = useRef(false);
@@ -168,6 +170,7 @@ export default function PersonalPlaylistsScreen() {
   );
 
   const resetForm = () => {
+    setImportingSpotify(false); setSpotifyUrl('');
     setName('');
     setDescription('');
     setIconUrl('');
@@ -175,6 +178,17 @@ export default function PersonalPlaylistsScreen() {
   };
 
   const createPlaylist = async () => {
+    if (importingSpotify) {
+      if (!spotifyUrl.trim()) return;
+      setSaving(true);
+      try {
+        const result = await apiRequest<ApiPlaylist>('/spotify/import', { method: 'POST', json: true, timeoutMs: 90000, body: JSON.stringify({ url: spotifyUrl.trim() }) });
+        setModalVisible(false); resetForm(); await loadPlaylists(false, true);
+        Alert.alert('Playlist importada', `${result.songs?.length || 0} músicas disponíveis. As restantes foram priorizadas no importador.`);
+      } catch (error) { Alert.alert('Falha ao importar', error instanceof Error ? error.message : 'Tente novamente.'); }
+      finally { setSaving(false); }
+      return;
+    }
     const cleanName = name.trim();
     if (!cleanName) {
       Alert.alert('Nome obrigatório', 'Dê um nome para a playlist.');
@@ -315,6 +329,9 @@ export default function PersonalPlaylistsScreen() {
                 <View style={styles.sectionHeading}>
                   <Text style={styles.sectionTitle}>Suas playlists</Text>
                   <View style={styles.sectionActions}>
+                    <TouchableOpacity accessibilityLabel="Importar playlist do Spotify" style={styles.smallAddButton} onPress={() => { resetForm(); setImportingSpotify(true); setModalVisible(true); }}>
+                      <Ionicons name="link-outline" size={18} color="#121212" />
+                    </TouchableOpacity>
                     <Text style={styles.sectionHint}>Segure para editar</Text>
                     <TouchableOpacity
                       accessibilityLabel="Criar playlist"
@@ -352,7 +369,11 @@ export default function PersonalPlaylistsScreen() {
       <Modal visible={modalVisible} transparent animationType="fade" onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>{editingPlaylist ? 'Editar playlist' : 'Nova playlist'}</Text>
+            <Text style={styles.modalTitle}>{importingSpotify ? 'Importar do Spotify' : editingPlaylist ? 'Editar playlist' : 'Nova playlist'}</Text>
+            {importingSpotify ? <>
+              <TextInput style={styles.input} placeholder="Link de playlist pública do Spotify" placeholderTextColor="#777" value={spotifyUrl} onChangeText={setSpotifyUrl} autoCapitalize="none" />
+              <Text style={{color:'#aaa', marginBottom:16}}>Faixas ausentes ficam pendentes até o importador enviá-las.</Text>
+            </> : <>
             <TextInput
               style={styles.input}
               placeholder="Nome"
@@ -375,6 +396,7 @@ export default function PersonalPlaylistsScreen() {
               onChangeText={setIconUrl}
               autoCapitalize="none"
             />
+            </>}
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={styles.secondaryButton}

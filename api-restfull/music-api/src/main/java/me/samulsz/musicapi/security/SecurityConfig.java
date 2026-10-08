@@ -38,6 +38,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/admin/**").permitAll()
                 .requestMatchers("/api/musicas/**").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/spotify/import").authenticated()
                 .requestMatchers("/api/spotify/**").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/playlists/global").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/playlists/most-downloaded/songs").permitAll()

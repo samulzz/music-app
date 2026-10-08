@@ -104,16 +104,24 @@ function schedulePersistPlaybackSession(delay = 350) {
 }
 
 async function restorePersistedPlaybackSession(expectedRevision: number) {
-  if (TrackPlayer.getQueue().length) {
-    schedulePersistPlaybackSession();
-    return;
-  }
   playbackSessionRestoring = true;
   try {
+    if (TrackPlayer.getQueue().length) return;
     const raw = await AsyncStorage.getItem(PLAYBACK_SESSION_KEY);
     const session = raw ? JSON.parse(raw) as PersistedPlaybackSession : null;
     if (!session || Date.now() - Number(session.savedAt || 0) > PLAYBACK_SESSION_MAX_AGE_MS) return;
     if (expectedRevision !== playbackQueueRevision || TrackPlayer.getQueue().length || !Array.isArray(session.queue) || !session.queue.length) return;
+    const offline = await deviceIsOffline();
+    const restoredSongs = await mergeWithOfflineLibrary(session.queue.map(({ song }) => song));
+    session.queue = session.queue.map((entry, index) => ({ ...entry, song: restoredSongs[index] || entry.song }));
+    if (offline) {
+      const active = session.queue[Math.max(0, Math.min(session.queue.length - 1, Number(session.queueIndex) || 0))];
+      // Never hand an unreachable remote source to the native player on cold startup.
+      if (!active?.song.localUri) return;
+      const originalActive = active.song.sourceId || active.song.id;
+      session.queue = session.queue.filter(({ song }) => Boolean(song.localUri));
+      session.queueIndex = session.queue.findIndex(({ song }) => (song.sourceId || song.id) === originalActive);
+    }
     const needsNetwork = session.queue.some(({ song }) => !song.localUri && Boolean(song.sourceId || song.remoteUrl));
     const headers = needsNetwork ? await getMediaHeaders() : undefined;
     if (expectedRevision !== playbackQueueRevision || TrackPlayer.getQueue().length) return;
@@ -134,12 +142,13 @@ async function restorePersistedPlaybackSession(expectedRevision: number) {
     if (Number(session.positionSeconds) > 0) TrackPlayer.seekTo(Number(session.positionSeconds));
     // Uma restauração fria sempre volta pausada para o app nunca começar sozinho.
     TrackPlayer.pause();
-    prefetchNextInQueue(index);
+    if (!offline) prefetchNextInQueue(index);
   } catch {
     // O app continua normalmente quando não existe sessão válida para restaurar.
   } finally {
     playbackSessionRestoring = false;
-    schedulePersistPlaybackSession();
+    // Keep the previous session when offline startup cannot restore its remote track.
+    try { if (TrackPlayer.getQueue().length) schedulePersistPlaybackSession(); } catch {}
   }
 }
 
@@ -370,8 +379,10 @@ export function setupMusicPlayer() {
   });
   initialized = true;
   const sampleStats = () => {
+    try {
     const item = TrackPlayer.getActiveMediaItem();
     sampleListening(item ? mediaItemSourceId(item) : '', TrackPlayer.getProgress().position, TrackPlayer.isPlaying());
+    } catch { /* Native player may still be initializing or recovering. */ }
   };
   TrackPlayer.addEventListener(Event.PlaybackProgressUpdated, sampleStats);
   TrackPlayer.addEventListener(Event.PlaybackStateChanged, sampleStats);
@@ -384,7 +395,7 @@ export function setupMusicPlayer() {
   AppState.addEventListener('change', (nextState) => {
     if (nextState !== 'active') void persistPlaybackSessionNow().catch(() => {});
   });
-  setInterval(() => schedulePersistPlaybackSession(0), 5_000);
+  setInterval(() => { try { if (TrackPlayer.getQueue().length) schedulePersistPlaybackSession(0); } catch {} }, 5_000);
 }
 
 function toMediaItem(song: MusicSong, headers?: Record<string, string>, origin: MusicSong['queueOrigin'] = 'manual'): MediaItem | null {
@@ -482,9 +493,15 @@ async function recoverActivePlayback() {
     if (Date.now() - previous < 15_000) return;
     lastRecoveryAt.set(sourceId, Date.now());
     const position = TrackPlayer.getProgress().position;
-    const headers = await getMediaHeaders();
     const extras = item.extras && typeof item.extras === 'object' ? item.extras : {};
-    const offlineLocal = extras.localUri && await deviceIsOffline() ? String(extras.localUri) : '';
+    const offline = await deviceIsOffline();
+    if (offline) {
+      // A network outage is not a reason to rebuild the queue or auto-resume playback.
+      TrackPlayer.pause();
+      return;
+    }
+    const headers = await getMediaHeaders();
+    const offlineLocal = '';
     if (revision !== playbackQueueRevision || mediaItemSourceId(TrackPlayer.getActiveMediaItem()) !== sourceId) return;
     const freshUrl = musicDownloadUrl(sourceId, String(item.title || 'Música'), String(item.artist || ''));
     const refreshed = [...queue];

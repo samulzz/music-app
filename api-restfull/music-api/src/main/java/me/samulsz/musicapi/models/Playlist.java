@@ -42,6 +42,12 @@ public class Playlist {
     )
     private Set<Song> songs = new HashSet<>();
 
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "playlist_pending_tracks", joinColumns = @JoinColumn(name = "playlist_id"))
+    private java.util.List<PendingPlaylistTrack> pendingTracks = new java.util.ArrayList<>();
+    public java.util.List<PendingPlaylistTrack> getPendingTracks() { return pendingTracks; }
+    public void setPendingTracks(java.util.List<PendingPlaylistTrack> value) { pendingTracks = value; }
+
     public Long getId() {
         return id;
     }

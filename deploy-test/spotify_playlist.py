@@ -28,12 +28,17 @@ def serialize_track(track):
     }
 
 
+def read_limit(value=200):
+    # Match the backend's supported import size, not the nightly batch size.
+    return min(max(int(value), 1), 1000)
+
+
 def main():
     if len(sys.argv) < 2:
         raise ValueError("Link do Spotify não informado.")
 
     url = sys.argv[1]
-    limit = min(max(int(sys.argv[2]) if len(sys.argv) > 2 else 200, 1), 200)
+    limit = read_limit(sys.argv[2] if len(sys.argv) > 2 else 200)
     kind = resource_type(url)
 
     with SpotifyClient(timeout=25) as client:
@@ -61,7 +66,7 @@ def main():
         "name": entity.name,
         "coverUrl": cover_url,
         "totalTracks": total_tracks,
-        "truncated": total_tracks > limit,
+        "truncated": total_tracks > len(tracks),
         "tracks": tracks,
     }, ensure_ascii=False))
 

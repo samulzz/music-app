@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import * as Application from 'expo-application';
 import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
 
@@ -31,22 +32,24 @@ export type UpdateCheckResult = {
   message?: string;
 };
 
-const FALLBACK_APP_VERSION = '1.1.5';
-const FALLBACK_ANDROID_VERSION_CODE = 7;
 const UPDATE_TIMEOUT_MS = 8000;
 
 const androidConfig = Constants.expoConfig?.android as { versionCode?: number } | undefined;
 const extraConfig = Constants.expoConfig?.extra as { androidVersionCode?: number } | undefined;
 
-export const CURRENT_APP_VERSION = Constants.nativeAppVersion
+export const CURRENT_APP_VERSION = Application.nativeApplicationVersion
+  || Constants.nativeAppVersion
   || Constants.expoConfig?.version
-  || FALLBACK_APP_VERSION;
-export const CURRENT_ANDROID_VERSION_CODE = Number(
-  Constants.nativeBuildVersion
+  || '0';
+const detectedBuildVersion = Number(
+  Application.nativeBuildVersion
+    ?? Constants.nativeBuildVersion
     ?? androidConfig?.versionCode
     ?? extraConfig?.androidVersionCode
-    ?? FALLBACK_ANDROID_VERSION_CODE,
+    ?? Number.NaN,
 );
+export const CURRENT_ANDROID_VERSION_CODE = Number.isInteger(detectedBuildVersion) && detectedBuildVersion > 0
+  ? detectedBuildVersion : undefined;
 
 function versionParts(version: string) {
   return String(version || '0')
@@ -84,10 +87,10 @@ async function fetchUpdateManifest(): Promise<UpdateManifest> {
 }
 
 function targetRequiresUpdate(target: UpdateTarget, currentVersion: string, currentVersionCode?: number) {
-  const latestVersionIsNewer = target.version
+  const latestVersionIsNewer = target.version && currentVersion !== '0'
     ? compareVersions(target.version, currentVersion) > 0
     : false;
-  const minimumVersionIsNewer = target.minimumVersion
+  const minimumVersionIsNewer = target.minimumVersion && currentVersion !== '0'
     ? compareVersions(target.minimumVersion, currentVersion) > 0
     : false;
   const latestCodeIsNewer = typeof target.versionCode === 'number' && typeof currentVersionCode === 'number'
@@ -143,6 +146,7 @@ export async function checkForRequiredUpdate(platform: 'android' | 'desktop' = P
 export async function openUpdateDownload(result: UpdateCheckResult) {
   const url = result.target?.url;
   if (!url) return false;
-  await Linking.openURL(url);
+  const separator = url.includes('?') ? '&' : '?';
+  await Linking.openURL(`${url}${separator}version=${encodeURIComponent(result.target?.version || '')}&t=${Date.now()}`);
   return true;
 }

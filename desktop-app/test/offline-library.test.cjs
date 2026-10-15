@@ -30,6 +30,7 @@ test('explicit download pins an already cached file without fetching again', asy
   const download = handler('music:download', {
     normalizeSong: song => song, protectedAudio: new Map(), cachedAudioFilePath: id => id,
     hasUsableCachedAudio: async () => true, pinOfflineSong: async song => pinned = song.sourceId,
+    apiRequest: async () => {},
     waitUntilPrepared: async () => networkCalls++, ensureDesktopAudioCached: async () => networkCalls++, Date,
   });
   assert.equal(await download(null, { sourceId: 'track' }), true);

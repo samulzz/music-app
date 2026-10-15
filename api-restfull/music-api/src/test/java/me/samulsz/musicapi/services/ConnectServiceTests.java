@@ -40,6 +40,7 @@ class ConnectServiceTests {
         PlaybackDeviceRepository devices = mock(PlaybackDeviceRepository.class);
 
         when(users.findByUsername("ouvinte")).thenReturn(Optional.of(user));
+        when(users.findByUsernameForUpdate("ouvinte")).thenReturn(Optional.of(user));
         when(playbacks.findByUser_Id(10L)).thenAnswer(invocation -> Optional.ofNullable(storedPlayback));
         when(playbacks.save(any(AccountPlayback.class))).thenAnswer(invocation -> storedPlayback = invocation.getArgument(0));
         when(devices.findByUser_IdAndDeviceId(any(), any())).thenAnswer(invocation -> storedDevices.stream()
@@ -99,6 +100,39 @@ class ConnectServiceTests {
                 id, id, id.equals("desktop") ? "desktop" : "android", song,
                 15D, 180D, playing, 0.7D, revision, "", "", ""
         ));
+    }
+
+    @Test
+    void passiveOldSnapshotCannotUndoPendingTransfer() {
+        heartbeat("desktop", song(), true, 0L);
+        var command = service.control("ouvinte", new ConnectControlRequest("mobile", "SYNC", 0D, null));
+        var beforeAck = heartbeat("mobile", null, false, 0L);
+        assertEquals("mobile", beforeAck.activeDeviceId());
+        assertEquals("SYNC", beforeAck.commandAction());
+        assertTrue(beforeAck.playing());
+        var afterAck = heartbeat("mobile", song(), true, command.commandRevision());
+        assertEquals("", afterAck.commandAction());
+        assertEquals("mobile", afterAck.activeDeviceId());
+        var oldPc = heartbeat("desktop", song(), false, 0L);
+        assertEquals("mobile", oldPc.activeDeviceId());
+        assertTrue(oldPc.playing());
+    }
+
+    @Test
+    void remoteProgressNeverExceedsDurationAfterLongAbsence() {
+        heartbeat("desktop", song(), true, 0L);
+        storedPlayback.setStateUpdatedAt(System.currentTimeMillis() - 550L * 60 * 1000);
+        var response = service.get("ouvinte", "mobile", 0L);
+        assertEquals(180D, response.positionSeconds());
+        assertFalse(response.playing());
+    }
+
+    @Test
+    void expiredCommandIsNotReplayedOnColdStartup() {
+        heartbeat("desktop", song(), true, 0L);
+        service.control("ouvinte", new ConnectControlRequest("desktop", "SYNC", 0D, null));
+        storedPlayback.setStateUpdatedAt(System.currentTimeMillis() - 180000);
+        assertEquals("", service.get("ouvinte", "desktop", 0L).commandAction());
     }
 
     private ConnectSongDto song() {

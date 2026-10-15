@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('nation', {
   removeOfflineSong: (sourceId) => ipcRenderer.invoke('music:remove-offline', sourceId),
   previewSpotify: (url) => ipcRenderer.invoke('spotify:preview', url),
   getLibrary: () => ipcRenderer.invoke('library:list'),
+  getLikedSongs: () => ipcRenderer.invoke('library:liked'),
   saveToLibrary: (song) => ipcRenderer.invoke('library:save', song),
   removeFromLibrary: (serverId) => ipcRenderer.invoke('library:remove', serverId),
   getPlaylists: () => ipcRenderer.invoke('playlists:list'),

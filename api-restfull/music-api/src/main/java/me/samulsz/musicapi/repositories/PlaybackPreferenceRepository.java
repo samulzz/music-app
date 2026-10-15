@@ -10,6 +10,8 @@ import java.util.Optional;
 public interface PlaybackPreferenceRepository extends JpaRepository<PlaybackPreference, Long> {
     Optional<PlaybackPreference> findByUserIdAndSongId(Long userId, Long songId);
     List<PlaybackPreference> findByUserIdOrderByLastListenedAtDesc(Long userId);
+    @Query("select p.song from PlaybackPreference p where p.user.id = :userId and p.liked = true order by p.song.title asc")
+    List<me.samulsz.musicapi.models.Song> findLikedSongsByUserId(@org.springframework.data.repository.query.Param("userId") Long userId);
 
     @Query(value = """
             SELECT s.artist

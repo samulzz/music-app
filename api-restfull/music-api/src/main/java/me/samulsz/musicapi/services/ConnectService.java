@@ -36,7 +36,7 @@ public class ConnectService {
     }
 
     public ConnectStateResponse heartbeat(String username, ConnectHeartbeatRequest request) {
-        User user = user(username);
+        User user = lockedUser(username);
         String deviceId = required(request == null ? null : request.deviceId(), "Identificador do dispositivo ausente.");
         long now = System.currentTimeMillis();
         PlaybackDevice device = devices.findByUser_IdAndDeviceId(user.getId(), deviceId).orElseGet(() -> {
@@ -64,14 +64,17 @@ public class ConnectService {
                 && Boolean.TRUE.equals(request.playing())) {
             playback.setActiveDeviceId(deviceId);
         }
-        if (deviceId.equals(playback.getActiveDeviceId())) {
+        boolean awaitingCommand = deviceId.equals(playback.getCommandTargetDeviceId())
+                && playback.getCommandRevision() > device.getProcessedCommandRevision()
+                && now - playback.getStateUpdatedAt() < Duration.ofMinutes(2).toMillis();
+        if (deviceId.equals(playback.getActiveDeviceId()) && !awaitingCommand) {
             if (request.song() != null) {
                 writeSong(playback, request.song());
                 playback.setContextType(clean(request.contextType()));
                 playback.setContextId(clean(request.contextId()));
                 playback.setContextName(clean(request.contextName()));
-                playback.setPositionSeconds(Math.max(0, value(request.positionSeconds(), playback.getPositionSeconds())));
                 playback.setDurationSeconds(Math.max(0, value(request.durationSeconds(), playback.getDurationSeconds())));
+                playback.setPositionSeconds(position(value(request.positionSeconds(), playback.getPositionSeconds()), playback.getDurationSeconds()));
                 playback.setPlaying(Boolean.TRUE.equals(request.playing()));
                 playback.setVolumeLevel(clamp(value(request.volumeLevel(), playback.getVolumeLevel()), 0, 1));
             } else {
@@ -94,7 +97,7 @@ public class ConnectService {
     }
 
     public ConnectStateResponse control(String username, ConnectControlRequest request) {
-        User user = user(username);
+        User user = lockedUser(username);
         String sourceDeviceId = required(request == null ? null : request.deviceId(), "Identificador do dispositivo ausente.");
         AccountPlayback playback = state(user);
         String action = clean(request.action()).toUpperCase(Locale.ROOT);
@@ -102,6 +105,8 @@ public class ConnectService {
         long now = System.currentTimeMillis();
 
         if ("SYNC".equals(action)) {
+            // Freeze the old device's elapsed position before transferring ownership.
+            playback.setPositionSeconds(effectivePosition(playback, now));
             playback.setActiveDeviceId(sourceDeviceId);
             if (request.song() != null) writeSong(playback, request.song());
             playback.setCommandTargetDeviceId(sourceDeviceId);
@@ -133,13 +138,17 @@ public class ConnectService {
         List<ConnectDeviceResponse> online = uniqueDevices.values().stream()
                 .map(device -> new ConnectDeviceResponse(device.getDeviceId(), device.getDeviceName(), device.getPlatform(), device.getDeviceId().equals(playback.getActiveDeviceId()), device.getLastSeenAt()))
                 .toList();
-        boolean commandPending = currentDeviceId.equals(playback.getCommandTargetDeviceId()) && playback.getCommandRevision() > processedRevision;
+        boolean commandPending = currentDeviceId.equals(playback.getCommandTargetDeviceId())
+                && playback.getCommandRevision() > processedRevision
+                && now - playback.getStateUpdatedAt() < Duration.ofMinutes(2).toMillis();
+        double effective = effectivePosition(playback, now);
+        boolean playing = playback.isPlaying() && (playback.getDurationSeconds() <= 0 || effective < playback.getDurationSeconds());
         return new ConnectStateResponse(
                 playback.getActiveDeviceId(), currentDeviceId.equals(playback.getActiveDeviceId()), online,
                 playback.getActiveDeviceId().isBlank() ? null : readSong(playback),
-                playback.getPositionSeconds(), playback.getDurationSeconds(), playback.isPlaying(), playback.getVolumeLevel(),
-                playback.getStateUpdatedAt(), commandPending ? playback.getCommandAction() : "", playback.getCommandValue(),
-                playback.getCommandRevision(), now
+                effective, playback.getDurationSeconds(), playing, playback.getVolumeLevel(),
+                now, commandPending ? playback.getCommandAction() : "", playback.getCommandValue(),
+                playback.getCommandRevision(), now, playback.getContextType(), playback.getContextId(), playback.getContextName()
         );
     }
 
@@ -148,6 +157,12 @@ public class ConnectService {
     }
     private AccountPlayback emptyState(User user) { AccountPlayback value = new AccountPlayback(); value.setUser(user); value.setStateUpdatedAt(System.currentTimeMillis()); return value; }
     private User user(String username) { return users.findByUsername(username).orElseThrow(() -> new IllegalArgumentException("Usuário não encontrado.")); }
+    private User lockedUser(String username) { return users.findByUsernameForUpdate(username).orElseThrow(() -> new IllegalArgumentException("Usuário não encontrado.")); }
+    private double position(double value, double duration) { return duration > 0 ? clamp(value, 0, duration) : Math.max(0, value); }
+    private double effectivePosition(AccountPlayback playback, long now) {
+        double elapsed = playback.isPlaying() ? Math.max(0, now - playback.getStateUpdatedAt()) / 1000D : 0;
+        return position(playback.getPositionSeconds() + elapsed, playback.getDurationSeconds());
+    }
     private void writeSong(AccountPlayback state, ConnectSongDto song) {
         state.setSongId(clean(song.id())); state.setSongSourceId(clean(song.sourceId())); state.setSongTitle(clean(song.title()));
         state.setSongArtist(clean(song.artist())); state.setSongArtworkUrl(clean(song.artworkUrl())); state.setSongRemoteUrl(clean(song.remoteUrl()));

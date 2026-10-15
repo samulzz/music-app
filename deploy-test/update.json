@@ -1,26 +1,26 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-05T02:15:00-03:00",
+  "generatedAt": "2026-10-15T14:30:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.38",
-    "versionCode": 40,
-    "minimumVersion": "1.1.38",
-    "minimumVersionCode": 40,
-    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.38.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.38.apk",
+    "version": "1.1.41",
+    "versionCode": 43,
+    "minimumVersion": "1.1.41",
+    "minimumVersionCode": 43,
+    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.41.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.41.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Recomendações por escuta real e gostos recentes, curtidas sincronizadas e interface mais consistente."
+    "releaseNotes": "Biblioteca unificada, coleção de curtidas, Connect mais estável, retomada com fila e transições suaves."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.42",
-    "minimumVersion": "1.2.42",
-    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.42.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.42.exe",
+    "version": "1.2.44",
+    "minimumVersion": "1.2.44",
+    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.44.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.44.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Recomendações por escuta real e gostos recentes, curtidas sincronizadas e interface mais consistente."
+    "releaseNotes": "Biblioteca unificada e curtidas, correções no Connect e na retomada, animações e janela maximizada com tamanho salvo."
   }
 }

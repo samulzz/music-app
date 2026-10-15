@@ -47,6 +47,12 @@ public class SongController {
         }
     }
 
+    @PostMapping("/downloads/sync")
+    public ResponseEntity<?> syncDownloads(Authentication auth, @RequestBody List<String> sourceIds) {
+        songService.syncDownloads(auth.getName(), sourceIds);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/search")
     public ResponseEntity<?> searchPrecachedCatalog(@RequestParam(required = false, defaultValue = "") String q) {
         try {

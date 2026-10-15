@@ -8,6 +8,7 @@ import { FullPlayerModal } from './full-player-modal';
 import { addSongToPlaylist } from './playlist-picker';
 import {
   playNext,
+  playSongQueue,
   getPlaybackQueue,
   playQueueIndex,
   playPrevious,
@@ -19,12 +20,14 @@ import {
 import { useSyncedActiveMediaItem } from '../services/player-state';
 import {
   getConnectDeviceId,
+  markConnectRevisionProcessed,
   sendConnectControl,
   subscribeConnectState,
   takeOverConnectPlayback,
   type ConnectState,
 } from '../services/connect';
 import { sendRecommendationFeedback, getRecommendationFeedback } from '../services/recommendations';
+import { getConnectQueue } from '../services/connect-queue';
 
 function formatTime(value: number) {
   if (!Number.isFinite(value) || value < 0) return '0:00';
@@ -81,7 +84,7 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
   const liked = Boolean(displayTrackKey && likedTrackKey === displayTrackKey);
   const displayPlaying = remote ? Boolean(connectState?.playing) : Boolean(isPlaying);
   const displayPosition = remote
-    ? Math.max(0, Number(connectState?.positionSeconds || 0) + (connectState?.playing ? Math.max(0, (clockNow - Number(connectState.stateUpdatedAt || clockNow)) / 1000) : 0))
+    ? Math.min(Number(connectState?.durationSeconds) > 0 ? Number(connectState?.durationSeconds) : Infinity, Math.max(0, Number(connectState?.positionSeconds || 0) + (connectState?.playing ? Math.max(0, (clockNow - Number(connectState.stateUpdatedAt || clockNow)) / 1000) : 0)))
     : progress.position;
   useEffect(() => {
     let active = true;
@@ -110,6 +113,18 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
   const displayDuration = remote ? Number(connectState?.durationSeconds || 0) : progress.duration;
   const remoteDeviceName = connectState?.devices.find((device) => device.active)?.deviceName;
   const control = (remoteAction: string, localAction: () => void) => {
+    if (remote && remoteAction === 'PLAY' && !connectState?.playing) {
+      void (async () => {
+        const transferred = await takeOverConnectPlayback();
+        if (transferred.song) {
+          const queue = await getConnectQueue(transferred);
+          await playSongQueue(queue.songs, queue.index, 'playlist', queue.context, true);
+          seekToPosition(transferred.positionSeconds);
+        }
+        markConnectRevisionProcessed(transferred.commandRevision);
+      })().catch(() => {});
+      return;
+    }
     if (remote) void sendConnectControl(remoteAction).catch(() => {});
     else run(localAction);
   };

@@ -20,8 +20,9 @@ public class SongService {
     @Autowired
     private MusicService musicService;
 
+    @org.springframework.transaction.annotation.Transactional
     public void saveSongForUser(String username, SongRequest request) {
-        User user = userRepository.findByUsername(username)
+        User user = userRepository.findByUsernameForUpdate(username)
                 .orElseThrow(() -> new RuntimeException("Usuário não encontrado!"));
 
         Song song = null;
@@ -51,6 +52,14 @@ public class SongService {
         song = songRepository.save(song);
 
         user.getDownloadedSongs().add(song);
+        userRepository.save(user);
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void syncDownloads(String username, java.util.List<String> sourceIds) {
+        if (sourceIds == null || sourceIds.size() > 5000) throw new IllegalArgumentException("Lista de downloads inválida.");
+        User user = userRepository.findByUsernameForUpdate(username).orElseThrow();
+        user.getDownloadedSongs().addAll(songRepository.findBySourceIdIn(sourceIds.stream().filter(java.util.Objects::nonNull).distinct().toList()));
         userRepository.save(user);
     }
 

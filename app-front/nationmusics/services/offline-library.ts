@@ -3,8 +3,10 @@ import { Directory, File, Paths, type DownloadProgress } from 'expo-file-system'
 import { DeviceEventEmitter, NativeModules, Platform } from 'react-native';
 
 import type { MusicSong } from '../types/music';
-import { apiRequest, getMediaHeaders } from './api';
+import { apiRequest, getMediaHeaders, deviceIsOffline } from './api';
 import { musicDownloadUrl } from './config';
+import { getSession } from './auth';
+import { fromApiLibrarySong, type ApiLibrarySong } from '../types/music';
 
 const INDEX_KEY = 'nationmusics.offline-library.v2';
 const MUSIC_DIRECTORY_NAME = 'nationmusics-audio';
@@ -304,6 +306,49 @@ export async function upsertOfflineSong(song: MusicSong) {
     ...library.filter((candidate) => songIdentity(candidate) !== identity),
   ];
   await writeIndex(next);
+  void syncDownloadedSong(song).catch(() => {});
+}
+
+const syncedDownloads = new Set<string>();
+async function loadSyncedDownloads(username: string) {
+  try {
+    const ids = JSON.parse(await AsyncStorage.getItem(`nationmusics.downloads-synced.${username}`) || '[]') as string[];
+    ids.forEach(id => syncedDownloads.add(`${username}:${id}`));
+  } catch {}
+}
+async function persistSyncedDownloads(username: string) {
+  const prefix = `${username}:`;
+  await AsyncStorage.setItem(`nationmusics.downloads-synced.${username}`, JSON.stringify(
+    [...syncedDownloads].filter(key => key.startsWith(prefix)).map(key => key.slice(prefix.length))));
+}
+async function syncDownloadedSong(song: MusicSong) {
+  const owner = await getSession();
+  if (!owner?.username || !song.sourceId) return;
+  await loadSyncedDownloads(owner.username);
+  const key = `${owner.username}:${song.sourceId}`;
+  if (syncedDownloads.has(key)) return;
+  await apiRequest('/songs/downloads/sync', { method: 'POST', json: true, body: JSON.stringify([song.sourceId]) });
+  syncedDownloads.add(key);
+  await persistSyncedDownloads(owner.username);
+}
+
+export async function getAccountLibrary(): Promise<MusicSong[]> {
+  const local = await getOfflineLibrary({ validateFiles: true });
+  if (await deviceIsOffline()) return local;
+  // Migrate existing downloads to the account, retrying failed syncs on next visit.
+  const owner = await getSession();
+  if (owner?.username) await loadSyncedDownloads(owner.username);
+  const missing = local.filter(song => song.sourceId && !syncedDownloads.has(`${owner?.username}:${song.sourceId}`));
+  if (missing.length) await apiRequest('/songs/downloads/sync', { method: 'POST', json: true,
+    body: JSON.stringify(missing.map(song => song.sourceId)) }).then(() => {
+      missing.forEach(song => syncedDownloads.add(`${owner?.username}:${song.sourceId}`));
+    }).then(() => owner?.username ? persistSyncedDownloads(owner.username) : undefined).catch(() => {});
+  let remote: MusicSong[] = [];
+  try { remote = (await apiRequest<ApiLibrarySong[]>('/songs/my-library')).map(fromApiLibrarySong); }
+  catch (error) { if (!local.length) throw error; }
+  const merged = new Map(local.map(song => [song.sourceId || song.id, song]));
+  for (const song of remote) merged.set(song.sourceId || song.id, { ...merged.get(song.sourceId || song.id), ...song });
+  return mergeWithOfflineLibrary([...merged.values()]);
 }
 
 export function canUseNativeBackgroundDownloads() {

@@ -22,6 +22,7 @@ function harness(queueIndex) {
     getMediaHeaders: async () => {calls.headers++; return {};},
     toMediaItem: song => ({mediaId: song.id, url: song.localUri || 'https://remote'}),
     emitShuffleEnabled: () => {}, prefetchNextInQueue: () => calls.prefetch++,
+    safePlaybackPosition: value => value,
     schedulePersistPlaybackSession: () => calls.persist++,
     TrackPlayer: {getQueue: () => queue, setVolume: () => {}, setMediaItems: items => queue=items,
       seekTo: () => {}, pause: () => calls.paused++},

@@ -253,7 +253,7 @@ export default function HomePlaylistsScreen() {
         if (restored.length) queue = restored;
       }
       const target = queue.findIndex((song) => (song.sourceId || song.id) === (fallback.sourceId || fallback.id));
-      await restorePausedSongQueue(queue, target >= 0 ? target : 0, item.positionSeconds, context);
+      await restorePausedSongQueue(queue, target >= 0 ? target : 0, item.positionSeconds, context, item.durationSeconds);
     } catch {}
   }, [personalized]);
 

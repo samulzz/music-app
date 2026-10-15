@@ -64,6 +64,11 @@ public class RecommendationController {
         return ResponseEntity.ok(recommendationService.feedback(auth.getName(), songId, sourceId));
     }
 
+    @GetMapping("/liked")
+    public ResponseEntity<?> liked(Authentication auth) {
+        return ResponseEntity.ok(recommendationService.likedSongs(auth.getName()));
+    }
+
     @GetMapping("/radio")
     public ResponseEntity<?> radio(Authentication auth, @RequestParam(defaultValue = "") String sourceId,
                                    @RequestParam(defaultValue = "30") int limit,

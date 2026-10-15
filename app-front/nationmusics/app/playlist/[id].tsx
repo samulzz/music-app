@@ -27,6 +27,7 @@ import {
   downloadSongsWithNativeService,
   mergeWithOfflineLibrary,
   getOfflineLibrary,
+  getAccountLibrary,
 } from '../../services/offline-library';
 import { ensureSourceId } from '../../services/music-resolver';
 import { addSongsToPlaybackQueue, playSongQueue, setShuffleEnabled, subscribeShuffleEnabled } from '../../services/player';
@@ -183,6 +184,7 @@ export default function PlaylistDetailsScreen() {
   const playlistKind = typeof params.kind === 'string' ? params.kind : 'global';
   const isPersonal = playlistKind === 'personal';
   const isLibrary = playlistKind === 'library';
+  const isLiked = playlistKind === 'liked';
   const isDaily = playlistKind === 'daily';
   const isOfflineLibrary = playlistKind === 'offline';
   const selectionMode = selectedIds.size > 0;
@@ -257,16 +259,16 @@ export default function PlaylistDetailsScreen() {
     try {
       const data = isDaily
         ? (await getDailyMix()).songs
-        : await apiRequest<ApiLibrarySong[]>(isLibrary
-          ? '/songs/my-library'
+        : isLibrary ? null
+        : await apiRequest<ApiLibrarySong[]>(isLiked ? '/recommendations/liked'
           : isPersonal
           ? `/playlists/personal/${encodeURIComponent(playlistId)}/songs`
           : playlistId === 'most-downloaded'
           ? '/playlists/most-downloaded/songs'
           : `/playlists/${encodeURIComponent(playlistId)}/songs`, {
-            authenticated: isPersonal || isLibrary,
+            authenticated: isPersonal || isLibrary || isLiked,
           });
-      const merged = await mergeWithOfflineLibrary(data.map(fromApiLibrarySong));
+      const merged = isLibrary ? await getAccountLibrary() : await mergeWithOfflineLibrary((data || []).map(fromApiLibrarySong));
       if (isPersonal) {
         const details = await apiRequest<{pendingTracks?: Array<{spotifyId: string; title: string; artist: string}>}>(`/playlists/personal/${encodeURIComponent(playlistId)}`);
         if (currentCacheKeyRef.current === cacheKey) setPendingTracks(details.pendingTracks || []);
@@ -291,7 +293,7 @@ export default function PlaylistDetailsScreen() {
 
     refreshInFlightRef.current = operation;
     return operation;
-  }, [isDaily, isLibrary, isPersonal, isOfflineLibrary, playlistId, cacheKey, readCache, writeCache]);
+  }, [isDaily, isLibrary, isLiked, isPersonal, isOfflineLibrary, playlistId, cacheKey, readCache, writeCache]);
 
   const hydrateSongs = useCallback(async () => {
     if (!playlistId) return;

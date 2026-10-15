@@ -12,6 +12,7 @@ import java.util.Optional;
 
 @Repository
 public interface SongRepository extends JpaRepository<Song, Long> {
+    java.util.List<Song> findBySourceIdIn(java.util.Collection<String> sourceIds);
 
     Optional<Song> findByUri(String uri);
 

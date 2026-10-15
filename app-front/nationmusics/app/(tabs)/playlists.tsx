@@ -300,19 +300,20 @@ export default function PersonalPlaylistsScreen() {
             contentContainerStyle={styles.list}
             ListHeaderComponent={
               <View>
-                <TouchableOpacity style={styles.card} onPress={() => router.push({ pathname: '/playlist/[id]', params: { id: 'offline', title: 'Baixadas neste celular', kind: 'offline' } })}>
-                  <Ionicons name="download-outline" size={25} color="#1db954" />
-                  <Text style={styles.title}>Baixadas neste celular</Text>
-                </TouchableOpacity>
                 <TouchableOpacity style={styles.libraryCard} onPress={openLibrary} activeOpacity={0.86}>
                   <View style={styles.libraryCover}>
-                    <Ionicons name="heart" size={30} color="#fff" />
+                    <Ionicons name="download" size={30} color="#fff" />
                   </View>
                   <View style={styles.libraryMeta}>
                     <Text style={styles.libraryEyebrow}>NA SUA CONTA</Text>
                     <Text style={styles.libraryTitle}>Minhas Músicas</Text>
-                    <Text style={styles.libraryDescription}>Todas as músicas que você salvou.</Text>
+                    <Text style={styles.libraryDescription}>Seus downloads e músicas salvas na conta.</Text>
                   </View>
+                  <Ionicons name="chevron-forward" size={20} color="#aaa" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.libraryCard} activeOpacity={0.86} onPress={() => router.push({ pathname: '/playlist/[id]', params: { id: 'liked', title: 'Músicas curtidas', kind: 'liked' } })}>
+                  <View style={styles.libraryCover}><Ionicons name="heart" size={30} color="#fff" /></View>
+                  <View style={styles.libraryMeta}><Text style={styles.libraryEyebrow}>SEUS FAVORITOS</Text><Text style={styles.libraryTitle}>Músicas curtidas</Text><Text style={styles.libraryDescription}>Todas as músicas que você curtiu.</Text></View>
                   <Ionicons name="chevron-forward" size={20} color="#aaa" />
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.dailyCard} onPress={openDailyMix} activeOpacity={0.86}>

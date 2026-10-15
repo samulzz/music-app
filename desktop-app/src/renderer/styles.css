@@ -450,6 +450,22 @@ nav {
   padding-bottom: 38px;
 }
 
+@keyframes view-arrive {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.content-view > * { animation: view-arrive 240ms ease-out both; }
+.playlist-card, .library-feature, .home-song-card, .song-row {
+  transition: background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+}
+.playlist-card:hover, .library-feature:hover { transform: translateY(-3px); box-shadow: 0 8px 24px #0003; }
+button:active { transform: scale(0.96); }
+#like-button.active { animation: view-arrive 220ms ease-out; }
+.liked-feature .library-feature-cover { background: linear-gradient(140deg, #5935b5, #a086e4); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}
+
 .content-view::-webkit-scrollbar {
   width: 8px;
 }

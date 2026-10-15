@@ -91,7 +91,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
 
   let response: Response | undefined;
   const method = String(request.method || 'GET').toUpperCase();
-  const cacheable = method === 'GET' && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(home|daily))(?:[/?]|$)/.test(path);
+  const cacheable = method === 'GET' && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(home|daily|liked))(?:[/?]|$)/.test(path);
   const cacheKey = cacheable ? await accountCacheKey(`nationmusics.api-cache.${path}`) : '';
   const cached = async () => {
     if (!cacheKey) return null;

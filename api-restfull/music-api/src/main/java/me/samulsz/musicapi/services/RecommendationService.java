@@ -100,6 +100,11 @@ public class RecommendationService {
         preferenceRepository.save(preference);
     }
 
+    @Transactional(readOnly = true)
+    public List<Song> likedSongs(String username) {
+        return preferenceRepository.findLikedSongsByUserId(getUser(username).getId());
+    }
+
     @Transactional
     public void setFeedback(String username, RecommendationFeedbackRequest request) {
         if (request == null) throw new IllegalArgumentException("Feedback inválido.");

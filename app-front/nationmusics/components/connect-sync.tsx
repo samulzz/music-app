@@ -3,15 +3,17 @@ import TrackPlayer from '@rntp/player';
 
 import {
   getProcessedConnectRevision,
+  getConnectControlEpoch,
   markConnectRevisionProcessed,
   sendConnectHeartbeat,
   publishConnectState,
   type ConnectSong,
   type ConnectState,
 } from '../services/connect';
-import { getPlaybackContext, playNext, playPrevious, playSongQueue } from '../services/player';
+import { getPlaybackContext, getPlaybackQueueRevision, playNext, playPrevious, playSongQueue } from '../services/player';
 import { getActiveMediaItemSafely, getPlayerProgressSafely, isPlayerPlayingSafely } from '../services/player-state';
 import { getSession } from '../services/auth';
+import { getConnectQueue } from '../services/connect-queue';
 
 function localSong(): ConnectSong | null {
   const item = getActiveMediaItemSafely();
@@ -29,12 +31,16 @@ function localSong(): ConnectSong | null {
 async function applyCommand(state: ConnectState) {
   if (!state.currentDeviceActive || !state.commandAction || state.commandRevision <= getProcessedConnectRevision()) return;
   const action = state.commandAction;
+  const epoch = getConnectControlEpoch();
+  const queueRevision = getPlaybackQueueRevision();
   if (action === 'SYNC' && state.song) {
     const current = localSong();
     if ((current?.sourceId || current?.id) !== (state.song.sourceId || state.song.id)) {
-      await playSongQueue([{ ...state.song, id: state.song.id || state.song.sourceId || '' }], 0);
+      const queue = await getConnectQueue(state);
+      if (epoch !== getConnectControlEpoch() || queueRevision !== getPlaybackQueueRevision()) return;
+      await playSongQueue(queue.songs, queue.index, 'playlist', queue.context, true, state.playing);
     }
-    TrackPlayer.seekTo(Math.max(0, state.positionSeconds));
+    TrackPlayer.seekTo(Math.min(Math.max(0, state.positionSeconds), state.durationSeconds > 0 ? Math.max(0, state.durationSeconds - 0.5) : 0));
     TrackPlayer.setVolume(Math.max(0, Math.min(1, state.volumeLevel)));
     if (state.playing) TrackPlayer.play(); else TrackPlayer.pause();
   } else if (action === 'PLAY') TrackPlayer.play();
@@ -66,6 +72,7 @@ export function ConnectSync() {
           volumeLevel: volume,
           context: getPlaybackContext(),
         });
+        if (!state) return;
         if (!state.currentDeviceActive && isPlayerPlayingSafely()) TrackPlayer.pause();
         await applyCommand(state);
       } catch {

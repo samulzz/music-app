@@ -1,4 +1,4 @@
-const { app, BrowserWindow, clipboard, ipcMain, protocol, shell } = require('electron');
+const { app, BrowserWindow, clipboard, ipcMain, protocol, shell, screen } = require('electron');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
@@ -42,6 +42,7 @@ const activePreparations = new Map();
 const activeAudioCacheDownloads = new Map();
 const protectedAudio = new Map();
 let offlineIndexWrites = Promise.resolve();
+const syncedAccountDownloads = new Set();
 
 async function pinOfflineSong(song) {
   const owner = await getSession();
@@ -680,7 +681,7 @@ function normalizeSong(song, saved = false) {
 
 async function apiRequest(endpoint, options = {}) {
   const session = await getSession();
-  const cacheable = (!options.method || options.method === 'GET') && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(home|daily))(?:[/?]|$)/.test(endpoint);
+  const cacheable = (!options.method || options.method === 'GET') && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(home|daily|liked))(?:[/?]|$)/.test(endpoint);
   const cachePath = cacheable ? dataPath(`metadata/${createHash('sha256').update(`${session?.username || 'public'}:${endpoint}`).digest('hex')}.json`) : '';
   const headers = {
     Accept: 'application/json',
@@ -1047,9 +1048,16 @@ async function handleAudioStream(request) {
 }
 
 async function createWindow() {
+  const savedWindow = await readJson(dataPath('window-state.json'), null);
+  const bounds = savedWindow?.bounds;
+  const visible = bounds && [bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)
+    && bounds.width >= 900 && bounds.height >= 620
+    && screen.getAllDisplays().some(({ workArea: area }) => bounds.x < area.x + area.width
+      && bounds.x + bounds.width > area.x && bounds.y < area.y + area.height && bounds.y + bounds.height > area.y);
   mainWindow = new BrowserWindow({
     width: 1180,
     height: 760,
+    ...(visible ? bounds : {}),
     minWidth: 900,
     minHeight: 620,
     backgroundColor: '#101010',
@@ -1067,8 +1075,21 @@ async function createWindow() {
     },
   });
 
-  await mainWindow.loadFile(path.join(__dirname, 'renderer/index.html'));
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  const win = mainWindow;
+  let maximized = savedWindow ? Boolean(savedWindow.maximized) : true;
+  let saveTimer;
+  const saveWindow = () => {
+    if (win.isDestroyed()) return;
+    try { fs.writeFileSync(dataPath('window-state.json'), JSON.stringify({ bounds: win.getNormalBounds(), maximized })); } catch {}
+  };
+  const scheduleSave = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveWindow, 300); };
+  win.on('maximize', () => { maximized = true; scheduleSave(); });
+  win.on('unmaximize', () => { maximized = false; scheduleSave(); });
+  win.on('resize', scheduleSave);
+  win.on('move', scheduleSave);
+  win.on('close', () => { clearTimeout(saveTimer); saveWindow(); });
+  win.once('ready-to-show', () => { if (maximized) win.maximize(); win.show(); });
+  await win.loadFile(path.join(__dirname, 'renderer/index.html'));
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -1162,6 +1183,7 @@ ipcMain.handle('music:download', async (_event, rawSong) => {
     await ensureDesktopAudioCached(song);
   }
   await pinOfflineSong(song);
+  await apiRequest('/songs/downloads/sync', { method: 'POST', body: [song.sourceId] }).catch(() => {});
   return true;
 });
 ipcMain.handle('music:is-downloaded', async (_event, rawSong) => {
@@ -1240,10 +1262,28 @@ ipcMain.handle('spotify:preview', async (_event, url) => {
   });
 });
 ipcMain.handle('library:list', async () => {
+  const local = await offlineSongs();
+  const owner = await getSession();
+  // One migration per account/track per process, not a save on every navigation.
+  const migrated = await readJson(dataPath('account-downloads-synced.json'), {});
+  for (const source of migrated[owner?.username] || []) syncedAccountDownloads.add(`${owner?.username}:${source}`);
+  const missing = local.filter(song => !syncedAccountDownloads.has(`${owner?.username}:${song.sourceId}`));
+  if (missing.length) await apiRequest('/songs/downloads/sync', { method: 'POST', body: missing.map(song => song.sourceId), timeoutMs: 2000 })
+    .then(async () => {
+      missing.forEach(song => syncedAccountDownloads.add(`${owner?.username}:${song.sourceId}`));
+      migrated[owner?.username] = [...new Set([...(migrated[owner?.username] || []), ...missing.map(song => song.sourceId)])];
+      await writeJson(dataPath('account-downloads-synced.json'), migrated);
+    }).catch(() => {});
   const songs = await apiRequest('/songs/my-library');
-  return songs.map((song) => normalizeSong(song, true));
+  const merged = new Map(local.map(song => [song.sourceId || song.id, { ...song, downloaded: true, saved: true }]));
+  for (const item of songs) {
+    const song = normalizeSong(item, true);
+    const localSong = merged.get(song.sourceId || song.id);
+    merged.set(song.sourceId || song.id, { ...localSong, ...song, downloaded: Boolean(localSong?.downloaded || song.downloaded) });
+  }
+  return [...merged.values()];
 });
-ipcMain.handle('library:save', async (_event, rawSong) => {
+async function saveSongToAccount(rawSong) {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) throw new Error('Esta música não possui uma origem válida.');
   await apiRequest('/songs/save', {
@@ -1259,7 +1299,9 @@ ipcMain.handle('library:save', async (_event, rawSong) => {
     },
   });
   return { ...song, saved: true };
-});
+}
+ipcMain.handle('library:save', (_event, rawSong) => saveSongToAccount(rawSong));
+ipcMain.handle('library:liked', async () => (await apiRequest('/recommendations/liked')).map(song => normalizeSong(song, false)));
 ipcMain.handle('library:remove', async (_event, serverId) => {
   if (!serverId) throw new Error('Não foi possível identificar esta música.');
   await apiRequest(`/songs/remove/${encodeURIComponent(serverId)}`, { method: 'DELETE' });
@@ -1432,10 +1474,10 @@ ipcMain.handle('friends:clear-presence', async () => {
   });
 });
 ipcMain.handle('connect:heartbeat', async (_event, payload) => {
-  return apiRequest('/connect/heartbeat', { method: 'POST', body: payload || {} });
+  return apiRequest('/connect/heartbeat', { method: 'POST', body: payload || {}, timeoutMs: 4000 });
 });
 ipcMain.handle('connect:control', async (_event, payload) => {
-  return apiRequest('/connect/control', { method: 'POST', body: payload || {} });
+  return apiRequest('/connect/control', { method: 'POST', body: payload || {}, timeoutMs: 2500 });
 });
 ipcMain.handle('jam:create', async (_event, payload) => {
   return apiRequest('/jams', {

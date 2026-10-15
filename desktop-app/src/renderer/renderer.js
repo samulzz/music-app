@@ -88,6 +88,7 @@ let friendListTimer = null;
 let jamHostTimer = null;
 let jamFollowTimer = null;
 let connectSyncTimer = null;
+let connectControlEpoch = 0;
 let playbackTelemetrySessionId = '';
 let playbackLoadStartedAt = 0;
 let waitingTelemetryTimer = null;
@@ -594,8 +595,8 @@ function persistPlaybackSession() {
   try {
     localStorage.setItem(playbackSessionKey(), JSON.stringify({
       savedAt: Date.now(),
-      queue: state.queue.slice(0, 250).map(persistedSong).filter(Boolean),
-      queueIndex: state.queueIndex,
+      queue: state.queue.slice(Math.max(0, state.queueIndex - 50), Math.max(0, state.queueIndex - 50) + 250).map(persistedSong).filter(Boolean),
+      queueIndex: state.queueIndex - Math.max(0, state.queueIndex - 50),
       queueMode: state.queueMode,
       shuffle: state.shuffle,
       positionSeconds: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
@@ -627,7 +628,7 @@ async function restorePersistedPlaybackSession() {
   state.queue = queue;
   state.queueHistory = [...queue];
   state.queueIndex = clamp(Number(restored.queueIndex) || 0, 0, queue.length - 1);
-  state.queueMode = restored.queueMode || 'selection';
+  state.queueMode = restored.queueMode === 'recommendations' ? 'recommendations' : 'selection';
   state.shuffle = Boolean(restored.shuffle);
   state.playbackContext = restored.playbackContext || null;
   state.queueRevision += 1;
@@ -638,6 +639,7 @@ async function restorePersistedPlaybackSession() {
   updateShuffleButton();
   resetShuffleRemainingIndexes();
   await loadCurrentTrack(false);
+  if (state.queue.length === 1) void seedRecommendationsForSingleSong(state.queue[0], state.queueRevision);
   prefetchNextTracks();
   return true;
 }
@@ -1032,7 +1034,8 @@ function currentConnectSong() {
 function connectEffectivePosition(remoteState) {
   if (!remoteState) return 0;
   const elapsed = remoteState.playing ? Math.max(0, (Date.now() - Number(remoteState.stateUpdatedAt || Date.now())) / 1000) : 0;
-  return Math.max(0, Number(remoteState.positionSeconds || 0) + elapsed);
+  const position = Math.max(0, Number(remoteState.positionSeconds || 0) + elapsed);
+  return Number(remoteState.durationSeconds) > 0 ? Math.min(position, Number(remoteState.durationSeconds)) : position;
 }
 
 function renderConnectState() {
@@ -1145,19 +1148,34 @@ function toggleCurrentLike() {
 
 async function executeConnectCommand(connect) {
   if (!connect?.currentDeviceActive || !connect.commandAction || connect.commandRevision <= state.connectProcessedRevision) return;
+  const epoch = connectControlEpoch;
+  const originalQueueRevision = state.queueRevision;
   const action = connect.commandAction;
   if (action === 'SYNC' && connect.song) {
     const local = currentConnectSong();
     if (songIdentity(local) !== songIdentity(connect.song)) {
-      state.queue = [{ ...connect.song, id: connect.song.id || connect.song.sourceId }];
-      state.queueIndex = 0;
+      const transferred = { ...connect.song, id: connect.song.id || connect.song.sourceId };
+      let queue = [transferred];
+      try {
+        if (connect.contextType === 'library') queue = await window.nation.getLibrary();
+        else if (connect.contextType === 'liked') queue = await window.nation.getLikedSongs();
+        else if (connect.contextType === 'personal' && connect.contextId) queue = await window.nation.getPersonalPlaylistSongs(connect.contextId);
+        else if (['global', 'daily', 'most-downloaded'].includes(connect.contextType) && connect.contextId) queue = await window.nation.getPlaylistSongs(connect.contextId);
+      } catch {}
+      if (epoch !== connectControlEpoch || originalQueueRevision !== state.queueRevision) return;
+      let index = queue.findIndex(song => songIdentity(song) === songIdentity(transferred));
+      if (index < 0) { queue.unshift(transferred); index = 0; }
+      state.queue = queue;
+      state.queueIndex = index;
       state.queueRevision += 1;
-      state.queueMode = 'external';
-      state.playbackContext = null;
+      state.queueMode = 'selection';
+      state.playbackContext = connect.contextType ? { type: connect.contextType, id: connect.contextId || '', name: connect.contextName || '' } : null;
       state.shuffleRemainingIndexes = [];
-      await loadCurrentTrack();
+      await loadCurrentTrack(false);
+      void seedRecommendationsForSingleSong(state.queue[0], state.queueRevision);
     }
-    if (Number.isFinite(connect.positionSeconds)) audio.currentTime = Math.max(0, Number(connect.positionSeconds));
+    if (epoch !== connectControlEpoch || songIdentity(currentConnectSong()) !== songIdentity(connect.song)) return;
+    if (Number.isFinite(connect.positionSeconds)) audio.currentTime = Math.min(Math.max(0, Number(connect.positionSeconds)), Number.isFinite(audio.duration) ? Math.max(0, audio.duration - 1) : 0);
     // Ao trazer a reprodução para este PC, mantém o volume que já estava salvo nele.
     if (connect.playing) await audio.play(); else audio.pause();
   } else if (action === 'PLAY') await audio.play();
@@ -1172,6 +1190,7 @@ async function executeConnectCommand(connect) {
 async function syncConnectPlayback() {
   if (!state.session?.token || state.connectSyncInFlight) return;
   state.connectSyncInFlight = true;
+  const epoch = connectControlEpoch;
   try {
     const connect = await window.nation.updateConnectPlayback({
       deviceId: connectDeviceId(),
@@ -1187,6 +1206,7 @@ async function syncConnectPlayback() {
       contextId: state.playbackContext?.id || '',
       contextName: state.playbackContext?.name || '',
     });
+    if (epoch !== connectControlEpoch) return;
     state.connectState = connect;
     if (!connect.currentDeviceActive && !audio.paused) audio.pause();
     await executeConnectCommand(connect);
@@ -1200,14 +1220,17 @@ async function syncConnectPlayback() {
   }
 }
 
-async function controlConnectPlayback(action, value) {
+async function controlConnectPlayback(action, value, quiet = false) {
+  connectControlEpoch += 1;
+  const epoch = connectControlEpoch;
   try {
     const connect = await window.nation.controlConnectPlayback({ deviceId: connectDeviceId(), action, value });
+    if (epoch !== connectControlEpoch) return null;
     state.connectState = connect;
     renderConnectState();
     return connect;
   } catch (error) {
-    showBanner(error.message || 'Nao foi possivel controlar o outro dispositivo.', true);
+    if (!quiet) showBanner(error.message || 'Nao foi possivel controlar o outro dispositivo.', true);
     return null;
   }
 }
@@ -2108,7 +2131,7 @@ function bindQueueControls(songs = state.visibleSongs, context = null) {
 
 function bindSongActions(playlist = null) {
   const context = playlist ? {
-    type: playlist.library ? 'library' : playlist.personal ? 'personal' : playlist.daily ? 'daily' : String(playlist.id) === 'most-downloaded' ? 'most-downloaded' : 'global',
+    type: playlist.liked ? 'liked' : playlist.library ? 'library' : playlist.personal ? 'personal' : playlist.daily ? 'daily' : String(playlist.id) === 'most-downloaded' ? 'most-downloaded' : 'global',
     id: String(playlist.id || ''),
     name: playlist.name || '',
   } : state.view === 'offline' ? { type: 'offline', name: 'Baixadas neste computador' } : null;
@@ -2287,6 +2310,7 @@ async function resumeHomePlayback(resume) {
     if (context) {
       if (context.type === 'personal') songs = await window.nation.getPersonalPlaylistSongs(context.id);
       else if (context.type === 'library') songs = await window.nation.getLibrary();
+      else if (context.type === 'liked') songs = await window.nation.getLikedSongs();
       else if (context.type === 'album') songs = await window.nation.getAlbumSongs({ name: context.name || context.id, playlistId: /^\d+$/.test(context.id) ? Number(context.id) : undefined });
       else songs = await window.nation.getPlaylistSongs(context.id);
     }
@@ -2306,11 +2330,13 @@ async function restoreHomePlaybackPaused(resume) {
   try {
     if (context?.type === 'personal') songs = await window.nation.getPersonalPlaylistSongs(context.id);
     else if (context?.type === 'library') songs = await window.nation.getLibrary();
+    else if (context?.type === 'liked') songs = await window.nation.getLikedSongs();
     else if (context?.type === 'album') songs = await window.nation.getAlbumSongs({ name: context.name || context.id, playlistId: /^\d+$/.test(context.id) ? Number(context.id) : undefined });
     else if (context) songs = await window.nation.getPlaylistSongs(context.id);
   } catch {}
   if (!songs.length) songs = [fallback];
   const index = Math.max(0, songs.findIndex((song) => songIdentity(song) === songIdentity(fallback)));
+  if (state.queue.length || audio.src) return;
   state.pendingResumePosition = Math.max(0, Number(resume.positionSeconds) || 0);
   playQueue(songs, index, context, { autoplay: false, passive: true });
 }
@@ -2375,7 +2401,7 @@ function renderPlaylistSongsContent(playlist, songs) {
   `;
   bindSongActions(playlist);
   const context = {
-    type: playlist.library ? 'library' : playlist.personal ? 'personal' : playlist.daily ? 'daily' : String(playlist.id) === 'most-downloaded' ? 'most-downloaded' : 'global',
+    type: playlist.liked ? 'liked' : playlist.library ? 'library' : playlist.personal ? 'personal' : playlist.daily ? 'daily' : String(playlist.id) === 'most-downloaded' ? 'most-downloaded' : 'global',
     id: String(playlist.id || ''),
     name: playlist.name || '',
   };
@@ -2424,7 +2450,7 @@ async function openPlaylist(playlist) {
   setPageHeader(playlist.library ? 'BIBLIOTECA' : 'PLAYLIST', playlist.name);
   const cacheKey = playlistDetailsCacheKey(playlist);
   const cached = playlistDetailsCache.get(cacheKey);
-  const cacheIsFresh = cached && Date.now() - cached.savedAt < VIEW_CACHE_TTL_MS
+  const cacheIsFresh = !playlist.liked && cached && Date.now() - cached.savedAt < VIEW_CACHE_TTL_MS
     && !(playlist.personal && ((playlist.pendingTracks || []).length || (Array.isArray(playlist.songs) && playlist.songs.length !== cached.songs.length)));
 
   if (cacheIsFresh) {
@@ -2437,10 +2463,10 @@ async function openPlaylist(playlist) {
   try {
     const [library, playlistSongs] = await Promise.all([
       window.nation.getLibrary(),
-      playlist.library ? Promise.resolve(null) : playlist.personal ? window.nation.getPersonalPlaylistSongs(playlist.id) : window.nation.getPlaylistSongs(playlist.id),
+      playlist.liked ? window.nation.getLikedSongs() : playlist.library ? Promise.resolve(null) : playlist.personal ? window.nation.getPersonalPlaylistSongs(playlist.id) : window.nation.getPlaylistSongs(playlist.id),
     ]);
     if (!currentView(viewRequest)) return;
-    const songs = playlist.library ? library : playlistSongs;
+    const songs = playlist.liked ? playlistSongs : playlist.library ? library : playlistSongs;
     if (playlist.personal) {
       const details = await window.nation.getPersonalPlaylist(playlist.id);
       if (!currentView(viewRequest)) return;
@@ -2868,16 +2894,19 @@ async function renderLibrary() {
     state.personalPlaylists = playlists;
     state.personalPlaylistsFetchedAt = Date.now();
     contentView.innerHTML = `
-      <button class="secondary-button" id="open-offline-library">${icon('download')} Baixadas neste computador</button>
       <article class="library-feature" id="open-saved-library">
         <div class="library-feature-cover">${icon('music')}</div>
         <div class="library-feature-copy">
           <span>NA SUA CONTA</span>
           <h2>Minhas Músicas</h2>
-          <p>Todas as músicas que você salvou, reunidas em um só lugar.</p>
+          <p>Seus downloads e músicas salvas, disponíveis em todos os dispositivos.</p>
           <small>${library.length} ${library.length === 1 ? 'música' : 'músicas'}</small>
         </div>
         ${icon('arrow-right')}
+      </article>
+      <article class="library-feature liked-feature" id="open-liked-library" role="button" tabindex="0">
+        <div class="library-feature-cover">${icon('heart')}</div>
+        <div class="library-feature-copy"><span>SEUS FAVORITOS</span><h2>Músicas curtidas</h2><p>Todas as músicas que você marcou com coração.</p></div>${icon('arrow-right')}
       </article>
       <div class="section-heading library-section-heading">
         <div class="section-title-stack"><h2>Suas playlists</h2><span>${playlists.length} ${playlists.length === 1 ? 'coleção' : 'coleções'}</span></div>
@@ -2896,7 +2925,7 @@ async function renderLibrary() {
       ${playlists.length ? '' : '<div class="empty-state compact-empty"><b>Nenhuma playlist pessoal</b><span>Crie uma playlist para organizar suas músicas.</span></div>'}
     `;
     $('#open-saved-library')?.addEventListener('click', () => openPlaylist({ id: 'library', name: 'Minhas Músicas', library: true }));
-    $('#open-offline-library')?.addEventListener('click', renderOfflineLibrary);
+    $('#open-liked-library')?.addEventListener('click', () => openPlaylist({ id: 'liked', name: 'Músicas curtidas', liked: true }));
     $('#import-spotify-playlist')?.addEventListener('click', importSpotifyPlaylist);
     $('#create-personal-playlist')?.addEventListener('click', createPersonalPlaylist);
     document.querySelectorAll('.playlist-card[data-personal-playlist-index]').forEach((card) => {
@@ -2974,13 +3003,13 @@ function playQueue(songs, index, context = null, options = {}) {
   const revision = state.queueRevision;
   if (context?.type === 'offline') state.connectState = null;
   void (async () => {
-    if (!options.passive && state.connectState && !state.connectState.currentDeviceActive) {
-      const connect = await controlConnectPlayback('SYNC');
+    if (!options.passive && !state.connectState?.currentDeviceActive && context?.type !== 'offline' && navigator.onLine !== false) {
+      const connect = await controlConnectPlayback('SYNC', undefined, true);
       if (connect) rememberConnectRevision(connect.commandRevision);
     }
     if (revision !== state.queueRevision) return;
     await loadCurrentTrack(options.autoplay !== false);
-    if (isSingle && context?.type !== 'offline') void seedRecommendationsForSingleSong(state.queue[0], state.queueRevision);
+    if (playable.length === 1 && context?.type !== 'offline') void seedRecommendationsForSingleSong(state.queue[0], state.queueRevision);
     window.setTimeout(prefetchNextTracks, 600);
     void syncConnectPlayback();
   })();
@@ -3177,7 +3206,7 @@ async function loadCurrentTrack(autoplay = true) {
     }
     if (requestId !== state.trackLoadRequestId) return;
     if (state.pendingResumePosition > 0) {
-      audio.currentTime = Math.min(state.pendingResumePosition, Number.isFinite(audio.duration) ? Math.max(0, audio.duration - 1) : state.pendingResumePosition);
+      audio.currentTime = Math.min(state.pendingResumePosition, Number.isFinite(audio.duration) ? Math.max(0, audio.duration - 1) : 0);
       state.pendingResumePosition = 0;
     }
     reportPlaybackTelemetry('READY', { loadTimeMs: Math.round(performance.now() - playbackLoadStartedAt) });
@@ -3354,10 +3383,19 @@ $('#top-discord-button')?.addEventListener('click', () => {
   void configureDiscord();
 });
 
-$('#play-button').addEventListener('click', () => {
+$('#play-button').addEventListener('click', async () => {
   if (state.connectState && !state.connectState.currentDeviceActive) {
-    void controlConnectPlayback(state.connectState.playing ? 'PAUSE' : 'PLAY');
+    if (state.connectState.playing) { void controlConnectPlayback('PAUSE'); return; }
+    const connect = await controlConnectPlayback('SYNC');
+    if (!connect) return;
+    await executeConnectCommand(connect);
+    await audio.play().catch(() => recoverDesktopPlayback(false));
     return;
+  }
+  if (audio.paused && state.queue.length && !state.connectState?.currentDeviceActive && navigator.onLine !== false) {
+    const connect = await controlConnectPlayback('SYNC', undefined, true);
+    if (connect) rememberConnectRevision(connect.commandRevision);
+    if (state.queue.length === 1) void seedRecommendationsForSingleSong(state.queue[0], state.queueRevision);
   }
   if (!audio.src) { if (!state.preparingSourceId) void loadCurrentTrack(true); return; }
   if (audio.paused) void audio.play().catch(() => recoverDesktopPlayback(false));

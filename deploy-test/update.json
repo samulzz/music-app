@@ -4,23 +4,23 @@
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.42",
-    "versionCode": 44,
-    "minimumVersion": "1.1.42",
-    "minimumVersionCode": 44,
-    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.42.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.42.apk",
+    "version": "1.1.43",
+    "versionCode": 45,
+    "minimumVersion": "1.1.43",
+    "minimumVersionCode": 45,
+    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.43.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.43.apk",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Removidas transições que causavam lentidão; pesquisas recentes persistentes, privadas por conta e resistentes a falhas de rede."
+    "releaseNotes": "Playlists visitadas abrem pelo cache sem bloquear controles; validação offline em lotes e botão de pausa na playlist ativa."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.45",
-    "minimumVersion": "1.2.45",
-    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.45.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.45.exe",
+    "version": "1.2.46",
+    "minimumVersion": "1.2.46",
+    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.46.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.46.exe",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Pesquisas recentes persistentes por conta, sem sumir com respostas atrasadas ou falhas de rede."
+    "releaseNotes": "Conteúdo usa a largura da janela em monitores grandes e a playlist ativa mostra o botão de pausa."
   }
 }

@@ -13,7 +13,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { type MediaItem } from '@rntp/player';
+import { type MediaItem, useIsPlaying } from '@rntp/player';
 
 import GlobalMiniPlayer from '../../components/global-mini-player';
 import { CollectionLoading } from '../../components/collection-loading';
@@ -21,6 +21,9 @@ import { addSongToPlaylist } from '../../components/playlist-picker';
 import type { ApiLibrarySong, MusicSong } from '../../types/music';
 import { fromApiLibrarySong } from '../../types/music';
 import { apiRequest, accountCacheKey, deviceIsOffline } from '../../services/api';
+import { getCachedSession } from '../../services/auth';
+import { readPlaylistSnapshot, rememberPlaylistSnapshot } from '../../services/playlist-cache';
+import { getLatestConnectState, subscribeConnectState, sendConnectControl, type ConnectState } from '../../services/connect';
 import {
   canUseNativeBackgroundDownloads,
   downloadSong,
@@ -30,7 +33,7 @@ import {
   getAccountLibrary,
 } from '../../services/offline-library';
 import { ensureSourceId } from '../../services/music-resolver';
-import { addSongsToPlaybackQueue, playSongQueue, setShuffleEnabled, subscribeShuffleEnabled } from '../../services/player';
+import { addSongsToPlaybackQueue, playSongQueue, setShuffleEnabled, subscribeShuffleEnabled, getPlaybackContext, togglePlayback } from '../../services/player';
 import { getDailyMix } from '../../services/recommendations';
 import { useSyncedActiveMediaItem } from '../../services/player-state';
 import { sortSongsAlphabetically } from '../../services/song-order';
@@ -165,10 +168,23 @@ export default function PlaylistDetailsScreen() {
   const params = useLocalSearchParams<{ id?: string; title?: string; kind?: string }>();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const playlistId = typeof params.id === 'string' ? params.id : '';
+  const playlistKind = typeof params.kind === 'string' ? params.kind : 'global';
+  const isPersonal = playlistKind === 'personal';
+  const isLibrary = playlistKind === 'library';
+  const isLiked = playlistKind === 'liked';
+  const isDaily = playlistKind === 'daily';
+  const isOfflineLibrary = playlistKind === 'offline';
+  const cacheKey = `nationmusics.playlist.${playlistKind}.${playlistId}.v2`;
+  const account = getCachedSession()?.username;
+  const memoryKey = account ? `${cacheKey}.account.${encodeURIComponent(account)}` : '';
+  const initialCache = readPlaylistSnapshot(memoryKey, isDaily);
   const activeItem = useSyncedActiveMediaItem();
-  const [songs, setSongs] = useState<MusicSong[]>([]);
+  const playing = useIsPlaying();
+  const [connect, setConnect] = useState<ConnectState | null>(getLatestConnectState);
+  const [songs, setSongs] = useState<MusicSong[]>(() => initialCache?.songs || []);
   const [pendingTracks, setPendingTracks] = useState<Array<{spotifyId: string; title: string; artist: string}>>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialCache);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<Record<string, number>>({});
   const [bulkDownload, setBulkDownload] = useState<{ done: number; total: number } | null>(null);
@@ -180,54 +196,61 @@ export default function PlaylistDetailsScreen() {
   const lastRefreshAtRef = useRef(0);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
 
-  const playlistId = typeof params.id === 'string' ? params.id : '';
-  const playlistKind = typeof params.kind === 'string' ? params.kind : 'global';
-  const isPersonal = playlistKind === 'personal';
-  const isLibrary = playlistKind === 'library';
-  const isLiked = playlistKind === 'liked';
-  const isDaily = playlistKind === 'daily';
-  const isOfflineLibrary = playlistKind === 'offline';
   const selectionMode = selectedIds.size > 0;
   const title = useMemo(
     () => typeof params.title === 'string' && params.title.trim() ? params.title : 'Playlist',
     [params.title]
   );
-  const cacheKey = `nationmusics.playlist.${playlistKind}.${playlistId}.v2`;
   const currentCacheKeyRef = useRef(cacheKey);
   currentCacheKeyRef.current = cacheKey;
   const bottomInset = Math.max(insets.bottom, 0);
+  const matchesContext = (type?: string, id?: string) => String(id) === playlistId
+    && (type === playlistKind || playlistId === 'most-downloaded');
+  const remote = Boolean(connect?.song && !connect.currentDeviceActive);
+  const currentCollection = remote ? matchesContext(connect?.contextType, connect?.contextId)
+    : matchesContext(getPlaybackContext()?.type, getPlaybackContext()?.id);
+  const collectionPlaying = currentCollection && (remote ? Boolean(connect?.playing) : playing);
+  useEffect(() => subscribeConnectState(setConnect), []);
 
   const readCache = useCallback(async (): Promise<PlaylistSongsCache> => {
-    const raw = await AsyncStorage.getItem(await accountCacheKey(cacheKey));
+    const scoped = memoryKey || await accountCacheKey(cacheKey);
+    const memory = readPlaylistSnapshot(scoped, isDaily);
+    if (memory) return memory;
+    const raw = await AsyncStorage.getItem(scoped);
     if (!raw) return { savedAt: 0, songs: [] };
     try {
       const parsed = JSON.parse(raw) as PlaylistSongsCache | MusicSong[];
       if (Array.isArray(parsed)) return { savedAt: 0, songs: parsed };
       if (Array.isArray(parsed.songs)) {
-        return { savedAt: Number(parsed.savedAt) || 0, songs: parsed.songs };
+        const value = { savedAt: Number(parsed.savedAt) || 0, songs: parsed.songs };
+        if (isDaily && new Date(value.savedAt).toDateString() !== new Date().toDateString()) return { savedAt: 0, songs: [] };
+        rememberPlaylistSnapshot(scoped, value);
+        return value;
       }
       return { savedAt: 0, songs: [] };
     } catch {
       return { savedAt: 0, songs: [] };
     }
-  }, [cacheKey]);
+  }, [cacheKey, memoryKey, isDaily]);
 
   const writeCache = useCallback(async (next: MusicSong[]) => {
-    if (currentCacheKeyRef.current !== cacheKey) return;
+    if (currentCacheKeyRef.current !== cacheKey || (account && getCachedSession()?.username !== account)) return;
     const savedAt = Date.now();
     lastRefreshAtRef.current = savedAt;
+    const scoped = memoryKey || await accountCacheKey(cacheKey);
+    rememberPlaylistSnapshot(scoped, { savedAt, songs: next });
     await AsyncStorage.setItem(
-      await accountCacheKey(cacheKey),
+      scoped,
       JSON.stringify({ savedAt, songs: next.map(({ localUri, ...song }) => song) })
     );
-  }, [cacheKey]);
+  }, [cacheKey, memoryKey, account]);
 
   const loadSongs = useCallback(async (showSpinner = true, force = false) => {
     if (!playlistId) return;
     if (isOfflineLibrary) {
       const downloaded = await getOfflineLibrary({ validateFiles: true });
       if (currentCacheKeyRef.current !== cacheKey) return;
-      setSongs(sortSongsAlphabetically(downloaded));
+      setSongs(isDaily ? downloaded : sortSongsAlphabetically(downloaded));
       setOfflineMode(true); setLoading(false); return;
     }
     const cacheIsFresh = lastRefreshAtRef.current > 0
@@ -249,10 +272,11 @@ export default function PlaylistDetailsScreen() {
 
     const cached = await readCache();
     if (currentCacheKeyRef.current !== cacheKey) return;
-    if (!isDaily && cached.songs.length) {
-      const downloaded = await mergeWithOfflineLibrary(cached.songs);
+    if (cached.songs.length) {
+      const downloaded = await mergeWithOfflineLibrary(cached.songs, await getOfflineLibrary({ validateFiles: false }));
       if (currentCacheKeyRef.current !== cacheKey) return;
-      setSongs(sortSongsAlphabetically(downloaded));
+      setSongs(isDaily ? downloaded : sortSongsAlphabetically(downloaded));
+      setLoading(false);
       lastRefreshAtRef.current = cached.savedAt;
     }
 
@@ -269,13 +293,14 @@ export default function PlaylistDetailsScreen() {
             authenticated: isPersonal || isLibrary || isLiked,
           });
       const merged = isLibrary ? await getAccountLibrary() : await mergeWithOfflineLibrary((data || []).map(fromApiLibrarySong));
+      const next = isDaily ? merged : sortSongsAlphabetically(merged);
+      if (currentCacheKeyRef.current !== cacheKey) return;
+      setSongs(next); setLoading(false);
       if (isPersonal) {
         const details = await apiRequest<{pendingTracks?: Array<{spotifyId: string; title: string; artist: string}>}>(`/playlists/personal/${encodeURIComponent(playlistId)}`);
         if (currentCacheKeyRef.current === cacheKey) setPendingTracks(details.pendingTracks || []);
       }
       if (currentCacheKeyRef.current !== cacheKey) return;
-      const next = isDaily ? merged : sortSongsAlphabetically(merged);
-      setSongs(next);
       setOfflineMode(await deviceIsOffline());
       await writeCache(next);
     } catch {
@@ -299,16 +324,20 @@ export default function PlaylistDetailsScreen() {
     if (!playlistId) return;
     const cached = await readCache();
     if (currentCacheKeyRef.current !== cacheKey) return;
-    if (!isDaily && cached.songs.length) {
-      setSongs(sortSongsAlphabetically(await mergeWithOfflineLibrary(cached.songs)));
+    if (cached.songs.length) {
+      const known = await mergeWithOfflineLibrary(cached.songs, await getOfflineLibrary({ validateFiles: false }));
+      const ordered = isDaily ? known : sortSongsAlphabetically(known);
+      setSongs(ordered);
+      if (memoryKey) rememberPlaylistSnapshot(memoryKey, { ...cached, songs: ordered });
       lastRefreshAtRef.current = cached.savedAt;
       setLoading(false);
       void loadSongs(false, true);
+      void deviceIsOffline().then(setOfflineMode).catch(() => {});
       return;
     }
 
     void loadSongs(true, true);
-  }, [isDaily, loadSongs, playlistId, cacheKey, readCache]);
+  }, [isDaily, loadSongs, playlistId, cacheKey, memoryKey, readCache]);
 
   useEffect(() => {
     hydratedRef.current = false;
@@ -317,14 +346,15 @@ export default function PlaylistDetailsScreen() {
     let active = true;
     queueMicrotask(() => {
       if (!active) return;
-      setSongs([]);
-      setLoading(true);
+      const snapshot = readPlaylistSnapshot(memoryKey, isDaily);
+      setSongs(snapshot?.songs || []);
+      setLoading(!snapshot);
       setBusyId(null);
       setDownloadProgress({});
       setBulkDownload(null);
     });
     return () => { active = false; };
-  }, [cacheKey]);
+  }, [cacheKey, memoryKey, isDaily]);
 
   useFocusEffect(
     useCallback(() => {
@@ -351,6 +381,11 @@ export default function PlaylistDetailsScreen() {
   }, [playlistId, playlistKind, songs, title, offlineMode]);
 
   const playAll = async () => {
+    if (collectionPlaying) {
+      if (remote) await sendConnectControl('PAUSE'); else await togglePlayback();
+      return;
+    }
+    if (currentCollection && !remote && activeItem) { await togglePlayback(); return; }
     const playable = offlineMode
       ? songs.map((song, index) => ({ song, index })).filter(({ song }) => song.localUri)
       : songs.map((song, index) => ({ song, index }));
@@ -726,12 +761,12 @@ export default function PlaylistDetailsScreen() {
               )}
             </TouchableOpacity>
             <TouchableOpacity
-              accessibilityLabel={shuffle ? 'Reproduzir playlist aleatória' : 'Reproduzir playlist'}
+              accessibilityLabel={collectionPlaying ? 'Pausar playlist' : 'Reproduzir playlist'}
               style={styles.playAllButton}
-              onPress={() => { void playAll(); }}
-              disabled={!songs.length}
+              onPress={() => { void playAll().catch(error => Alert.alert('Não foi possível controlar a reprodução', error instanceof Error ? error.message : 'Tente novamente.')); }}
+              disabled={!songs.length && !currentCollection}
             >
-              <Ionicons name="play" size={21} color="#121212" />
+              <Ionicons name={collectionPlaying ? 'pause' : 'play'} size={21} color="#121212" />
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityLabel="Alternar modo aleatório"

@@ -10,6 +10,8 @@ export type AuthSession = {
 const SESSION_KEY = 'nationmusics.auth.session.v2';
 const LEGACY_TOKEN_KEY = 'userToken';
 const LEGACY_USERNAME_KEY = 'username';
+let lastKnownSession: AuthSession | null = null;
+export function getCachedSession() { return lastKnownSession; }
 
 async function readSecureSession() {
   try {
@@ -40,7 +42,7 @@ export async function getSession(): Promise<AuthSession | null> {
   if (stored) {
     try {
       const session = JSON.parse(stored) as AuthSession;
-      if (session.token?.trim()) return session;
+      if (session.token?.trim()) { lastKnownSession = session; return session; }
     } catch {}
   }
 
@@ -49,7 +51,7 @@ export async function getSession(): Promise<AuthSession | null> {
     LEGACY_USERNAME_KEY,
   ]);
   const token = legacyToken[1]?.replace(/^Bearer\s+/i, '').trim();
-  if (!token) return null;
+  if (!token) { lastKnownSession = null; return null; }
 
   const migrated: AuthSession = {
     token,
@@ -65,6 +67,7 @@ export async function saveSession(session: AuthSession) {
     ...session,
     token: session.token.replace(/^Bearer\s+/i, '').trim(),
   };
+  lastKnownSession = normalized;
   await writeSecureSession(JSON.stringify(normalized));
   await AsyncStorage.multiSet([
     [LEGACY_TOKEN_KEY, normalized.token],
@@ -73,6 +76,7 @@ export async function saveSession(session: AuthSession) {
 }
 
 export async function clearSession() {
+  lastKnownSession = null;
   await Promise.all([
     deleteSecureSession(),
     AsyncStorage.multiRemove([SESSION_KEY, LEGACY_TOKEN_KEY, LEGACY_USERNAME_KEY]),

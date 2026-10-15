@@ -2265,6 +2265,8 @@ body {
 
 .content-view {
   width: 100%;
+  max-width: none;
+  margin: 0;
   height: auto;
   min-height: 0;
   flex: 1 1 auto;

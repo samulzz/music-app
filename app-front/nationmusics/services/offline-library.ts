@@ -14,6 +14,11 @@ const DOWNLOAD_ATTEMPTS = 3;
 const PREPARATION_POLL_MS = 2000;
 const PREPARATION_TIMEOUT_MS = 8 * 60 * 1000;
 const MIN_OFFLINE_AUDIO_BYTES = 512 * 1024;
+let indexSnapshot: MusicSong[] | null = null;
+let indexRead: Promise<MusicSong[]> | null = null;
+let indexRevision = 0;
+let validatedSnapshot: { revision: number; at: number; songs: MusicSong[] } | null = null;
+let validation: Promise<MusicSong[]> | null = null;
 
 type NativeOfflineDownloadsModule = {
   downloadSongs: (
@@ -223,18 +228,24 @@ function requireUsableOfflineSong(song: MusicSong) {
 }
 
 async function readIndex(): Promise<MusicSong[]> {
-  const raw = await AsyncStorage.getItem(INDEX_KEY);
-  if (!raw) return [];
-
-  try {
-    const parsed = JSON.parse(raw) as MusicSong[];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
+  if (indexSnapshot) return indexSnapshot;
+  if (!indexRead) {
+    const revision = indexRevision;
+    indexRead = (async () => {
+      const raw = await AsyncStorage.getItem(INDEX_KEY);
+      let parsed: MusicSong[] = [];
+      try { const value = JSON.parse(raw || '[]'); if (Array.isArray(value)) parsed = value; } catch {}
+      if (revision === indexRevision) indexSnapshot = parsed;
+      return indexSnapshot || parsed;
+    })().finally(() => { indexRead = null; });
   }
+  return indexRead;
 }
 
 async function writeIndex(songs: MusicSong[]) {
+  indexRevision += 1;
+  indexSnapshot = songs;
+  validatedSnapshot = null;
   await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(songs));
   try {
     const { refreshAndroidAutoLibrary } = await import('./player');
@@ -250,21 +261,29 @@ export async function getOfflineLibrary(options: OfflineLibraryOptions = {}) {
     return stored.filter((song) => Boolean(song.localUri));
   }
 
-  const valid = stored
-    .map((song) => withResolvedOfflineFile(song))
-    .filter((song): song is MusicSong => Boolean(song));
-
-  const changed = valid.length !== stored.length
-    || valid.some((song, index) =>
-      song.localUri !== stored[index]?.localUri
-      || song.sizeBytes !== stored[index]?.sizeBytes
-      || song.downloadedAt !== stored[index]?.downloadedAt
-    );
-
-  if (changed) {
-    await writeIndex(valid);
-  }
-  return valid;
+  if (validatedSnapshot?.revision === indexRevision && Date.now() - validatedSnapshot.at < 30000) return validatedSnapshot.songs;
+  if (validation) return validation;
+  const revision = indexRevision;
+  validation = (async () => {
+    const valid: MusicSong[] = [];
+    for (let index = 0; index < stored.length; index++) {
+      // File metadata calls are synchronous on Android: yield between small batches.
+      if (index % 8 === 0) await wait(0);
+      const song = withResolvedOfflineFile(stored[index]);
+      if (song) valid.push(song);
+    }
+    if (revision !== indexRevision) return (await readIndex()).filter(song => Boolean(song.localUri));
+    const changed = valid.length !== stored.length || valid.some((song, index) =>
+      song.localUri !== stored[index]?.localUri || song.sizeBytes !== stored[index]?.sizeBytes || song.downloadedAt !== stored[index]?.downloadedAt);
+    if (changed) {
+      const writeRevision = indexRevision + 1;
+      await writeIndex(valid);
+      if (indexRevision !== writeRevision) return (await readIndex()).filter(song => Boolean(song.localUri));
+    }
+    validatedSnapshot = { revision: indexRevision, at: Date.now(), songs: valid };
+    return valid;
+  })().finally(() => { validation = null; });
+  return validation;
 }
 
 export async function findOfflineSong(song: MusicSong) {

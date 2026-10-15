@@ -821,6 +821,7 @@ function setPlayButtonIcon(playing) {
   if (!button) return;
   button.innerHTML = icon(playing ? 'pause' : 'play');
   button.title = playing ? 'Pausar' : 'Reproduzir';
+  syncCollectionPlayButtons();
 }
 
 function setShuffleMode(enabled, _notify = true) {
@@ -2072,6 +2073,51 @@ function songRows(songs, emptyText = 'Nada por aqui ainda.', options = {}) {
   `;
 }
 
+function samePlaybackCollection(left, right) {
+  if (!left?.type || !right?.type || !left?.id || !right?.id) return false;
+  const type = context => String(context.id) === 'most-downloaded' ? 'most-downloaded' : context.type;
+  return type(left) === type(right) && String(left.id) === String(right.id);
+}
+function collectionPlayback(context) {
+  const remote = state.connectState?.song && !state.connectState.currentDeviceActive ? state.connectState : null;
+  const current = remote ? { type: remote.contextType, id: remote.contextId } : state.playbackContext;
+  return { remote, current: samePlaybackCollection(context, current), playing: remote ? Boolean(remote.playing) : Boolean(audio.src && !audio.paused && !audio.ended) };
+}
+function syncCollectionPlayButtons() {
+  document.querySelectorAll('[data-playback-context]').forEach(button => {
+    let context; try { context = JSON.parse(button.dataset.playbackContext); } catch { return; }
+    const status = collectionPlayback(context);
+    const playing = status.current && status.playing;
+    if (button.dataset.collectionPlaying === String(playing)) return;
+    button.dataset.collectionPlaying = String(playing);
+    button.innerHTML = icon(playing ? 'pause' : 'play') + (button.classList.contains('home-hero-play') ? (playing ? ' Pausar' : ' Ouvir agora') : '');
+    button.title = playing ? 'Pausar playlist' : 'Reproduzir playlist';
+    button.setAttribute('aria-label', button.title);
+    button.setAttribute('aria-pressed', String(playing));
+  });
+}
+async function toggleCollection(context) {
+  const status = collectionPlayback(context);
+  if (!status.current) return false;
+  if (status.remote) {
+    if (!status.playing) return false;
+    await controlConnectPlayback('PAUSE');
+  } else if (audio.src) {
+    if (audio.paused) {
+      if (!state.connectState?.currentDeviceActive && typeof navigator !== 'undefined' && navigator.onLine !== false) {
+        const connect = await controlConnectPlayback('SYNC', undefined, true);
+        if (connect) rememberConnectRevision(connect.commandRevision);
+      }
+      await audio.play().catch(() => recoverDesktopPlayback(false));
+    } else audio.pause();
+  } else return false;
+  syncCollectionPlayButtons();
+  return true;
+}
+function playlistPlaybackContext(playlist) {
+  return { type: playlist.liked ? 'liked' : playlist.library ? 'library' : playlist.personal ? 'personal' : playlist.daily ? 'daily' : String(playlist.id) === 'most-downloaded' ? 'most-downloaded' : 'global', id: String(playlist.id || ''), name: playlist.name || '' };
+}
+
 function queueControlsMarkup(count, label = 'Tocar lista', allowDownload = true) {
   return `
     <div class="queue-controls" aria-label="${escapeHtml(label)}">
@@ -2089,12 +2135,15 @@ function queueControlsMarkup(count, label = 'Tocar lista', allowDownload = true)
 
 function bindQueueControls(songs = state.visibleSongs, context = null) {
   document.querySelectorAll('.queue-play-button').forEach((button) => {
-    button.addEventListener('click', () => {
+    if (context) button.dataset.playbackContext = JSON.stringify(context);
+    button.addEventListener('click', async () => {
+      if (await toggleCollection(context)) return;
       if (!songs.length) return;
       const index = state.shuffle ? Math.floor(Math.random() * songs.length) : 0;
       playQueue(songs, index, context);
     });
   });
+  syncCollectionPlayButtons();
 
   document.querySelectorAll('[data-shuffle-toggle]').forEach((button) => {
     button.addEventListener('click', () => toggleShuffleMode());
@@ -2226,6 +2275,7 @@ function bindSongActions(playlist = null) {
 }
 
 function syncSongRows() {
+  syncCollectionPlayButtons();
   const activeSourceId = songIdentity(state.queue[state.queueIndex]);
   document.querySelectorAll('.song-row').forEach((row) => {
     const sourceId = row.dataset.sourceId || '';
@@ -2296,7 +2346,21 @@ function renderHomeContent(playlists = state.playlists, home = state.homeData) {
   `;
   document.querySelectorAll('[data-home-index]').forEach((card) => {
     card.addEventListener('click', () => openPlaylist(playlists[Number(card.dataset.homeIndex)]));
+    const button = card.querySelector('button');
+    const playlist = playlists[Number(card.dataset.homeIndex)];
+    if (!button || !playlist) return;
+    const context = playlistPlaybackContext(playlist);
+    button.dataset.playbackContext = JSON.stringify(context);
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      if (await toggleCollection(context)) return;
+      try {
+        const songs = await window.nation.getPlaylistSongs(playlist.id);
+        if (songs.length) playQueue(songs, 0, context);
+      } catch (error) { showBanner(error.message, true); }
+    });
   });
+  syncCollectionPlayButtons();
   document.querySelectorAll('[data-home-recent]').forEach((card) => card.addEventListener('click', () => playQueue([recent[Number(card.dataset.homeRecent)]], 0)));
   document.querySelectorAll('[data-home-recommended]').forEach((card) => card.addEventListener('click', () => playQueue([recommended[Number(card.dataset.homeRecommended)]], 0)));
   document.querySelectorAll('[data-home-artist]').forEach((card) => card.addEventListener('click', () => void renderArtist(artists[Number(card.dataset.homeArtist)].name)));

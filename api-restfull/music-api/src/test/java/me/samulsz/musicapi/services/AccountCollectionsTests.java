@@ -19,6 +19,7 @@ class AccountCollectionsTests {
     @Autowired SongRepository songs;
     @Autowired SongService library;
     @Autowired RecommendationService recommendations;
+    @Autowired RecentSearchService recentSearch;
 
     private User user(String name) {
         User value = new User(); value.setUsername(name); value.setPassword("test-only");
@@ -44,5 +45,14 @@ class AccountCollectionsTests {
         assertTrue(recommendations.likedSongs(other.getUsername()).isEmpty());
         recommendations.setFeedback(owner.getUsername(), new RecommendationFeedbackRequest(song.getId(),null,"CLEAR"));
         assertTrue(recommendations.likedSongs(owner.getUsername()).isEmpty());
+    }
+
+    @Test void recentSearchHistoryContainsOnlySongsExplicitlyRecordedByThatUser() {
+        User owner = user("search-owner"); User other = user("search-other"); Song song = song();
+        recentSearch.record(owner.getUsername(), song.getId());
+        recentSearch.record(owner.getUsername(), song.getId());
+        assertEquals(List.of(song.getId()), recentSearch.list(owner.getUsername()).stream().map(Song::getId).toList());
+        assertTrue(recentSearch.list(other.getUsername()).isEmpty());
+        assertTrue(library.getUserLibrary(owner.getUsername()).isEmpty());
     }
 }

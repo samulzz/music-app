@@ -154,7 +154,9 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
       ? String(parsedBody.message)
       : String(parsedBody || '').trim();
     if (response.status === 401 || response.status === 403) {
-      void handleInvalidSession();
+      const sentAuth = new Headers(requestHeaders).get('Authorization') || new Headers(headers).get('Authorization');
+      const current = await getSession();
+      if (!sentAuth || sentAuth === `Bearer ${current?.token}`) void handleInvalidSession();
       throw new Error(message || 'Sessão inválida. Conecte-se e faça login novamente.');
     }
     throw new Error(message || `Erro do servidor (${response.status}).`);

@@ -2155,7 +2155,10 @@ function bindSongActions(playlist = null) {
       menu.addEventListener('click', (event) => {
         const action = event.target.closest('[data-song-menu]')?.dataset.songMenu;
         if (action === 'queue') addSongToPlaybackQueue(song);
-        if (action === 'play') playQueue(state.visibleSongs, Number(button.dataset.index), context);
+        if (action === 'play') {
+          if (state.view === 'search') rememberDesktopRecentSearch(song);
+          playQueue(state.visibleSongs, Number(button.dataset.index), context);
+        }
         if (action === 'download' && !song.downloaded) void window.nation.downloadSong(song).then(() => {
           song.downloaded = true; syncSongRows();
         }).catch(error => showBanner(error.message || 'Não foi possível baixar.', true));
@@ -2173,7 +2176,7 @@ function bindSongActions(playlist = null) {
   document.querySelectorAll('.play-song').forEach((button) => {
     button.addEventListener('click', () => {
       const song = state.visibleSongs[Number(button.dataset.index)];
-      if (state.view === 'search' && song) void window.nation.recordRecentSearchSong?.(song.serverId || song.id).catch(() => {});
+      if (state.view === 'search' && song) rememberDesktopRecentSearch(song);
       playQueue(state.visibleSongs, Number(button.dataset.index), context);
     });
   });
@@ -2625,24 +2628,72 @@ async function addSongToPlaylist(song) {
   }
 }
 
+const recentSearchRefreshes = new Map();
+function mergeRecentSearchSongs(...groups) {
+  const seen = new Set();
+  return groups.flat().filter(song => {
+    const id = String(song?.sourceId || song?.id || '');
+    if (!id || !song?.title || seen.has(id)) return false;
+    seen.add(id); return true;
+  }).slice(0, 20);
+}
+function recentSearchKey(username) { return `recent-search-v2:${encodeURIComponent(username)}`; }
+function readRecentSearch(username) {
+  try {
+    const raw = localStorage.getItem(recentSearchKey(username));
+    if (raw) { const value = JSON.parse(raw); return { songs: mergeRecentSearchSongs(value.songs || []), pending: value.pending || [] }; }
+    // Legacy responses were not pinned to their requesting account.
+    return { songs: [], pending: [] };
+  } catch { return { songs: [], pending: [] }; }
+}
+function writeRecentSearch(username, value) { try { localStorage.setItem(recentSearchKey(username), JSON.stringify(value)); } catch {} }
+function rememberDesktopRecentSearch(song) {
+  const username = state.session?.username;
+  if (!username) return;
+  const current = readRecentSearch(username);
+  writeRecentSearch(username, { songs: mergeRecentSearchSongs([song], current.songs), pending: [
+    ...current.pending.filter(item => String(item.song.id) !== String(song.id)), { song, at: Date.now() },
+  ].slice(-20) });
+  void (async () => { await recentSearchRefreshes.get(username); await refreshDesktopRecentSearch(username); })().catch(() => {});
+}
+function refreshDesktopRecentSearch(username) {
+  if (recentSearchRefreshes.has(username)) return recentSearchRefreshes.get(username);
+  const operation = (async () => {
+    for (const item of readRecentSearch(username).pending) {
+      if (state.session?.username !== username) return readRecentSearch(username).songs;
+      try {
+        await window.nation.recordRecentSearchSong({ username, songId: item.song.serverId || item.song.id });
+        const latest = readRecentSearch(username);
+        writeRecentSearch(username, { ...latest, pending: latest.pending.filter(value => value.song.id !== item.song.id || value.at !== item.at) });
+      } catch { break; }
+    }
+    try {
+      const remote = await window.nation.getRecentSearchSongs(username);
+      const latest = readRecentSearch(username);
+      const songs = mergeRecentSearchSongs([...latest.pending].reverse().map(item => item.song), remote, latest.songs);
+      writeRecentSearch(username, { ...latest, songs });
+      return songs;
+    } catch { return readRecentSearch(username).songs; }
+  })().finally(() => recentSearchRefreshes.delete(username));
+  recentSearchRefreshes.set(username, operation); return operation;
+}
+
 async function renderSearch(query = '', exactGenre = false) {
   const viewRequest = beginView('search');
   const requestId = state.searchRequestId + 1;
   state.searchRequestId = requestId;
   setPageHeader('ENCONTRE ALGO NOVO', query ? `Resultados para “${query}”` : 'O que vai ouvir hoje?');
   if (!query.trim()) {
-    const cacheKey = `recent-search:${state.session?.username || ''}`;
-    let recent = [];
-    try { recent = JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch {}
+    const username = state.session?.username || '';
+    const recent = username ? readRecentSearch(username).songs : [];
     const renderRecent = (songs) => {
-      if (!currentView(viewRequest) || state.searchRequestId !== requestId) return;
+      if (!currentView(viewRequest) || state.searchRequestId !== requestId || state.session?.username !== username) return;
       contentView.innerHTML = `<h3>Pesquisadas recentemente</h3>${songRows(songs, 'As músicas que você abrir pela busca aparecem aqui e nos seus outros dispositivos.', { preserveOrder: true })}`;
       bindSongActions();
     };
-    renderRecent(recent);
+    if (recent.length) renderRecent(recent); else setLoading('Carregando suas pesquisas recentes...');
     try {
-      recent = await window.nation.getRecentSearchSongs();
-      localStorage.setItem(cacheKey, JSON.stringify(recent)); renderRecent(recent);
+      if (username) renderRecent(await refreshDesktopRecentSearch(username));
     } catch {}
     return;
   }

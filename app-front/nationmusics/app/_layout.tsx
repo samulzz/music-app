@@ -36,16 +36,16 @@ export default function RootLayout() {
         <Stack
           screenOptions={{
             headerShown: false,
-            animation: 'fade',
+            animation: 'none',
             contentStyle: { backgroundColor: '#121212' },
           }}
         >
           <Stack.Screen name="index" />
           <Stack.Screen name="login" />
           <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="playlist/[id]" options={{ animation: 'slide_from_right', animationDuration: 220 }} />
-          <Stack.Screen name="artist/[name]" options={{ animation: 'slide_from_right', animationDuration: 220 }} />
-          <Stack.Screen name="album/[name]" options={{ animation: 'slide_from_right', animationDuration: 220 }} />
+          <Stack.Screen name="playlist/[id]" />
+          <Stack.Screen name="artist/[name]" />
+          <Stack.Screen name="album/[name]" />
           <Stack.Screen name="jam/[code]" />
         </Stack>
       </MandatoryUpdateGate>

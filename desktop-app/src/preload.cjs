@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('nation', {
   searchGenre: (genre) => ipcRenderer.invoke('music:genre', genre),
   getArtistSongs: (artist) => ipcRenderer.invoke('music:artist', artist),
   smartSearch: (query) => ipcRenderer.invoke('catalog:search', query),
-  getRecentSearchSongs: () => ipcRenderer.invoke('search:recent'),
+  getRecentSearchSongs: (username) => ipcRenderer.invoke('search:recent', username),
   recordRecentSearchSong: (songId) => ipcRenderer.invoke('search:record', songId),
   importSpotifyPlaylist: (url) => ipcRenderer.invoke('spotify:import', url),
   getAlbums: () => ipcRenderer.invoke('catalog:albums'),

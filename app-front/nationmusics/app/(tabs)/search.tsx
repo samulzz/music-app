@@ -23,8 +23,7 @@ import { downloadSong } from '../../services/offline-library';
 import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
 import { addSongToPlaylist } from '../../components/playlist-picker';
 import { useFocusEffect } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { accountCacheKey } from '../../services/api';
+import { getCachedRecentSearch, refreshRecentSearch, rememberRecentSearch, subscribeRecentSearch } from '../../services/recent-search';
 
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -92,19 +91,30 @@ export default function SearchScreen() {
   const [selectedGenre, setSelectedGenre] = useState('');
   const [results, setResults] = useState<MusicSong[]>([]);
   const [recentSongs, setRecentSongs] = useState<MusicSong[]>([]);
+  const [recentLoading, setRecentLoading] = useState(false);
+  const recentAccountRef = useRef('');
+  const recentRevisionRef = useRef(0);
   useFocusEffect(useCallback(() => {
     let active = true;
     void (async () => {
-      const key = await accountCacheKey('search-recent.v1');
-      try { const cached = JSON.parse(await AsyncStorage.getItem(key) || '[]'); if (active) setRecentSongs(cached); } catch {}
-      try {
-        const data = await apiRequest<ApiSearchSong[]>('/search/recent');
-        const next = data.map(fromApiSearchSong);
-        if (active) setRecentSongs(next);
-        await AsyncStorage.setItem(key, JSON.stringify(next));
-      } catch {}
-    })();
-    return () => { active = false; };
+      const session = await getSession();
+      if (!active || !session?.token) return;
+      if (recentAccountRef.current !== session.username) setRecentSongs([]);
+      recentAccountRef.current = session.username;
+      setUsername(session.username);
+      const revision = recentRevisionRef.current;
+      const cached = await getCachedRecentSearch(session.username);
+      if (active) {
+        if (cached.length && revision === recentRevisionRef.current) setRecentSongs(cached);
+        setRecentLoading(!cached.length);
+      }
+      await refreshRecentSearch(session);
+      if (active && recentAccountRef.current === session.username) setRecentLoading(false);
+    })().catch(() => { if (active) setRecentLoading(false); });
+    const unsubscribe = subscribeRecentSearch((account, songs) => {
+      if (active && recentAccountRef.current === account) { recentRevisionRef.current += 1; setRecentSongs(songs); }
+    });
+    return () => { active = false; unsubscribe(); };
   }, []));
   const [playlistResults, setPlaylistResults] = useState<ApiPlaylist[]>([]);
   const [albumResults, setAlbumResults] = useState<AlbumSummary[]>([]);
@@ -223,8 +233,7 @@ export default function SearchScreen() {
 
   const play = useCallback(async (song: MusicSong) => {
     try {
-      void apiRequest(`/search/recent/${encodeURIComponent(song.id)}`, { method: 'POST' }).catch(() => {});
-      setRecentSongs(current => [song, ...current.filter(item => item.id !== song.id)].slice(0, 20));
+      void rememberRecentSearch(song).catch(() => {});
       await playSongQueue([song], 0, 'manual');
     } catch (error) {
       Alert.alert('Não foi possível reproduzir', error instanceof Error ? error.message : 'Tente novamente.');
@@ -347,7 +356,7 @@ export default function SearchScreen() {
           showsVerticalScrollIndicator={false}
           initialNumToRender={8}
           windowSize={7}
-          removeClippedSubviews
+          removeClippedSubviews={false}
           ListHeaderComponent={
             <View>
               {!query.trim() && <Text style={styles.genreTitle}>Pesquisadas recentemente</Text>}
@@ -420,7 +429,7 @@ export default function SearchScreen() {
             </View>
           }
           ListEmptyComponent={
-            searching ? <CollectionLoading label="Buscando no catálogo..." /> : resultsReady && (artistResults.length || playlistResults.length || albumResults.length) ? null : (
+            !query.trim() && recentLoading ? <ActivityIndicator color="#1db954" style={{ marginTop: 20 }} /> : searching ? <CollectionLoading label="Buscando no catálogo..." /> : resultsReady && (artistResults.length || playlistResults.length || albumResults.length) ? null : (
               <View style={[styles.empty, !query.trim() && styles.emptyCompact]}>
                 <Ionicons name="headset-outline" size={52} color="#444" />
                 <Text style={styles.emptyTitle}>Encontre e baixe suas músicas</Text>

@@ -680,7 +680,7 @@ function normalizeSong(song, saved = false) {
 }
 
 async function apiRequest(endpoint, options = {}) {
-  const session = await getSession();
+  const session = options.accountSession || await getSession();
   const cacheable = (!options.method || options.method === 'GET') && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(home|daily|liked))(?:[/?]|$)/.test(endpoint);
   const cachePath = cacheable ? dataPath(`metadata/${createHash('sha256').update(`${session?.username || 'public'}:${endpoint}`).digest('hex')}.json`) : '';
   const headers = {
@@ -726,7 +726,7 @@ async function apiRequest(endpoint, options = {}) {
       : String(body || '').trim();
 
     if ((response.status === 401 || response.status === 403) && options.auth !== false) {
-      await saveSession(null);
+      if (session?.token === (await getSession())?.token) await saveSession(null);
       throw new Error('Sessão expirada. Entre novamente.');
     }
 
@@ -1144,8 +1144,16 @@ ipcMain.handle('catalog:search', async (_event, query) => {
   return { ...result, songs: (result.songs || []).map((song) => normalizeSong(song, false)) };
 });
 ipcMain.handle('catalog:albums', async () => apiRequest('/catalog/albums'));
-ipcMain.handle('search:recent', async () => (await apiRequest('/search/recent')).map(song => normalizeSong(song, false)));
-ipcMain.handle('search:record', async (_event, songId) => apiRequest(`/search/recent/${encodeURIComponent(songId)}`, { method: 'POST' }));
+ipcMain.handle('search:recent', async (_event, username) => {
+  const session = await getSession();
+  if (!session?.token || session.username !== username) throw new Error('A conta da busca mudou.');
+  return (await apiRequest('/search/recent', { accountSession: session, timeoutMs: 4000 })).map(song => normalizeSong(song, false));
+});
+ipcMain.handle('search:record', async (_event, payload) => {
+  const session = await getSession();
+  if (!session?.token || session.username !== payload?.username) throw new Error('A conta da busca mudou.');
+  return apiRequest(`/search/recent/${encodeURIComponent(payload.songId)}`, { method: 'POST', accountSession: session, timeoutMs: 3000 });
+});
 ipcMain.handle('spotify:import', async (_event, url) => apiRequest('/spotify/import', { method: 'POST', timeoutMs: 90000, body: { url } }));
 ipcMain.handle('catalog:album-songs', async (_event, album) => {
   const query = new URLSearchParams({ name: String(album?.name || ''), artist: String(album?.artist || '') });

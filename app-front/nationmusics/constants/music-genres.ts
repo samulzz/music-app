@@ -1,4 +1,5 @@
 export const MUSIC_GENRES = [
+  { name: 'Infantil', query: 'infantil', icon: 'happy' as const, color: '#a34978' },
   { name: 'Funk', query: 'funk', icon: 'flame' as const, color: '#16783b' },
   { name: 'Piseiro', query: 'piseiro', icon: 'musical-notes' as const, color: '#c55b1c' },
   { name: 'Sertanejo', query: 'sertanejo', icon: 'star' as const, color: '#8a5328' },

@@ -114,7 +114,7 @@ public class SongService {
         if (value == null) return null;
         String normalized = java.text.Normalizer.normalize(value, java.text.Normalizer.Form.NFD)
                 .replaceAll("\\p{M}", "").toLowerCase(java.util.Locale.ROOT).trim();
-        return java.util.Set.of("funk", "rap", "trap", "sertanejo", "pagode", "samba", "forro", "piseiro", "gospel", "mpb", "pop", "rock", "phonk").contains(normalized)
+        return java.util.Set.of("funk", "rap", "trap", "sertanejo", "pagode", "samba", "forro", "piseiro", "gospel", "mpb", "pop", "rock", "phonk", "infantil").contains(normalized)
                 ? normalized : null;
     }
 

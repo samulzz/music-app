@@ -1,26 +1,28 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-15T14:30:00-03:00",
+  "generatedAt": "2026-10-20T16:39:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.43",
-    "versionCode": 45,
-    "minimumVersion": "1.1.43",
-    "minimumVersionCode": 45,
-    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.43.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.43.apk",
+    "version": "1.1.44",
+    "versionCode": 46,
+    "minimumVersion": "1.1.44",
+    "minimumVersionCode": 46,
+    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.44.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.44.apk",
+    "sha256": "07b3100788b4e75892c203cabee04281ac91c7ca90e5c02489f6fa6b2a082bd1",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Playlists visitadas abrem pelo cache sem bloquear controles; validação offline em lotes e botão de pausa na playlist ativa."
+    "releaseNotes": "Nova categoria Infantil, álbuns na página do artista e botão para ouvir suas músicas em ordem aleatória."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.46",
-    "minimumVersion": "1.2.46",
-    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.46.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.46.exe",
+    "version": "1.2.47",
+    "minimumVersion": "1.2.47",
+    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.47.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.47.exe",
+    "sha256": "7f216ee820bf1b9c6b0591a3634c8d8bb9721beada7e5411f57f5852d2f7c34d",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Conteúdo usa a largura da janela em monitores grandes e a playlist ativa mostra o botão de pausa."
+    "releaseNotes": "Categoria Infantil e página do artista com álbuns e reprodução aleatória das músicas."
   }
 }

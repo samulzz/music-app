@@ -29,7 +29,8 @@ public class CatalogDiscoveryService {
             new SmartSearchResponse.GenreResult("Pagode", "pagode", "🥁", "#61447b", "purple"),
             new SmartSearchResponse.GenreResult("Trap", "trap", "💎", "#742e3c", "red"),
             new SmartSearchResponse.GenreResult("Forró", "forro", "🌵", "#7b651e", "yellow"),
-            new SmartSearchResponse.GenreResult("Rap", "rap", "🎤", "#1f6663", "teal")
+            new SmartSearchResponse.GenreResult("Rap", "rap", "🎤", "#1f6663", "teal"),
+            new SmartSearchResponse.GenreResult("Infantil", "infantil", "🧸", "#a34978", "purple")
     );
     private final SongRepository songs;
     private final PlaylistRepository playlists;

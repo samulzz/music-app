@@ -67,6 +67,7 @@ const PREFETCH_AHEAD_COUNT = 2;
 const VOLUME_CURVE = 1.6;
 const SEARCH_DEBOUNCE_MS = 220;
 const MUSIC_GENRES = [
+  { name: 'Infantil', query: 'infantil', tone: 'purple', icon: '🧸' },
   { name: 'Funk', query: 'funk', tone: 'green', icon: '🔥' },
   { name: 'Piseiro', query: 'piseiro', tone: 'orange', icon: '🪗' },
   { name: 'Sertanejo', query: 'sertanejo', tone: 'brown', icon: '🤠' },
@@ -2821,13 +2822,26 @@ async function renderArtist(artistName) {
   setPageHeader('ARTISTA', name);
   setLoading('Carregando músicas do artista...');
   try {
-    const [songs, library] = await Promise.all([window.nation.getArtistSongs(name), window.nation.getLibrary()]);
+    const [songs, library, allAlbums] = await Promise.all([window.nation.getArtistSongs(name), window.nation.getLibrary(), window.nation.getAlbums().catch(() => [])]);
     if (!currentView(viewRequest) || state.artistName !== name) return;
     const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
     const merged = songs.map((song) => savedBySource.has(song.sourceId) ? { ...song, ...savedBySource.get(song.sourceId), saved: true } : song);
     const artwork = merged.find((song) => song.artworkUrl)?.artworkUrl;
-    contentView.innerHTML = `<section class="artist-hero"><div class="artist-hero-cover">${artwork ? `<img src="${escapeHtml(artwork)}" alt="" />` : icon('users')}</div><div><span>ARTISTA</span><h2>${escapeHtml(name)}</h2><p>${merged.length} ${merged.length === 1 ? 'música' : 'músicas'} no catálogo</p></div></section>${merged.length ? queueControlsMarkup(merged.length, 'Tocar músicas do artista', false) : ''}<div class="section-heading"><h2>Músicas</h2></div>${songRows(merged, 'Nenhuma música disponível deste artista.')}`;
-    if (merged.length) bindQueueControls(merged);
+    const artistKey = (value) => normalizeCatalogText(value).replace(/[^a-z0-9]/g, '');
+    const albums = allAlbums.filter((album) => artistKey(album.artist) === artistKey(name));
+    contentView.innerHTML = `<section class="artist-hero"><div class="artist-hero-cover">${artwork ? `<img src="${escapeHtml(artwork)}" alt="" />` : icon('users')}</div><div><span>ARTISTA</span><h2>${escapeHtml(name)}</h2><p>${merged.length} ${merged.length === 1 ? 'música' : 'músicas'} no catálogo</p></div></section>${merged.length ? queueControlsMarkup(merged.length, 'Tocar músicas do artista', false) : ''}${albums.length ? `<section class="home-section"><div class="section-heading"><h2>Álbuns</h2><span>${albums.length} disponíveis</span></div><div class="home-shelf search-playlist-grid">${albums.map((album, index) => `<article class="home-album-card" data-artist-album-index="${index}" tabindex="0" role="button" aria-label="Abrir álbum ${escapeHtml(album.name)}"><div>${album.coverUrl ? `<img src="${escapeHtml(album.coverUrl)}" alt="" />` : icon('music')}</div><strong>${escapeHtml(album.name)}</strong><p>${album.songCount} músicas disponíveis</p></article>`).join('')}</div></section>` : ''}<div class="section-heading"><h2>Músicas</h2></div>${songRows(merged, 'Nenhuma música disponível deste artista.')}`;
+    if (merged.length) bindQueueControls(merged, { type: 'artist', id: name, name });
+    contentView.querySelectorAll('[data-shuffle-toggle]').forEach((button) => {
+      button.setAttribute('aria-label', 'Reproduzir artista em ordem aleatória');
+      button.addEventListener('click', () => {
+        if (state.shuffle && merged.length) void playQueue(merged, Math.floor(Math.random() * merged.length), { type: 'artist', id: name, name });
+      });
+    });
+    document.querySelectorAll('[data-artist-album-index]').forEach((card) => {
+      const open = () => void renderAlbum(albums[Number(card.dataset.artistAlbumIndex)]);
+      card.addEventListener('click', open);
+      card.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); open(); } });
+    });
     bindSongActions();
   } catch (error) {
     if (!currentView(viewRequest)) return;

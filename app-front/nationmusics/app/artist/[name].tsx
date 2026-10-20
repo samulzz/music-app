@@ -6,8 +6,10 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import GlobalMiniPlayer from '../../components/global-mini-player';
 import { apiRequest } from '../../services/api';
-import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
-import { fromApiSearchSong, type ApiSearchSong, type MusicSong } from '../../types/music';
+import { addSongsToPlaybackQueue, playSongQueue, setShuffleEnabled } from '../../services/player';
+import { fromApiSearchSong, type AlbumSummary, type ApiSearchSong, type MusicSong } from '../../types/music';
+
+const artistKey = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 export default function ArtistScreen() {
   const router = useRouter();
@@ -17,10 +19,13 @@ export default function ArtistScreen() {
   const [songs, setSongs] = useState<MusicSong[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [albums, setAlbums] = useState<AlbumSummary[]>([]);
+  const [albumError, setAlbumError] = useState('');
 
   useEffect(() => {
     let active = true;
     if (!artistName) return;
+    setLoading(true); setError(''); setSongs([]);
     apiRequest<ApiSearchSong[]>(`/songs/artist?name=${encodeURIComponent(artistName)}`)
       .then((data) => { if (active) setSongs(data.map(fromApiSearchSong)); })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : 'Não foi possível carregar as músicas.'); })
@@ -28,10 +33,24 @@ export default function ArtistScreen() {
     return () => { active = false; };
   }, [artistName]);
 
-  const play = useCallback(async (index: number) => {
-    try { await playSongQueue(songs, index, 'playlist'); }
+  useEffect(() => {
+    let active = true;
+    setAlbums([]); setAlbumError('');
+    if (!artistName) return;
+    apiRequest<AlbumSummary[]>('/catalog/albums')
+      .then((data) => { if (active) setAlbums(data.filter((album) => artistKey(album.artist) === artistKey(artistName))); })
+      .catch(() => { if (active) setAlbumError('Não foi possível carregar os álbuns agora.'); });
+    return () => { active = false; };
+  }, [artistName]);
+
+  const play = useCallback(async (index: number, shuffle = false) => {
+    if (!songs.length) return;
+    try {
+      setShuffleEnabled(shuffle);
+      await playSongQueue(songs, shuffle ? Math.floor(Math.random() * songs.length) : index, 'playlist', { type: 'artist', id: artistName, name: artistName });
+    }
     catch (reason) { Alert.alert('Não foi possível reproduzir', reason instanceof Error ? reason.message : 'Tente novamente.'); }
-  }, [songs]);
+  }, [artistName, songs]);
 
   const artwork = songs.find((song) => song.artworkUrl)?.artworkUrl;
   return (
@@ -46,7 +65,10 @@ export default function ArtistScreen() {
             {artwork ? <Image source={{ uri: artwork }} style={styles.heroCover} /> : <View style={[styles.heroCover, styles.placeholder]}><Ionicons name="person" size={66} color="#1db954" /></View>}
             <Text style={styles.eyebrow}>ARTISTA</Text><Text style={styles.name}>{artistName}</Text><Text style={styles.count}>{songs.length} {songs.length === 1 ? 'música' : 'músicas'} no catálogo</Text>
           </View>
-          {songs.length > 0 && <TouchableOpacity style={styles.playAll} onPress={() => play(0)}><Ionicons name="play" size={22} color="#07140b" /><Text style={styles.playAllText}>Tocar músicas</Text></TouchableOpacity>}
+          {songs.length > 0 && <View style={styles.actions}><TouchableOpacity style={styles.playAll} onPress={() => play(0)}><Ionicons name="play" size={22} color="#07140b" /><Text style={styles.playAllText}>Tocar músicas</Text></TouchableOpacity><TouchableOpacity style={styles.shuffle} accessibilityLabel="Reproduzir músicas do artista em ordem aleatória" onPress={() => play(0, true)}><Ionicons name="shuffle" size={26} color="#1db954" /></TouchableOpacity></View>}
+          {albums.length > 0 && <View style={styles.albums}><Text style={styles.sectionTitle}>Álbuns</Text><FlatList horizontal data={albums} showsHorizontalScrollIndicator={false} keyExtractor={(album) => `${album.name}:${album.artist}:${album.playlistId || ''}`} renderItem={({ item }) => <TouchableOpacity style={styles.albumCard} accessibilityLabel={`Abrir álbum ${item.name}`} onPress={() => router.push({ pathname: '/album/[name]', params: { name: item.name, artist: item.artist, coverUrl: item.coverUrl || '', playlistId: item.playlistId ? String(item.playlistId) : '' } })}>{item.coverUrl ? <Image source={{ uri: item.coverUrl }} style={styles.albumCover} /> : <View style={[styles.albumCover, styles.placeholder]}><Ionicons name="disc" size={36} color="#1db954" /></View>}<Text numberOfLines={2} style={styles.albumTitle}>{item.name}</Text><Text style={styles.songArtist}>{item.songCount} músicas disponíveis</Text></TouchableOpacity>} /></View>}
+          {!!albumError && <Text style={styles.songArtist}>{albumError}</Text>}
+          {songs.length > 0 && <Text style={styles.sectionTitle}>Músicas</Text>}
           {loading && <ActivityIndicator color="#1db954" style={styles.loading} />}
           {Boolean(error) && <Text style={styles.notice}>{error}</Text>}
           {!loading && !error && !songs.length && <Text style={styles.notice}>Nenhuma música disponível deste artista.</Text>}
@@ -79,6 +101,13 @@ const styles = StyleSheet.create({
   count: { color: '#888', fontSize: 13, marginTop: 6 },
   playAll: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minWidth: 176, height: 48, borderRadius: 24, backgroundColor: '#1db954', marginBottom: 24 },
   playAllText: { color: '#07140b', fontWeight: '900' },
+  actions: { flexDirection: 'row', justifyContent: 'center', alignItems: 'flex-start', gap: 12 },
+  shuffle: { width: 48, height: 48, borderRadius: 24, borderWidth: 1, borderColor: '#1db954', alignItems: 'center', justifyContent: 'center' },
+  albums: { marginBottom: 24 },
+  sectionTitle: { color: '#fff', fontWeight: '800', fontSize: 20, marginBottom: 14 },
+  albumCard: { width: 145, marginRight: 14 },
+  albumCover: { width: 145, height: 145, borderRadius: 10 },
+  albumTitle: { color: '#fff', fontWeight: '700', marginTop: 8 },
   loading: { marginTop: 35 },
   notice: { color: '#aaa', textAlign: 'center', marginTop: 32 },
   songRow: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: 11, borderBottomWidth: 1, borderBottomColor: '#292929' },

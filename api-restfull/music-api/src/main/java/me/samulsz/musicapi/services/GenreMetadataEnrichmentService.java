@@ -78,6 +78,7 @@ public class GenreMetadataEnrichmentService {
         if (value.matches(".*\\b(gospel|christian)\\b.*")) result.add("gospel");
         if (value.matches(".*\\bmpb\\b.*")) result.add("mpb");
         if (value.matches(".*\\bpop\\b.*")) result.add("pop");
+        if (value.matches(".*\\b(children|kids|infantil|enfants)\\b.*")) result.add("infantil");
         if (value.matches(".*\\brock\\b.*")) result.add("rock");
         return result;
     }

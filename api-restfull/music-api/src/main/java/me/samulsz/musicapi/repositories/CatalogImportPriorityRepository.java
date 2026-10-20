@@ -9,4 +9,5 @@ public interface CatalogImportPriorityRepository extends JpaRepository<CatalogIm
     Optional<CatalogImportPriority> findByExternalTrackId(String externalTrackId);
     List<CatalogImportPriority> findByStatusOrderByPriorityDescCreatedAtAsc(String status, Pageable pageable);
     long countByStatus(String status);
+    List<CatalogImportPriority> findByStatusAndReasonAndCreatedAtGreaterThanEqualOrderByPriorityDescCreatedAtAsc(String status, String reason, long createdAt, Pageable pageable);
 }

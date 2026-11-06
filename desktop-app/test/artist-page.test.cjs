@@ -12,6 +12,7 @@ function harness(failAlbums = false) {
     contentView: { innerHTML: '', querySelectorAll: () => [] },
     document: { querySelectorAll: () => [] },
     normalizeCatalogText: value => String(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase(),
+    contentIdentity: song => song.sourceId || song.id,
     escapeHtml: value => String(value).replaceAll('<', '&lt;').replaceAll('>', '&gt;'),
     icon: () => '', queueControlsMarkup: () => '<controls>', songRows: () => '<songs>',
     bindQueueControls: (songs, collection) => controls.push(collection), bindSongActions() {},

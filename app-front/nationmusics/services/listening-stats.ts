@@ -49,7 +49,7 @@ export function sampleListening(sourceId: string, position: number, playing: boo
     // Saltos de posição e períodos em pausa não são tempo ouvido.
     if (previous.playing && delta > 0 && delta <= elapsed + 1.5) previous.seconds += Math.min(delta, elapsed);
   }
-  if (previous && (previous.sourceId !== sourceId || !playing || previous.seconds >= 30)) {
+  if (previous && (previous.sourceId !== sourceId || !playing || previous.seconds >= 15)) {
     const seconds = Math.min(60, Math.floor(previous.seconds));
     if (seconds > 0) enqueue({ eventId: uuid(), sessionId: previous.sessionId,
       sourceId: previous.sourceId, seconds, occurredAt: previous.at });

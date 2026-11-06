@@ -7,18 +7,34 @@ import { apiRequest, getMediaHeaders, deviceIsOffline } from './api';
 import { musicDownloadUrl } from './config';
 import { getSession } from './auth';
 import { fromApiLibrarySong, type ApiLibrarySong } from '../types/music';
+import { songContentKey, uniqueSongs } from './song-identity';
 
 const INDEX_KEY = 'nationmusics.offline-library.v2';
 const MUSIC_DIRECTORY_NAME = 'nationmusics-audio';
 const DOWNLOAD_ATTEMPTS = 3;
 const PREPARATION_POLL_MS = 2000;
 const PREPARATION_TIMEOUT_MS = 8 * 60 * 1000;
-const MIN_OFFLINE_AUDIO_BYTES = 512 * 1024;
+const MIN_OFFLINE_AUDIO_BYTES = 16 * 1024;
+let indexMutations = Promise.resolve();
+let indexStorageWrites = Promise.resolve();
 let indexSnapshot: MusicSong[] | null = null;
 let indexRead: Promise<MusicSong[]> | null = null;
 let indexRevision = 0;
 let validatedSnapshot: { revision: number; at: number; songs: MusicSong[] } | null = null;
 let validation: Promise<MusicSong[]> | null = null;
+let directorySnapshot: { at: number; files: Map<string, File> } | null = null;
+
+function downloadedFiles() {
+  if (directorySnapshot && Date.now() - directorySnapshot.at < 30000) return directorySnapshot.files;
+  const files = new Map<string, File>();
+  try {
+    for (const file of getMusicDirectory().list()) {
+      if (file instanceof File && file.name.endsWith('.mp3')) files.set(file.name, file);
+    }
+  } catch {}
+  directorySnapshot = { at: Date.now(), files };
+  return files;
+}
 
 type NativeOfflineDownloadsModule = {
   downloadSongs: (
@@ -210,6 +226,7 @@ function resolveOfflineFile(song: Pick<MusicSong, 'id' | 'sourceId' | 'title' | 
 function withResolvedOfflineFile(song: MusicSong): MusicSong | null {
   const file = resolveOfflineFile(song);
   if (!file) return null;
+  if (song.sizeBytes && file.size < song.sizeBytes) return null;
 
   return {
     ...song,
@@ -246,7 +263,9 @@ async function writeIndex(songs: MusicSong[]) {
   indexRevision += 1;
   indexSnapshot = songs;
   validatedSnapshot = null;
-  await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(songs));
+  const snapshot = JSON.stringify(songs);
+  indexStorageWrites = indexStorageWrites.catch(() => {}).then(() => AsyncStorage.setItem(INDEX_KEY, snapshot));
+  await indexStorageWrites;
   try {
     const { refreshAndroidAutoLibrary } = await import('./player');
     await refreshAndroidAutoLibrary();
@@ -318,13 +337,12 @@ export async function findOfflineSong(song: MusicSong) {
 
 export async function upsertOfflineSong(song: MusicSong) {
   if (!song.localUri) return;
-  const library = await readIndex();
-  const identity = songIdentity(song);
-  const next = [
-    song,
-    ...library.filter((candidate) => songIdentity(candidate) !== identity),
-  ];
-  await writeIndex(next);
+  indexMutations = indexMutations.catch(() => {}).then(async () => {
+    const library = await readIndex();
+    const identity = songIdentity(song);
+    await writeIndex([song, ...library.filter((candidate) => songIdentity(candidate) !== identity)]);
+  });
+  await indexMutations;
   void syncDownloadedSong(song).catch(() => {});
 }
 
@@ -367,7 +385,7 @@ export async function getAccountLibrary(): Promise<MusicSong[]> {
   catch (error) { if (!local.length) throw error; }
   const merged = new Map(local.map(song => [song.sourceId || song.id, song]));
   for (const song of remote) merged.set(song.sourceId || song.id, { ...merged.get(song.sourceId || song.id), ...song });
-  return mergeWithOfflineLibrary([...merged.values()]);
+  return uniqueSongs(await mergeWithOfflineLibrary([...merged.values()]));
 }
 
 export function canUseNativeBackgroundDownloads() {
@@ -423,7 +441,7 @@ export async function downloadSongsWithNativeService(
 
   const failures = [...(parsed.failures || [])];
   const downloaded = (parsed.downloaded || []).reduce<MusicSong[]>((result, item) => {
-    const normalized = normalizeNativeDownloadedSong(item);
+    const normalized = { ...songs.find(song => song.sourceId === item.sourceId), ...normalizeNativeDownloadedSong(item) };
     const verified = withResolvedOfflineFile(normalized);
     if (verified) {
       result.push(verified);
@@ -567,9 +585,9 @@ export async function clearOfflineLibrary() {
 
 function offlineLookupKeys(song: Pick<MusicSong, 'id' | 'sourceId'>) {
   return [
-    songIdentity(song),
-    song.id,
-    song.sourceId?.trim(),
+    song.sourceId?.trim() ? `source:${song.sourceId.trim()}` : '',
+    song.id ? `id:${song.id}` : '',
+    songContentKey(song as MusicSong),
   ].filter((key): key is string => Boolean(key));
 }
 
@@ -583,14 +601,26 @@ export async function mergeWithOfflineLibrary(songs: MusicSong[], offlineSongs?:
     }
   }
 
-  return songs.map((song) => {
+  const merged: MusicSong[] = [];
+  for (let index = 0; index < songs.length; index++) {
+    const song = songs[index];
     const offline = offlineLookupKeys(song)
       .map((key) => offlineByKey.get(key))
       .find(Boolean);
 
-    if (!offline) return song;
+    if (!offline) {
+      // Old concurrent index writes could lose an entry, not its actual MP3.
+      // Recover by exact source filename; never guess using a title-only filename.
+      if (index % 8 === 0) await wait(0);
+      const name = `${normalizeFilePart(songIdentity(song))}.mp3`;
+      const file = downloadedFiles().get(name);
+      const recovered = file ? withResolvedOfflineFile({ ...song, localUri: file.uri }) : null;
+      if (recovered) { await upsertOfflineSong(recovered); merged.push(recovered); }
+      else merged.push(song);
+      continue;
+    }
 
-    return {
+    merged.push({
       ...song,
       ...offline,
       id: song.id || offline.id,
@@ -598,8 +628,9 @@ export async function mergeWithOfflineLibrary(songs: MusicSong[], offlineSongs?:
       title: song.title || offline.title,
       artist: song.artist || offline.artist,
       artworkUrl: song.artworkUrl || offline.artworkUrl,
-    };
-  });
+    });
+  }
+  return merged;
 }
 
 export function formatBytes(bytes?: number) {

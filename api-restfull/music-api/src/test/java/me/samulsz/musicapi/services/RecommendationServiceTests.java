@@ -29,6 +29,27 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class RecommendationServiceTests {
+    @Test void radioVariesSessionsWithoutLeakingUnrelatedFavorites() {
+        var users=mock(UserRepository.class);var songs=mock(SongRepository.class);var prefs=mock(PlaybackPreferenceRepository.class);
+        var user=new User();user.setId(7L);user.setDownloadedSongs(new HashSet<>());
+        var catalog=new ArrayList<Song>();
+        for(long id=1;id<=70;id++) {
+            var song=new Song();song.setId(id);song.setTitle("Song "+id);song.setSourceId("src"+id);
+            song.setArtist(id==1?"English seed":"Artist "+id);song.setGenres(java.util.Set.of(id<=60?"pop":"sertanejo"));catalog.add(song);
+        }
+        var favorite=new PlaybackPreference();favorite.setSong(catalog.get(69));favorite.setLiked(true);favorite.setPlayCount(1000);
+        when(users.findByUsername("listener")).thenReturn(Optional.of(user));when(songs.findBySourceId("src1")).thenReturn(Optional.of(catalog.getFirst()));
+        when(songs.findAll()).thenReturn(catalog);when(prefs.findByUserIdOrderByLastListenedAtDesc(7L)).thenReturn(List.of(favorite));
+        var music=mock(MusicService.class);when(music.hasPrecachedAudio(any())).thenReturn(true);
+        var service=new RecommendationService(users,songs,mock(PlaylistRepository.class),prefs,mock(DailyMixRepository.class),mock(AccountPlaybackRepository.class),music);
+        var sessions=new java.util.HashSet<List<Long>>();
+        for(int i=0;i<5;i++) {
+            var radio=service.radio("listener","src1",15);
+            org.junit.jupiter.api.Assertions.assertTrue(radio.stream().allMatch(s -> s.getGenres().contains("pop")));
+            sessions.add(radio.stream().map(Song::getId).toList());
+        }
+        org.junit.jupiter.api.Assertions.assertTrue(sessions.size()>1);
+    }
 
     @Test void radioKeepsContextAndExcludesBlockedAndUnavailableSongs() {
         var users = mock(UserRepository.class); var songs = mock(SongRepository.class);
@@ -51,7 +72,7 @@ class RecommendationServiceTests {
         var result = service.radio("ouvinte", "source-1", 30);
         assertEquals(2L, result.getFirst().getId());
         assertFalse(result.stream().anyMatch(s -> java.util.Set.of(1L, 3L, 5L).contains(s.getId())));
-        assertEquals(List.of(4L), service.radio("ouvinte", "source-1", 30, java.util.Set.of("source-2")).stream().map(Song::getId).toList());
+        assertEquals(List.of(), service.radio("ouvinte", "source-1", 30, java.util.Set.of("source-2")).stream().map(Song::getId).toList());
     }
 
     @Test void likingDoesNotDeleteTodaysMix() {

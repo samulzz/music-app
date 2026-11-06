@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import NetInfo from '@react-native-community/netinfo';
 import {
   ActivityIndicator,
   Alert,
@@ -305,7 +306,7 @@ export default function PlaylistDetailsScreen() {
       await writeCache(next);
     } catch {
       if (currentCacheKeyRef.current !== cacheKey) return;
-      setOfflineMode(true);
+      setOfflineMode(await deviceIsOffline());
       if (!cached.songs.length) setSongs([]);
       else if (isDaily) setSongs(await mergeWithOfflineLibrary(cached.songs));
     } finally {
@@ -369,9 +370,14 @@ export default function PlaylistDetailsScreen() {
   );
 
   useEffect(() => subscribeShuffleEnabled(setShuffle), []);
+  useEffect(() => NetInfo.addEventListener((network) => {
+    if (!isOfflineLibrary) setOfflineMode(network.isConnected === false);
+  }), [isOfflineLibrary]);
 
   const play = useCallback(async (song: MusicSong) => {
-    const queue = offlineMode ? songs.filter(candidate => candidate.localUri) : songs;
+    const offline = await deviceIsOffline();
+    setOfflineMode(offline);
+    const queue = offline ? songs.filter(candidate => candidate.localUri) : songs;
     const index = queue.findIndex((candidate) => identity(candidate) === identity(song));
     try {
       await playSongQueue(queue, index, 'playlist', { type: playlistKind, id: playlistId, name: title });
@@ -386,7 +392,9 @@ export default function PlaylistDetailsScreen() {
       return;
     }
     if (currentCollection && !remote && activeItem) { await togglePlayback(); return; }
-    const playable = offlineMode
+    const offline = await deviceIsOffline();
+    setOfflineMode(offline);
+    const playable = offline
       ? songs.map((song, index) => ({ song, index })).filter(({ song }) => song.localUri)
       : songs.map((song, index) => ({ song, index }));
     if (!playable.length) {

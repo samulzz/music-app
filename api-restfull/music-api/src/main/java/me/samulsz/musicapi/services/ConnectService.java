@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.Objects;
 
 @Service
 @Transactional
@@ -69,6 +70,10 @@ public class ConnectService {
                 && now - playback.getStateUpdatedAt() < Duration.ofMinutes(2).toMillis();
         if (deviceId.equals(playback.getActiveDeviceId()) && !awaitingCommand) {
             if (request.song() != null) {
+                // Passive restoration cannot replace a newer song from another device.
+                if (!Boolean.TRUE.equals(request.playing())
+                        && !Objects.equals(playback.getSongSourceId(), request.song().sourceId()))
+                    return response(user, playback, deviceId, device.getProcessedCommandRevision(), now);
                 writeSong(playback, request.song());
                 playback.setContextType(clean(request.contextType()));
                 playback.setContextId(clean(request.contextId()));

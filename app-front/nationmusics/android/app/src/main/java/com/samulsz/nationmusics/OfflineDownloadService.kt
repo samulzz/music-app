@@ -408,6 +408,6 @@ class OfflineDownloadService : Service() {
   companion object {
     private const val CHANNEL_ID = "offline-downloads"
     private const val NOTIFICATION_ID = 8817
-    private const val MIN_OFFLINE_AUDIO_BYTES = 512L * 1024L
+    private const val MIN_OFFLINE_AUDIO_BYTES = 16L * 1024L
   }
 }

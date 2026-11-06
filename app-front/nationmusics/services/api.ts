@@ -13,7 +13,6 @@ export class OfflineError extends Error {
 }
 
 let authRedirectInFlight = false;
-let serverUnavailable = false;
 
 export async function accountCacheKey(base: string) {
   const session = await getSession();
@@ -21,7 +20,7 @@ export async function accountCacheKey(base: string) {
 }
 
 export async function deviceIsOffline() {
-  if (serverUnavailable) return true;
+  // A VPS timeout is not evidence that the device lost internet connectivity.
   try { return (await NetInfo.fetch()).isConnected === false; } catch { return false; }
 }
 
@@ -39,8 +38,8 @@ async function handleInvalidSession() {
   }, 0);
 }
 
-export async function getAuthenticatedHeaders(includeJson = false) {
-  const session = await getSession();
+export async function getAuthenticatedHeaders(includeJson = false, capturedSession?: Awaited<ReturnType<typeof getSession>>) {
+  const session = capturedSession === undefined ? await getSession() : capturedSession;
   if (!session?.token) {
     void handleInvalidSession();
     throw new Error('Sessão indisponível. Entre novamente quando houver internet.');
@@ -82,8 +81,9 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     ...request
   } = options;
 
+  const requestOwner = await getSession();
   const headers = authenticated
-    ? await getAuthenticatedHeaders(json)
+    ? await getAuthenticatedHeaders(json, requestOwner)
     : {
         ...APP_HEADERS,
         ...(json ? { 'Content-Type': 'application/json' } : {}),
@@ -91,8 +91,8 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
 
   let response: Response | undefined;
   const method = String(request.method || 'GET').toUpperCase();
-  const cacheable = method === 'GET' && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(home|daily|liked))(?:[/?]|$)/.test(path);
-  const cacheKey = cacheable ? await accountCacheKey(`nationmusics.api-cache.${path}`) : '';
+  const cacheable = method === 'GET' && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(daily|liked))(?:[/?]|$)/.test(path);
+  const cacheKey = cacheable ? `nationmusics.api-cache.${path}.account.${encodeURIComponent(requestOwner?.username || 'guest')}` : '';
   const cached = async () => {
     if (!cacheKey) return null;
     try { const raw = await AsyncStorage.getItem(cacheKey); return raw ? JSON.parse(raw) as { data: T } : null; } catch { return null; }
@@ -128,7 +128,6 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   }
 
   if (!response) {
-    serverUnavailable = true;
     const stored = await cached();
     if (stored) return stored.data;
     throw new OfflineError();
@@ -146,7 +145,6 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
 
   if (!response.ok) {
     if (response.status >= 500) {
-      serverUnavailable = true;
       const stored = await cached();
       if (stored) return stored.data;
     }
@@ -163,7 +161,6 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
   }
 
   if (response.status === 204) return undefined as T;
-  serverUnavailable = false;
   if (cacheKey) await AsyncStorage.setItem(cacheKey, JSON.stringify({ data: parsedBody, savedAt: Date.now() })).catch(() => {});
   return parsedBody as T;
 }

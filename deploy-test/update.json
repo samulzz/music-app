@@ -1,28 +1,28 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-20T16:39:00-03:00",
+  "generatedAt": "2026-11-05T22:24:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.44",
-    "versionCode": 46,
-    "minimumVersion": "1.1.44",
-    "minimumVersionCode": 46,
-    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.44.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.44.apk",
-    "sha256": "07b3100788b4e75892c203cabee04281ac91c7ca90e5c02489f6fa6b2a082bd1",
+    "version": "1.1.45",
+    "versionCode": 47,
+    "minimumVersion": "1.1.45",
+    "minimumVersionCode": 47,
+    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.45.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.45.apk",
+    "sha256": "336afb789ce2ca58381acfbbc4586f366df973bc1cb06219d5290a53201a3db6",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Nova categoria Infantil, álbuns na página do artista e botão para ouvir suas músicas em ordem aleatória."
+    "releaseNotes": "Rádio contextual e variada, correção do falso offline, recuperação de downloads e restauração da última reprodução por conta."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.47",
-    "minimumVersion": "1.2.47",
-    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.47.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.47.exe",
-    "sha256": "7f216ee820bf1b9c6b0591a3634c8d8bb9721beada7e5411f57f5852d2f7c34d",
+    "version": "1.2.48",
+    "minimumVersion": "1.2.48",
+    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.48.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.48.exe",
+    "sha256": "631be58ef7173755f1e6474dd29e2adbe299abf3e5951040c2ce0064caeaf0df",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Categoria Infantil e página do artista com álbuns e reprodução aleatória das músicas."
+    "releaseNotes": "Fila variada ligada à música escolhida, biblioteca sem cópias repetidas e retomada da reprodução mais recente entre dispositivos."
   }
 }

@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Optional;
 
 public interface PlaybackPreferenceRepository extends JpaRepository<PlaybackPreference, Long> {
+    @Query(value = "SELECT song_id FROM listening_events WHERE user_id = :userId AND seconds > 0 GROUP BY song_id ORDER BY MAX(occurred_at) DESC LIMIT 12", nativeQuery = true)
+    List<Long> findRecentlyListenedSongIds(@org.springframework.data.repository.query.Param("userId") Long userId);
     Optional<PlaybackPreference> findByUserIdAndSongId(Long userId, Long songId);
     List<PlaybackPreference> findByUserIdOrderByLastListenedAtDesc(Long userId);
     @Query("select p.song from PlaybackPreference p where p.user.id = :userId and p.liked = true order by p.song.title asc")

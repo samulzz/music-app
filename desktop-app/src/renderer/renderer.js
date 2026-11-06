@@ -115,7 +115,7 @@ function sampleListeningStats(force = false) {
     const elapsed = (now - statsPrevious.at) / 1000;
     if (statsPrevious.playing && delta > 0 && delta <= elapsed + 1.5) statsPrevious.seconds += Math.min(delta, elapsed);
   }
-  if (statsPrevious && (force || sourceId !== statsPrevious.sourceId || !playing || statsPrevious.seconds >= 30)) {
+  if (statsPrevious && (force || sourceId !== statsPrevious.sourceId || !playing || statsPrevious.seconds >= 15)) {
     const seconds = Math.min(60, Math.floor(statsPrevious.seconds));
     if (seconds > 0 && state.session?.username) {
       const key = `nationmusics.stats.pending.${state.session.username}`;
@@ -225,6 +225,11 @@ function bindGenreActions() {
 
 function normalizeCatalogText(value) {
   return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function contentIdentity(song) {
+  const normalize = value => normalizeCatalogText(value).replace(/[^a-z0-9]+/g, ' ').trim();
+  return song?.title?.trim() && song?.artist?.trim() ? `content:${normalize(song.title)}|${normalize(song.artist)}` : `source:${song?.sourceId || song?.id || ''}`;
 }
 
 function artistsFromSongs(songs, query) {
@@ -596,6 +601,7 @@ function persistPlaybackSession() {
   try {
     localStorage.setItem(playbackSessionKey(), JSON.stringify({
       savedAt: Date.now(),
+      lastPlayedAt: state.lastPlaybackActivityAt || 0,
       queue: state.queue.slice(Math.max(0, state.queueIndex - 50), Math.max(0, state.queueIndex - 50) + 250).map(persistedSong).filter(Boolean),
       queueIndex: state.queueIndex - Math.max(0, state.queueIndex - 50),
       queueMode: state.queueMode,
@@ -611,7 +617,7 @@ function persistPlaybackSession() {
 }
 
 function schedulePersistPlaybackSession(delay = 350) {
-  window.clearTimeout(playbackSessionPersistTimer);
+  if (playbackSessionPersistTimer) return;
   playbackSessionPersistTimer = window.setTimeout(persistPlaybackSession, delay);
 }
 
@@ -632,6 +638,7 @@ async function restorePersistedPlaybackSession() {
   state.queueMode = restored.queueMode === 'recommendations' ? 'recommendations' : 'selection';
   state.shuffle = Boolean(restored.shuffle);
   state.playbackContext = restored.playbackContext || null;
+  state.lastPlaybackActivityAt = Number(restored.lastPlayedAt) || 0;
   state.queueRevision += 1;
   state.pendingResumePosition = Math.max(0, Number(restored.positionSeconds) || 0);
   if (Number.isFinite(Number(restored.volumeSliderValue))) {
@@ -725,7 +732,8 @@ function recommendationAffinity(anchor, candidate) {
 }
 
 async function seedRecommendationsForSingleSong(anchor, revision) {
-  if (state.recommendationSeedingInFlight) return;
+  if (state.recommendationSeedingInFlight && state.recommendationSeedingRevision === revision) return;
+  state.recommendationSeedingRevision = revision;
   state.recommendationSeedingInFlight = true;
   try {
     const mix = { songs: await window.nation.getRadio(anchor) };
@@ -739,7 +747,6 @@ async function seedRecommendationsForSingleSong(anchor, revision) {
         existing.add(identity);
         return true;
       })
-      .sort((left, right) => right.score - left.score || left.order - right.order)
       .slice(0, 30)
       .map(({ song }, queueSequence) => ({ ...song, queueOrigin: 'recommendation', queueSequence }));
     if (!additions.length || revision !== state.queueRevision) return;
@@ -751,7 +758,7 @@ async function seedRecommendationsForSingleSong(anchor, revision) {
   } catch {
     // A música escolhida continua tocando mesmo se as recomendações estiverem offline.
   } finally {
-    state.recommendationSeedingInFlight = false;
+    if (state.recommendationSeedingRevision === revision) state.recommendationSeedingInFlight = false;
   }
 }
 
@@ -2391,7 +2398,8 @@ async function resumeHomePlayback(resume) {
 }
 
 async function restoreHomePlaybackPaused(resume) {
-  if (!resume?.song || state.queue.length || audio.src) return;
+  if (!resume?.song || !audio.paused || Number(resume.updatedAt) <= (state.lastPlaybackActivityAt || 0)) return;
+  const revision = state.queueRevision;
   const fallback = { ...resume.song, id: resume.song.id || resume.song.sourceId };
   const context = resume.contextId ? { type: resume.contextType || 'global', id: String(resume.contextId), name: resume.contextName || '' } : null;
   let songs = [fallback];
@@ -2400,11 +2408,14 @@ async function restoreHomePlaybackPaused(resume) {
     else if (context?.type === 'library') songs = await window.nation.getLibrary();
     else if (context?.type === 'liked') songs = await window.nation.getLikedSongs();
     else if (context?.type === 'album') songs = await window.nation.getAlbumSongs({ name: context.name || context.id, playlistId: /^\d+$/.test(context.id) ? Number(context.id) : undefined });
+    else if (context?.type === 'artist') songs = await window.nation.getArtistSongs(context.name || context.id);
     else if (context) songs = await window.nation.getPlaylistSongs(context.id);
   } catch {}
   if (!songs.length) songs = [fallback];
-  const index = Math.max(0, songs.findIndex((song) => songIdentity(song) === songIdentity(fallback)));
-  if (state.queue.length || audio.src) return;
+  let index = songs.findIndex((song) => songIdentity(song) === songIdentity(fallback));
+  if (index < 0) { songs = [fallback, ...songs]; index = 0; }
+  if (revision !== state.queueRevision || !audio.paused) return;
+  state.lastPlaybackActivityAt = Number(resume.updatedAt) || 0;
   state.pendingResumePosition = Math.max(0, Number(resume.positionSeconds) || 0);
   playQueue(songs, index, context, { autoplay: false, passive: true });
 }
@@ -2540,9 +2551,9 @@ async function openPlaylist(playlist) {
       if (!currentView(viewRequest)) return;
       playlist = { ...playlist, pendingTracks: details.pendingTracks || [] };
     }
-    const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
-    const merged = songs.map((song) => savedBySource.has(song.sourceId)
-      ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
+    const savedBySource = new Map(library.map((song) => [contentIdentity(song), song]));
+    const merged = songs.map((song) => savedBySource.has(contentIdentity(song))
+      ? { ...song, ...savedBySource.get(contentIdentity(song)), id: song.id, saved: true }
       : song);
     await Promise.all(merged.map(async (song) => {
       song.downloaded = await window.nation.isSongDownloaded(song);
@@ -2771,9 +2782,9 @@ async function renderSearch(query = '', exactGenre = false) {
       window.nation.getLibrary(),
     ]);
     if (!currentView(viewRequest) || requestId !== state.searchRequestId) return;
-    const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
-    const merged = (discovery.songs || []).map((song) => savedBySource.has(song.sourceId)
-      ? { ...song, ...savedBySource.get(song.sourceId), saved: true }
+    const savedBySource = new Map(library.map((song) => [contentIdentity(song), song]));
+    const merged = (discovery.songs || []).map((song) => savedBySource.has(contentIdentity(song))
+      ? { ...song, ...savedBySource.get(contentIdentity(song)), id: song.id, saved: true }
       : song);
     const matchingPlaylists = discovery.playlists || [];
     const artists = discovery.artists || [];
@@ -2824,8 +2835,8 @@ async function renderArtist(artistName) {
   try {
     const [songs, library, allAlbums] = await Promise.all([window.nation.getArtistSongs(name), window.nation.getLibrary(), window.nation.getAlbums().catch(() => [])]);
     if (!currentView(viewRequest) || state.artistName !== name) return;
-    const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
-    const merged = songs.map((song) => savedBySource.has(song.sourceId) ? { ...song, ...savedBySource.get(song.sourceId), saved: true } : song);
+    const savedBySource = new Map(library.map((song) => [contentIdentity(song), song]));
+    const merged = songs.map((song) => savedBySource.has(contentIdentity(song)) ? { ...song, ...savedBySource.get(contentIdentity(song)), id: song.id, saved: true } : song);
     const artwork = merged.find((song) => song.artworkUrl)?.artworkUrl;
     const artistKey = (value) => normalizeCatalogText(value).replace(/[^a-z0-9]/g, '');
     const albums = allAlbums.filter((album) => artistKey(album.artist) === artistKey(name));
@@ -2861,8 +2872,8 @@ async function renderAlbum(album) {
   try {
     const [songs, library] = await Promise.all([window.nation.getAlbumSongs(album), window.nation.getLibrary()]);
     if (!currentView(viewRequest) || state.albumName !== album.name) return;
-    const savedBySource = new Map(library.map((song) => [song.sourceId, song]));
-    const merged = songs.map((song) => savedBySource.has(song.sourceId) ? { ...song, ...savedBySource.get(song.sourceId), saved: true } : song);
+    const savedBySource = new Map(library.map((song) => [contentIdentity(song), song]));
+    const merged = songs.map((song) => savedBySource.has(contentIdentity(song)) ? { ...song, ...savedBySource.get(contentIdentity(song)), id: song.id, saved: true } : song);
     const artwork = album.coverUrl || merged.find((song) => song.artworkUrl)?.artworkUrl;
     contentView.innerHTML = `<section class="artist-hero album-hero"><div class="artist-hero-cover">${artwork ? `<img src="${escapeHtml(artwork)}" alt="" />` : icon('music')}</div><div><span>ÁLBUM</span><h2>${escapeHtml(album.name)}</h2><p>${escapeHtml(album.artist || 'NationMusics')} • ${merged.length} ${merged.length === 1 ? 'música' : 'músicas'}</p></div></section>${merged.length ? queueControlsMarkup(merged.length, 'Tocar álbum', false) : ''}<div class="section-heading"><h2>Faixas</h2></div>${songRows(merged, 'Nenhuma música disponível deste álbum.')}`;
     if (merged.length) bindQueueControls(merged, { type: 'album', id: String(album.playlistId || album.name), name: album.name });
@@ -3103,6 +3114,7 @@ async function saveSong(song) {
 }
 
 function playQueue(songs, index, context = null, options = {}) {
+  if (!options.passive) state.lastPlaybackActivityAt = Date.now();
   reportCurrentPlayback(false);
   recommendationListening.reset();
   const playable = songs.filter((song) => song.sourceId || song.spotifyId || song.title);
@@ -3644,6 +3656,7 @@ audio.addEventListener('playing', clearWaitingTelemetryTimer);
 audio.addEventListener('canplay', clearWaitingTelemetryTimer);
 audio.addEventListener('stalled', () => reportPlaybackTelemetry('STALLED'));
 audio.addEventListener('timeupdate', () => {
+  if (!audio.paused && !audio.ended) state.lastPlaybackActivityAt = Date.now();
   sampleListeningStats();
   $('#current-time').textContent = formatTime(audio.currentTime);
   $('#duration').textContent = formatTime(audio.duration);

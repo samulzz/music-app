@@ -170,16 +170,29 @@ public class RecommendationService {
                 .filter(s -> anchor == null || !Objects.equals(s.getId(), anchor.getId()))
                 .filter(s -> !excluded.contains(s.getSourceId()))
                 .filter(s -> !byId.containsKey(s.getId()) || !byId.get(s.getId()).isDoNotRecommend()).toList());
-        // Seed stays stable within the day, not randomly reshuffled on every request.
-        long seed = user.getId() * 31 + LocalDate.now(APP_ZONE).toEpochDay();
+        // Radio is a new contextual session, unlike the intentionally stable daily mix.
+        if (anchor != null) {
+            var relatedGenres = new HashSet<String>(anchor.getGenres().stream().map(RecommendationRanking::key).toList());
+            if (relatedGenres.isEmpty()) catalog.stream()
+                    .filter(song -> RecommendationRanking.artist(song).equals(RecommendationRanking.artist(anchor)))
+                    .forEach(song -> song.getGenres().forEach(g -> relatedGenres.add(RecommendationRanking.key(g))));
+            catalog.removeIf(song -> RecommendationRanking.context(anchor, song) <= 0
+                    && song.getGenres().stream().map(RecommendationRanking::key).noneMatch(relatedGenres::contains));
+        } else if (sourceId != null && !sourceId.isBlank()) {
+            return List.of(); // An unresolved seed must not silently become the user's favorites.
+        }
+        long seed = java.util.concurrent.ThreadLocalRandom.current().nextLong();
+        var variation = new HashMap<Long, Double>();
+        var random = new Random(seed);
+        catalog.forEach(song -> variation.put(song.getId(), random.nextDouble() * 24));
         catalog.sort(Comparator.comparingDouble((Song song) -> {
             var p = byId.get(song.getId());
             double personal = Math.max(-10, Math.min(20, artists.getOrDefault(RecommendationRanking.artist(song), 0.0) * 0.5))
                     + Math.max(-4, Math.min(15, song.getGenres().stream().mapToDouble(g -> genres.getOrDefault(normalizeGenre(g), 0.0)).sum() * 0.2));
             double own = p == null ? 3 : RecommendationRanking.strength(p, now) * 0.3;
             double recent = p != null && p.getLastListenedAt() != null && p.getLastListenedAt().isAfter(now.minusHours(8)) ? 9 : 0;
-            return RecommendationRanking.context(anchor, song) + personal + own - recent
-                    + new Random(seed ^ song.getId()).nextDouble() * 2;
+            return RecommendationRanking.context(anchor, song) + personal * 0.2 + own * 0.2 - recent
+                    + variation.get(song.getId());
         }).reversed().thenComparing(Song::getId));
         return RecommendationRanking.diversify(catalog, Math.max(1, Math.min(50, requestedLimit)), 4);
     }
@@ -207,12 +220,20 @@ public class RecommendationService {
                 .toList();
 
         List<Song> recentSongs = usablePreferences.stream()
+                .filter(item -> item.getPlayCount() > 0 || item.getListenedSeconds() > 0)
                 .map(PlaybackPreference::getSong)
                 .filter(distinctById())
                 .limit(12)
                 .toList();
 
         Map<String, ArtistAccumulator> artists = new LinkedHashMap<>();
+        var recentIdsFromListening = preferenceRepository.findRecentlyListenedSongIds(user.getId());
+        if (!recentIdsFromListening.isEmpty()) {
+            var recentById = songRepository.findAllById(recentIdsFromListening).stream().collect(Collectors.toMap(Song::getId, Function.identity()));
+            recentSongs = recentIdsFromListening.stream().map(recentById::get).filter(Objects::nonNull)
+                    .filter(song -> musicService.hasPrecachedAudio(song.getSourceId())).toList();
+        }
+        recentSongs = CatalogIdentity.unique(recentSongs);
         usablePreferences.forEach(item -> {
             String name = primaryArtist(item.getSong().getArtist());
             String key = normalizeArtist(name);
@@ -259,7 +280,7 @@ public class RecommendationService {
                 .map(state -> new PersonalizedHomeResponse.ContinueListening(
                         new ConnectSongDto(state.getSongId(), state.getSongSourceId(), state.getSongTitle(), state.getSongArtist(),
                                 state.getSongArtworkUrl(), state.getSongRemoteUrl()),
-                        state.getPositionSeconds(), state.getDurationSeconds(), state.getStateUpdatedAt(),
+                        resumePosition(state), state.getDurationSeconds(), state.getStateUpdatedAt(),
                         state.getContextType(), state.getContextId(), state.getContextName()))
                 .orElse(null);
         String reason = topArtists.isEmpty()
@@ -270,8 +291,12 @@ public class RecommendationService {
     }
 
     private boolean canResume(AccountPlayback state) {
-        if ((state.getSongId().isBlank() && state.getSongSourceId().isBlank()) || state.getPositionSeconds() < 5) return false;
-        return state.getDurationSeconds() <= 0 || state.getPositionSeconds() < state.getDurationSeconds() - 8;
+        return !state.getSongId().isBlank() || !state.getSongSourceId().isBlank();
+    }
+
+    private double resumePosition(AccountPlayback state) {
+        return state.getDurationSeconds() > 0 && state.getPositionSeconds() >= state.getDurationSeconds() - 1
+                ? 0 : Math.max(0, state.getPositionSeconds());
     }
 
     private int playlistAffinity(Playlist playlist, Set<Long> songIds, Set<String> artists) {

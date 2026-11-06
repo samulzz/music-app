@@ -138,4 +138,11 @@ class ConnectServiceTests {
     private ConnectSongDto song() {
         return new ConnectSongDto("1", "source-1", "Faixa", "Artista", "", "https://example.test/audio.mp3");
     }
+
+    @Test void pausedOldRestorationNeverOverwritesLastHeardSong() {
+        heartbeat("desktop", song(), true, 0L);
+        var old=new ConnectSongDto("old","old-source","Old song","Old artist","","");
+        heartbeat("desktop",old,false,0L);
+        assertEquals("source-1",storedPlayback.getSongSourceId());
+    }
 }

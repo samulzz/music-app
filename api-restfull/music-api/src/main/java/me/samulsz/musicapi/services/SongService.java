@@ -68,7 +68,7 @@ public class SongService {
             throw new RuntimeException("Utilizador não encontrado!");
         }
 
-        return songRepository.findLibraryByUsername(username);
+        return CatalogIdentity.unique(songRepository.findLibraryByUsername(username), song -> musicService.hasPrecachedAudio(song.getSourceId()));
     }
 
     public java.util.List<Song> searchPrecachedCatalog(String query) {

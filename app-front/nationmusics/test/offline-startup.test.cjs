@@ -9,7 +9,7 @@ const restore = source.slice(source.indexOf('async function restorePersistedPlay
 function harness(queueIndex) {
   const calls = {headers: 0, prefetch: 0, persist: 0, paused: 0};
   let queue = [];
-  const session = {savedAt: Date.now(), queueIndex, volume: .4, positionSeconds: 12, queue: [
+  const session = {username:'alice',lastPlayedAt:100,savedAt: Date.now(), queueIndex, volume: .4, positionSeconds: 12, queue: [
     {song: {id: '1', title:'Remote', sourceId:'remote'}},
     {song: {id: '2', title:'Local', sourceId:'local', localUri:'file:///valid.mp3'}},
   ]};
@@ -17,6 +17,7 @@ function harness(queueIndex) {
     playbackSessionRestoring: false, playbackQueueRevision: 0, playbackContext: null,
     PLAYBACK_SESSION_KEY: 'session', PLAYBACK_SESSION_MAX_AGE_MS: 100000,
     AsyncStorage: {getItem: async () => JSON.stringify(session)},
+    getSession: async () => ({username:'alice'}), playbackLastPlayedAt:0,
     deviceIsOffline: async () => true,
     mergeWithOfflineLibrary: async songs => songs,
     getMediaHeaders: async () => {calls.headers++; return {};},
@@ -29,7 +30,7 @@ function harness(queueIndex) {
   };
   vm.createContext(context);
   vm.runInContext(ts.transpileModule(restore, {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText, context);
-  return {context, calls, getQueue: () => queue};
+  return {context, calls, session, getQueue: () => queue};
 }
 
 test('offline cold startup restores only local files, paused and without preloading', async () => {
@@ -45,4 +46,10 @@ test('native initialization failure is contained instead of becoming an unhandle
   const h=harness(0); h.context.TrackPlayer.getQueue=() => {throw Error('not ready');};
   await assert.doesNotReject(() => h.context.restorePersistedPlaybackSession(0));
   assert.equal(h.context.playbackSessionRestoring,false);
+});
+
+test('a saved playback session belonging to another account is never restored', async () => {
+  const h=harness(1);h.session.username='bob';
+  await h.context.restorePersistedPlaybackSession(0);
+  assert.equal(h.getQueue().length,0);
 });

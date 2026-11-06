@@ -78,6 +78,7 @@ export default function HomePlaylistsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [playlists, setPlaylists] = useState<HomePlaylist[]>([]);
   const [personalized, setPersonalized] = useState<PersonalizedHome | null>(null);
+  const [homeVerified, setHomeVerified] = useState(false);
   const [offline, setOffline] = useState(false);
   const hydratedRef = useRef(false);
   const lastRefreshAtRef = useRef(0);
@@ -156,6 +157,7 @@ export default function HomePlaylistsScreen() {
       ];
       setPlaylists(next);
       setPersonalized(home);
+      setHomeVerified(Boolean(home));
       setOffline(false);
       await writeCache(next, home);
     } catch (error) {
@@ -245,15 +247,17 @@ export default function HomePlaylistsScreen() {
                 ? '/songs/my-library'
                 : context.type === 'album'
                   ? `/catalog/albums/songs?name=${encodeURIComponent(context.name || context.id)}${/^\d+$/.test(context.id) ? `&playlistId=${encodeURIComponent(context.id)}` : ''}`
-                : `/playlists/${encodeURIComponent(context.id)}/songs`;
+                  : context.type === 'artist' ? `/songs/artist?name=${encodeURIComponent(context.name || context.id)}`
+                  : `/playlists/${encodeURIComponent(context.id)}/songs`;
         const raw = context.type === 'daily'
           ? personalized?.dailyMix.songs || []
           : await apiRequest<import('../../types/music').ApiLibrarySong[]>(endpoint);
         const restored = raw.map(fromApiLibrarySong);
         if (restored.length) queue = restored;
       }
-      const target = queue.findIndex((song) => (song.sourceId || song.id) === (fallback.sourceId || fallback.id));
-      await restorePausedSongQueue(queue, target >= 0 ? target : 0, item.positionSeconds, context, item.durationSeconds);
+      let target = queue.findIndex((song) => (song.sourceId || song.id) === (fallback.sourceId || fallback.id));
+      if (target < 0) { queue = [fallback, ...queue]; target = 0; }
+      await restorePausedSongQueue(queue, target, item.positionSeconds, context, item.durationSeconds, item.updatedAt);
     } catch {}
   }, [personalized]);
 
@@ -262,10 +266,10 @@ export default function HomePlaylistsScreen() {
   const recommendedSongs = (personalized?.recommendedSongs || []).map(fromApiLibrarySong);
 
   useEffect(() => {
-    if (!resume || restoredPlayerRef.current) return;
+    if (!homeVerified || !resume || restoredPlayerRef.current) return;
     restoredPlayerRef.current = true;
     void restorePausedPlayback(resume);
-  }, [restorePausedPlayback, resume]);
+  }, [homeVerified, restorePausedPlayback, resume]);
 
   return (
     <SafeAreaView style={styles.safe}>

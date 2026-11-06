@@ -4,6 +4,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID, createHash } = require('node:crypto');
 const { downloadAudio } = require('./resumable-download.cjs');
+const { contentIdentity } = require('./song-identity.cjs');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const { Readable } = require('node:stream');
@@ -26,7 +27,7 @@ const PREPARATION_POLL_MS = 2000;
 const UPDATE_TIMEOUT_MS = 8000;
 const UPDATE_DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 const MIN_DESKTOP_INSTALLER_BYTES = 20 * 1024 * 1024;
-const MIN_DESKTOP_AUDIO_BYTES = 512 * 1024;
+const MIN_DESKTOP_AUDIO_BYTES = 16 * 1024;
 const DEFAULT_DESKTOP_AUDIO_CACHE_BYTES = 1024 * 1024 * 1024;
 const MIN_DESKTOP_AUDIO_CACHE_BYTES = 256 * 1024 * 1024;
 const MAX_DESKTOP_AUDIO_CACHE_BYTES = 4 * 1024 * 1024 * 1024;
@@ -681,7 +682,7 @@ function normalizeSong(song, saved = false) {
 
 async function apiRequest(endpoint, options = {}) {
   const session = options.accountSession || await getSession();
-  const cacheable = (!options.method || options.method === 'GET') && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(home|daily|liked))(?:[/?]|$)/.test(endpoint);
+  const cacheable = (!options.method || options.method === 'GET') && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(daily|liked))(?:[/?]|$)/.test(endpoint);
   const cachePath = cacheable ? dataPath(`metadata/${createHash('sha256').update(`${session?.username || 'public'}:${endpoint}`).digest('hex')}.json`) : '';
   const headers = {
     Accept: 'application/json',
@@ -1283,11 +1284,11 @@ ipcMain.handle('library:list', async () => {
       await writeJson(dataPath('account-downloads-synced.json'), migrated);
     }).catch(() => {});
   const songs = await apiRequest('/songs/my-library');
-  const merged = new Map(local.map(song => [song.sourceId || song.id, { ...song, downloaded: true, saved: true }]));
+  const merged = new Map(local.map(song => [contentIdentity(song), { ...song, downloaded: true, saved: true }]));
   for (const item of songs) {
     const song = normalizeSong(item, true);
-    const localSong = merged.get(song.sourceId || song.id);
-    merged.set(song.sourceId || song.id, { ...localSong, ...song, downloaded: Boolean(localSong?.downloaded || song.downloaded) });
+    const localSong = merged.get(contentIdentity(song));
+    merged.set(contentIdentity(song), { ...song, ...(localSong?.downloaded ? localSong : {}), id: song.id, saved: true, downloaded: Boolean(localSong?.downloaded || song.downloaded) });
   }
   return [...merged.values()];
 });

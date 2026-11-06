@@ -51,3 +51,12 @@ test('legacy cache cannot introduce songs from an incorrectly cached account',as
   const storage=new Map([['search-recent.v1.account.bob',JSON.stringify([song])]]);
   assert.equal((await harness(undefined,storage).api.getCachedRecentSearch('bob')).length,0);
 });
+
+test('recent rows are immediately available on tab remount and stay account scoped',async()=>{
+  const h=harness(async()=>{throw Error('offline');});
+  await h.api.rememberRecentSearch(song);
+  assert.equal(h.api.getMemoryRecentSearch('alice')[0].id,'7');
+  assert.equal(h.api.getMemoryRecentSearch('bob').length,0);
+  await h.api.refreshRecentSearch({username:'alice',token:'token-alice'});
+  assert.equal(h.api.getMemoryRecentSearch('alice')[0].id,'7');
+});

@@ -171,13 +171,26 @@ public class RecommendationService {
                 .filter(s -> !excluded.contains(s.getSourceId()))
                 .filter(s -> !byId.containsKey(s.getId()) || !byId.get(s.getId()).isDoNotRecommend()).toList());
         // Radio is a new contextual session, unlike the intentionally stable daily mix.
+        var contextualPeers = new HashSet<Long>();
         if (anchor != null) {
+            // Sparse/unclassified seeds can still have a real context: their album
+            // or a collection that actually includes them. Never fall back to favorites.
+            var collections = new ArrayList<>(playlistRepository.findByGlobalPlaylistTrueOrderByIdDesc());
+            collections.addAll(playlistRepository.findByOwnerUsernameOrderByIdDesc(username));
+            collections.stream().filter(p -> p.getSongs().size() <= 500)
+                    .filter(p -> p.getSongs().stream().anyMatch(s -> Objects.equals(s.getId(), anchor.getId())))
+                    .forEach(p -> p.getSongs().forEach(s -> contextualPeers.add(s.getId())));
+            if (anchor.getAlbum() != null && !anchor.getAlbum().isBlank()) catalog.stream()
+                    .filter(s -> CatalogIdentity.normalize(anchor.getAlbum()).equals(CatalogIdentity.normalize(s.getAlbum())))
+                    .filter(s -> RecommendationRanking.artist(s).equals(RecommendationRanking.artist(anchor)))
+                    .forEach(s -> contextualPeers.add(s.getId()));
             var relatedGenres = new HashSet<String>(anchor.getGenres().stream().map(RecommendationRanking::key).toList());
             if (relatedGenres.isEmpty()) catalog.stream()
                     .filter(song -> RecommendationRanking.artist(song).equals(RecommendationRanking.artist(anchor)))
                     .forEach(song -> song.getGenres().forEach(g -> relatedGenres.add(RecommendationRanking.key(g))));
             catalog.removeIf(song -> RecommendationRanking.context(anchor, song) <= 0
-                    && song.getGenres().stream().map(RecommendationRanking::key).noneMatch(relatedGenres::contains));
+                    && song.getGenres().stream().map(RecommendationRanking::key).noneMatch(relatedGenres::contains)
+                    && !(relatedGenres.isEmpty() && contextualPeers.contains(song.getId())));
         } else if (sourceId != null && !sourceId.isBlank()) {
             return List.of(); // An unresolved seed must not silently become the user's favorites.
         }
@@ -192,6 +205,7 @@ public class RecommendationService {
             double own = p == null ? 3 : RecommendationRanking.strength(p, now) * 0.3;
             double recent = p != null && p.getLastListenedAt() != null && p.getLastListenedAt().isAfter(now.minusHours(8)) ? 9 : 0;
             return RecommendationRanking.context(anchor, song) + personal * 0.2 + own * 0.2 - recent
+                    + (contextualPeers.contains(song.getId()) ? 25 : 0)
                     + variation.get(song.getId());
         }).reversed().thenComparing(Song::getId));
         return RecommendationRanking.diversify(catalog, Math.max(1, Math.min(50, requestedLimit)), 4);

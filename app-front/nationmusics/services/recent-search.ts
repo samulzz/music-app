@@ -8,6 +8,10 @@ type History = { songs: MusicSong[]; pending: Pending[] };
 const writes = new Map<string, Promise<unknown>>();
 const refreshing = new Map<string, Promise<MusicSong[]>>();
 const listeners = new Set<(username: string, songs: MusicSong[]) => void>();
+const memory = new Map<string, History>();
+export function getMemoryRecentSearch(username: string): MusicSong[] {
+  return memory.get(username)?.songs || [];
+}
 const key = (username: string) => `search-recent.v2.account.${encodeURIComponent(username)}`;
 
 export function mergeRecentSongs(...groups: MusicSong[][]): MusicSong[] {
@@ -19,9 +23,11 @@ export function mergeRecentSongs(...groups: MusicSong[][]): MusicSong[] {
   }).slice(0, 20);
 }
 async function read(username: string): Promise<History> {
+  const known = memory.get(username);
+  if (known) return known;
   try {
     const raw = await AsyncStorage.getItem(key(username));
-    if (raw) { const value = JSON.parse(raw); return { songs: mergeRecentSongs(value.songs || []), pending: value.pending || [] }; }
+    if (raw) { const value = JSON.parse(raw); const history = { songs: mergeRecentSongs(value.songs || []), pending: value.pending || [] }; memory.set(username, history); return history; }
     // Legacy caches could have been written by a request from another account.
     // Bootstrap from the account-authenticated server instead of trusting those rows.
     return { songs: [], pending: [] };
@@ -32,6 +38,7 @@ function mutate(username: string, change: (current: History) => History) {
     const previous = await read(username);
     const value = change(previous);
     await AsyncStorage.setItem(key(username), JSON.stringify(value));
+    memory.set(username, value);
     if (JSON.stringify(previous.songs) !== JSON.stringify(value.songs)) listeners.forEach(listener => listener(username, value.songs));
     return value;
   });

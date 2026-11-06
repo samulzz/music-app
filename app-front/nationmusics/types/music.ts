@@ -104,6 +104,7 @@ export type AlbumSummary = {
 };
 
 export type SmartSearchResponse = {
+  results?: Array<{ type: string; index: number }>;
   correctedQuery?: string;
   songs: ApiSearchSong[];
   artists: Array<{ name: string; artworkUrl?: string; songCount: number }>;

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,13 +17,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { AlbumSummary, ApiPlaylist, ApiSearchSong, MusicSong, SmartSearchResponse } from '../../types/music';
 import { fromApiSearchSong } from '../../types/music';
 import { apiRequest } from '../../services/api';
-import { getSession } from '../../services/auth';
+import { getCachedSession, getSession } from '../../services/auth';
 import { CollectionLoading } from '../../components/collection-loading';
 import { downloadSong } from '../../services/offline-library';
 import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
 import { addSongToPlaylist } from '../../components/playlist-picker';
 import { useFocusEffect } from 'expo-router';
-import { getCachedRecentSearch, refreshRecentSearch, rememberRecentSearch, subscribeRecentSearch } from '../../services/recent-search';
+import { getCachedRecentSearch, getMemoryRecentSearch, refreshRecentSearch, rememberRecentSearch, subscribeRecentSearch } from '../../services/recent-search';
 
 const SEARCH_DEBOUNCE_MS = 220;
 
@@ -90,26 +90,31 @@ export default function SearchScreen() {
   const [query, setQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
   const [results, setResults] = useState<MusicSong[]>([]);
-  const [recentSongs, setRecentSongs] = useState<MusicSong[]>([]);
+  const [recentSongs, setRecentSongs] = useState<MusicSong[]>(() => getMemoryRecentSearch(getCachedSession()?.username || ''));
   const [recentLoading, setRecentLoading] = useState(false);
-  const recentAccountRef = useRef('');
+  const recentAccountRef = useRef(getCachedSession()?.username || '');
   const recentRevisionRef = useRef(0);
   useFocusEffect(useCallback(() => {
     let active = true;
     void (async () => {
       const session = await getSession();
       if (!active || !session?.token) return;
-      if (recentAccountRef.current !== session.username) setRecentSongs([]);
+      const changedAccount = recentAccountRef.current !== session.username;
       recentAccountRef.current = session.username;
       setUsername(session.username);
       const revision = recentRevisionRef.current;
       const cached = await getCachedRecentSearch(session.username);
       if (active) {
-        if (cached.length && revision === recentRevisionRef.current) setRecentSongs(cached);
+        if (revision === recentRevisionRef.current && (cached.length || changedAccount)) setRecentSongs(cached);
         setRecentLoading(!cached.length);
       }
-      await refreshRecentSearch(session);
-      if (active && recentAccountRef.current === session.username) setRecentLoading(false);
+      const refreshed = await refreshRecentSearch(session);
+      if (active && recentAccountRef.current === session.username) {
+        // A focus may join an existing refresh that emitted before subscribing.
+        // Apply its return value too; a same-account empty response isn't a clear action.
+        if (revision === recentRevisionRef.current && refreshed.length) setRecentSongs(refreshed);
+        setRecentLoading(false);
+      }
     })().catch(() => { if (active) setRecentLoading(false); });
     const unsubscribe = subscribeRecentSearch((account, songs) => {
       if (active && recentAccountRef.current === account) { recentRevisionRef.current += 1; setRecentSongs(songs); }
@@ -117,8 +122,8 @@ export default function SearchScreen() {
     return () => { active = false; unsubscribe(); };
   }, []));
   const [playlistResults, setPlaylistResults] = useState<ApiPlaylist[]>([]);
+  const [resultOrder, setResultOrder] = useState<Array<{ type: string; index: number }>>([]);
   const [albumResults, setAlbumResults] = useState<AlbumSummary[]>([]);
-  const [featuredAlbums, setFeaturedAlbums] = useState<AlbumSummary[]>([]);
   const [artistResults, setArtistResults] = useState<SmartSearchResponse['artists']>([]);
   const [genreResults, setGenreResults] = useState<SmartSearchResponse['genres']>([]);
   const [correctedQuery, setCorrectedQuery] = useState('');
@@ -130,11 +135,9 @@ export default function SearchScreen() {
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
   const searchRequestId = useRef(0);
   const resultsReady = resultsForQuery === query.trim();
-  const visibleAlbums = query.trim() ? (resultsReady ? albumResults : []) : featuredAlbums;
 
   useEffect(() => {
     getSession().then((session) => setUsername(session?.username || '')).catch(() => {});
-    apiRequest<AlbumSummary[]>('/catalog/albums').then((albums) => setFeaturedAlbums(albums.slice(0, 16))).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -175,12 +178,19 @@ export default function SearchScreen() {
       setResultsForQuery(value);
       const songs = data.map(fromApiSearchSong);
       setResults(songs);
+      setResultOrder(smart?.results?.length ? smart.results : [
+        ...songs.map((_, index) => ({ type: 'song', index })),
+        ...(smart?.artists || []).map((_, index) => ({ type: 'artist', index })),
+        ...(smart?.albums || []).map((_, index) => ({ type: 'album', index })),
+        ...(smart?.playlists || []).map((_, index) => ({ type: 'playlist', index })),
+        ...(smart?.genres || []).map((_, index) => ({ type: 'genre', index })),
+      ]);
       setPlaylistResults(smart?.playlists || []);
       setAlbumResults(smart?.albums || []);
       setArtistResults(smart?.artists || []);
       setGenreResults(smart?.genres || []);
       setCorrectedQuery(smart?.correctedQuery || '');
-      setSearchError(songs.length || smart?.playlists?.length || smart?.albums?.length || smart?.artists?.length ? '' : 'Nenhuma música, artista, álbum ou playlist encontrada.');
+      setSearchError(songs.length || smart?.playlists?.length || smart?.albums?.length || smart?.artists?.length || smart?.genres?.length ? '' : 'Nenhuma música, artista, álbum ou playlist encontrada.');
     } catch (error) {
       if (requestId !== searchRequestId.current) return;
       setResults([]);
@@ -332,24 +342,49 @@ export default function SearchScreen() {
         )}
 
         <FlatList
-          data={!query.trim() ? recentSongs : resultsReady ? results : []}
-          keyExtractor={(item) => item.sourceId || item.id}
+          data={!query.trim() ? recentSongs.map((_, index) => ({ type: 'recent', index })) : resultsReady ? resultOrder : []}
+          keyExtractor={(item) => `${item.type}:${item.index}`}
           renderItem={({ item }) => {
-            const identity = item.sourceId || item.id;
-            return (
-              <SearchCard
-                song={item}
-                progress={downloadProgress[identity]}
-                downloaded={downloadedIds.has(identity)}
-                onPlay={play}
-                onDownload={download}
-                onOptions={(song) => Alert.alert(song.title, 'O que deseja fazer?', [
-                  { text: 'Adicionar à fila', onPress: () => { void addSongsToPlaybackQueue([song]); } },
-                  { text: 'Adicionar à playlist', onPress: () => addSongToPlaylist(song) },
+            if (item.type === 'song' || item.type === 'recent') {
+              const song = item.type === 'recent' ? recentSongs[item.index] : results[item.index];
+              if (!song) return null;
+              const identity = song.sourceId || song.id;
+              return <SearchCard song={song} progress={downloadProgress[identity]}
+                downloaded={downloadedIds.has(identity)} onPlay={play} onDownload={download}
+                onOptions={(selected) => Alert.alert(selected.title, 'O que deseja fazer?', [
+                  { text: 'Adicionar à fila', onPress: () => { void addSongsToPlaybackQueue([selected]); } },
+                  { text: 'Adicionar à playlist', onPress: () => addSongToPlaylist(selected) },
                   { text: 'Cancelar', style: 'cancel' },
-                ])}
-              />
-            );
+                ])} />;
+            }
+            let title = '', subtitle = '', artwork = '';
+            let glyph: ComponentProps<typeof Ionicons>['name'] = 'musical-notes';
+            let open = () => {};
+            if (item.type === 'artist') {
+              const artist = artistResults[item.index]; if (!artist) return null;
+              title = artist.name; subtitle = 'Artista'; artwork = artist.artworkUrl || ''; glyph = 'person';
+              open = () => router.push({ pathname: '/artist/[name]' as never, params: { name: artist.name } });
+            } else if (item.type === 'album') {
+              const album = albumResults[item.index]; if (!album) return null;
+              title = album.name; subtitle = `Álbum · ${album.artist}`; artwork = album.coverUrl || ''; glyph = 'disc';
+              open = () => router.push({ pathname: '/album/[name]' as never, params: {
+                name: album.name, artist: album.artist, coverUrl: album.coverUrl || '',
+                playlistId: album.playlistId ? String(album.playlistId) : '',
+              } });
+            } else if (item.type === 'playlist') {
+              const playlist = playlistResults[item.index]; if (!playlist) return null;
+              title = playlist.name; subtitle = 'Playlist'; artwork = playlist.iconUrl || ''; glyph = 'albums';
+              open = () => router.push({ pathname: '/playlist/[id]' as never, params: { id: String(playlist.id), title: playlist.name, kind: 'global' } });
+            } else if (item.type === 'genre') {
+              const genre = genreResults[item.index]; if (!genre) return null;
+              title = genre.name; subtitle = 'Gênero'; open = () => chooseGenre(genre.query);
+            } else return null;
+            return <TouchableOpacity style={styles.playlistCard} onPress={open} activeOpacity={0.82}>
+              {artwork ? <Image source={{ uri: artwork }} style={item.type === 'artist' ? styles.artistCover : styles.playlistCover} />
+                : <View style={styles.playlistCoverPlaceholder}><Ionicons name={glyph} size={23} color="#1db954" /></View>}
+              <View style={styles.playlistMeta}><Text style={styles.cardTitle} numberOfLines={1}>{title}</Text><Text style={styles.cardArtist} numberOfLines={1}>{subtitle}</Text></View>
+              <Ionicons name="chevron-forward" size={20} color="#777" />
+            </TouchableOpacity>;
           }}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
@@ -357,77 +392,7 @@ export default function SearchScreen() {
           initialNumToRender={8}
           windowSize={7}
           removeClippedSubviews={false}
-          ListHeaderComponent={
-            <View>
-              {!query.trim() && <Text style={styles.genreTitle}>Pesquisadas recentemente</Text>}
-              {resultsReady && genreResults.length > 0 && <><Text style={styles.genreTitle}>Gêneros</Text>
-              <View style={styles.genreGrid}>
-                {genreResults.map((item) => (
-                  <TouchableOpacity
-                    key={item.query}
-                    style={[styles.genreCard, { backgroundColor: item.color || '#176b39' }]}
-                    onPress={() => chooseGenre(item.query)}
-                    activeOpacity={0.82}
-                  >
-                    <Text style={styles.genreName}>{item.name}</Text>
-                    <Ionicons name="musical-notes" size={22} color="#ffffffcc" />
-                  </TouchableOpacity>
-                ))}
-              </View></>}
-              {resultsReady && artistResults.length > 0 && (
-                <View style={styles.playlistSection}>
-                  <Text style={styles.genreTitle}>Artistas</Text>
-                  {artistResults.map((artist) => (
-                    <TouchableOpacity key={artist.name} style={styles.playlistCard} onPress={() => router.push({ pathname: '/artist/[name]' as never, params: { name: artist.name } })}>
-                      {artist.artworkUrl ? <Image source={{ uri: artist.artworkUrl }} style={styles.artistCover} /> : <View style={[styles.playlistCoverPlaceholder, styles.artistCover]}><Ionicons name="person" size={23} color="#1db954" /></View>}
-                      <View style={styles.playlistMeta}><Text style={styles.cardTitle} numberOfLines={1}>{artist.name}</Text><Text style={styles.cardArtist}>Ver músicas do artista</Text></View>
-                      <Ionicons name="chevron-forward" size={20} color="#777" />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-              {visibleAlbums.length > 0 && (
-                <View style={styles.playlistSection}>
-                  <Text style={styles.genreTitle}>{query.trim() ? 'Álbuns' : 'Álbuns no catálogo'}</Text>
-                  {visibleAlbums.map((album) => (
-                    <TouchableOpacity key={`${album.name}:${album.artist}`} style={styles.playlistCard} onPress={() => router.push({ pathname: '/album/[name]' as never, params: { name: album.name, artist: album.artist, coverUrl: album.coverUrl || '', playlistId: album.playlistId ? String(album.playlistId) : '' } })}>
-                      {album.coverUrl ? <Image source={{ uri: album.coverUrl }} style={styles.playlistCover} /> : <View style={styles.playlistCoverPlaceholder}><Ionicons name="disc" size={23} color="#1db954" /></View>}
-                      <View style={styles.playlistMeta}><Text style={styles.cardTitle} numberOfLines={1}>{album.name}</Text><Text style={styles.cardArtist} numberOfLines={1}>{album.artist || `${album.songCount} músicas`}</Text></View>
-                      <Ionicons name="chevron-forward" size={20} color="#777" />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-              {resultsReady && playlistResults.length > 0 && (
-                <View style={styles.playlistSection}>
-                  <Text style={styles.genreTitle}>Playlists</Text>
-                  {playlistResults.map((playlist) => (
-                    <TouchableOpacity
-                      key={playlist.id}
-                      style={styles.playlistCard}
-                      activeOpacity={0.82}
-                      onPress={() => router.push({
-                        pathname: '/playlist/[id]' as never,
-                        params: { id: String(playlist.id), title: playlist.name, kind: 'global' },
-                      })}
-                    >
-                      {playlist.iconUrl ? (
-                        <Image source={{ uri: playlist.iconUrl }} style={styles.playlistCover} />
-                      ) : (
-                        <View style={styles.playlistCoverPlaceholder}><Ionicons name="albums" size={22} color="#1db954" /></View>
-                      )}
-                      <View style={styles.playlistMeta}>
-                        <Text style={styles.cardTitle} numberOfLines={1}>{playlist.name}</Text>
-                        <Text style={styles.cardArtist} numberOfLines={1}>{playlist.description || 'Playlist do NationMusics'}</Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={20} color="#777" />
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-              {query.trim() ? <Text style={styles.genreTitle}>Músicas</Text> : null}
-            </View>
-          }
+          ListHeaderComponent={<Text style={styles.genreTitle}>{query.trim() ? 'Resultados' : 'Pesquisadas recentemente'}</Text>}
           ListEmptyComponent={
             !query.trim() && recentLoading ? <ActivityIndicator color="#1db954" style={{ marginTop: 20 }} /> : searching ? <CollectionLoading label="Buscando no catálogo..." /> : resultsReady && (artistResults.length || playlistResults.length || albumResults.length) ? null : (
               <View style={[styles.empty, !query.trim() && styles.emptyCompact]}>

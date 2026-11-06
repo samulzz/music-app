@@ -2242,8 +2242,12 @@ function bindSongActions(playlist = null) {
   document.querySelectorAll('.play-song').forEach((button) => {
     button.addEventListener('click', () => {
       const song = state.visibleSongs[Number(button.dataset.index)];
-      if (state.view === 'search' && song) rememberDesktopRecentSearch(song);
-      playQueue(state.visibleSongs, Number(button.dataset.index), context);
+      if (state.view === 'search' && song) {
+        rememberDesktopRecentSearch(song);
+        // Search results are not a playlist: continue from the selected seed,
+        // not from arbitrary title matches further down the results.
+        playQueue([song], 0, null);
+      } else playQueue(state.visibleSongs, Number(button.dataset.index), context);
     });
   });
   document.querySelectorAll('.save-song').forEach((button) => {
@@ -2799,17 +2803,35 @@ async function renderSearch(query = '', exactGenre = false) {
     const artists = discovery.artists || [];
     const albums = discovery.albums || [];
     const genres = discovery.genres || [];
+    // Keep server relevance, including the indices used by all song row actions.
+    const rowTemplate = document.createElement('template');
+    rowTemplate.innerHTML = songRows(merged, '', { preserveOrder: true });
+    const songMarkup = [...rowTemplate.content.querySelectorAll('.song-row')].map(row => row.outerHTML);
+    const order = discovery.results?.length ? discovery.results : [
+      ...merged.map((_, index) => ({ type: 'song', index })),
+      ...artists.map((_, index) => ({ type: 'artist', index })),
+      ...albums.map((_, index) => ({ type: 'album', index })),
+      ...matchingPlaylists.map((_, index) => ({ type: 'playlist', index })),
+      ...genres.map((_, index) => ({ type: 'genre', index })),
+    ];
+    const resultMarkup = order.map(({ type, index }) => {
+      if (type === 'song') return songMarkup[index] || '';
+      const entry = type === 'artist' ? artists[index] : type === 'album' ? albums[index]
+        : type === 'playlist' ? matchingPlaylists[index] : genres[index];
+      if (!entry) return '';
+      const label = type === 'artist' ? 'Artista' : type === 'album' ? `Álbum · ${entry.artist || ''}` : type === 'playlist' ? 'Playlist' : 'Gênero';
+      const action = type === 'artist' ? `data-artist-index="${index}"` : type === 'album'
+        ? `data-search-album-index="${index}"` : type === 'playlist'
+        ? `data-search-playlist-index="${index}"` : `data-genre-query="${escapeHtml(entry.query)}"`;
+      return `<button class="song-row search-result" type="button" ${action}>
+        ${coverMarkup({ title: entry.name, artworkUrl: entry.artworkUrl || entry.coverUrl || entry.iconUrl })}
+        <div class="song-main"><strong>${escapeHtml(entry.name)}</strong><span>${escapeHtml(label)}</span></div>
+        <div class="song-artist"></div><span class="song-actions">${icon('next')}</span></button>`;
+    }).join('');
     contentView.innerHTML = `
-      ${genres.length ? `<section class="home-section search-genres"><div class="section-heading"><h2>Gêneros</h2><span>${genres.length} encontrados</span></div><div class="genre-grid">${genres.map((genre) => `<button class="genre-card genre-${escapeHtml(genre.tone || 'green')}" data-genre-query="${escapeHtml(genre.query)}" type="button"><span>${escapeHtml(genre.icon || '♫')}</span><strong>${escapeHtml(genre.name)}</strong></button>`).join('')}</div></section>` : ''}
-      ${artists.length ? `<section class="home-section"><div class="section-heading"><h2>Artistas</h2><span>${artists.length} encontrados</span></div><div class="artist-results">${artists.map((artist, index) => `<button class="artist-result" data-artist-index="${index}" type="button">${artist.artworkUrl ? `<img src="${escapeHtml(artist.artworkUrl)}" alt="" />` : `<span class="artist-result-placeholder">${icon('users')}</span>`}<strong>${escapeHtml(artist.name)}</strong><small>Ver músicas</small></button>`).join('')}</div></section>` : ''}
-      ${albums.length ? `<section class="home-section"><div class="section-heading"><h2>Álbuns</h2><span>${albums.length} encontrados</span></div><div class="home-shelf search-playlist-grid">${albums.map((album, index) => `<article class="home-album-card" data-search-album-index="${index}"><div>${album.coverUrl ? `<img src="${escapeHtml(album.coverUrl)}" alt="" />` : icon('music')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(album.name)}</strong><p>${escapeHtml(album.artist || `${album.songCount} músicas`)}</p></article>`).join('')}</div></section>` : ''}
-      ${matchingPlaylists.length ? `<section class="home-section"><div class="section-heading"><h2>Playlists</h2><span>${matchingPlaylists.length} encontradas</span></div><div class="home-shelf search-playlist-grid">${matchingPlaylists.map((playlist, index) => `<article class="home-album-card" data-search-playlist-index="${index}"><div>${playlist.iconUrl ? `<img src="${escapeHtml(playlist.iconUrl)}" alt="" />` : icon('playlist')}<button type="button">${icon('play')}</button></div><strong>${escapeHtml(playlist.name)}</strong><p>${escapeHtml(playlist.description || 'Playlist do NationMusics')}</p></article>`).join('')}</div></section>` : ''}
       ${discovery.correctedQuery ? `<button class="search-correction" id="search-correction" type="button">${icon('search')} Você quis dizer “${escapeHtml(discovery.correctedQuery)}”?</button>` : ''}
-      <div class="section-heading">
-        <h2>Músicas</h2>
-        <span>${merged.length} encontrados</span>
-      </div>
-      ${songRows(merged, `Nenhum resultado para “${query}”.`)}
+      <div class="section-heading"><h2>Resultados</h2><span>${order.length} encontrados</span></div>
+      <div class="song-list">${resultMarkup || `<div class="empty-state">Nenhum resultado para “${escapeHtml(query)}”.</div>`}</div>
     `;
     bindGenreActions();
     document.querySelectorAll('[data-artist-index]').forEach((card) => {

@@ -29,6 +29,22 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 class RecommendationServiceTests {
+    @Test void unclassifiedSingleTrackGetsContextFromItsOwnCollectionNotUnrelatedFavorites() {
+        var users=mock(UserRepository.class); var songs=mock(SongRepository.class);
+        var playlists=mock(PlaylistRepository.class); var prefs=mock(PlaybackPreferenceRepository.class);
+        var user=new User(); user.setId(7L); user.setDownloadedSongs(new HashSet<>());
+        var seed=new Song(); seed.setId(1L); seed.setSourceId("seed"); seed.setTitle("Superpowers"); seed.setArtist("Daniel Caesar");
+        var peer=new Song(); peer.setId(2L); peer.setSourceId("peer"); peer.setTitle("Related track"); peer.setArtist("Other artist");
+        var unrelated=new Song(); unrelated.setId(3L); unrelated.setSourceId("unrelated"); unrelated.setTitle("Favorite"); unrelated.setArtist("Favorite artist");
+        var collection=new me.samulsz.musicapi.models.Playlist(); collection.setSongs(new HashSet<>(List.of(seed,peer)));
+        when(users.findByUsername("listener")).thenReturn(Optional.of(user));
+        when(songs.findBySourceId("seed")).thenReturn(Optional.of(seed)); when(songs.findAll()).thenReturn(List.of(seed,peer,unrelated));
+        when(playlists.findByOwnerUsernameOrderByIdDesc("listener")).thenReturn(List.of(collection));
+        var music=mock(MusicService.class); when(music.hasPrecachedAudio(any())).thenReturn(true);
+        var service=new RecommendationService(users,songs,playlists,prefs,mock(DailyMixRepository.class),mock(AccountPlaybackRepository.class),music);
+        assertEquals(List.of(2L),service.radio("listener","seed",30).stream().map(Song::getId).toList());
+        assertEquals(List.of(),service.radio("listener","seed",30,java.util.Set.of("peer")));
+    }
     @Test void radioVariesSessionsWithoutLeakingUnrelatedFavorites() {
         var users=mock(UserRepository.class);var songs=mock(SongRepository.class);var prefs=mock(PlaybackPreferenceRepository.class);
         var user=new User();user.setId(7L);user.setDownloadedSongs(new HashSet<>());

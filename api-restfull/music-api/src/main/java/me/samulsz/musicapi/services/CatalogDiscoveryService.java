@@ -55,6 +55,16 @@ public class CatalogDiscoveryService {
                         .thenComparing(item -> normalize(item.song().getTitle())))
                 .toList();
 
+        // Typo recovery is a fallback, never extra noise below a real match.
+        List<ScoredSong> literalSongs = rankedSongs.stream().filter(item -> {
+            Song song = item.song();
+            String combined = normalize(String.join(" ", Objects.toString(song.getTitle(), ""),
+                    Objects.toString(song.getArtist(), ""), Objects.toString(song.getAlbum(), ""),
+                    String.join(" ", song.getGenres())));
+            return Stream.of(query.split("\\s+")).allMatch(combined::contains);
+        }).toList();
+        if (!literalSongs.isEmpty()) rankedSongs = literalSongs;
+
         List<Song> songResults = CatalogIdentity.unique(rankedSongs.stream()
                 .map(ScoredSong::song)
                 .filter(song -> music.hasPrecachedAudio(song.getSourceId()))
@@ -95,7 +105,7 @@ public class CatalogDiscoveryService {
                 .toList();
         String correction = songResults.isEmpty() && artistResults.isEmpty() && albumResults.isEmpty()
                 && playlistResults.isEmpty() && genreResults.isEmpty() ? closestSuggestion(query) : "";
-        return new SmartSearchResponse(correction, songResults, artistResults, albumResults, playlistResults, genreResults);
+        return new SmartSearchResponse(correction, songResults, artistResults, albumResults, playlistResults, genreResults).ranked(query);
     }
 
     public List<AlbumSummaryResponse> listAlbums() {
@@ -158,9 +168,11 @@ public class CatalogDiscoveryService {
         String artist = normalize(song.getArtist());
         String album = normalize(song.getAlbum());
         String genres = normalize(String.join(" ", song.getGenres()));
-        int score = Math.max(fieldScore(title, query, 120), fieldScore(artist, query, 95));
-        score = Math.max(score, fieldScore(album, query, 80));
-        score = Math.max(score, fieldScore(genres, query, 65));
+        // A track title prefix must not be buried under songs whose artist/album
+        // happens to contain the same text. Artists have their own unified hit.
+        int score = Math.max(fieldScore(title, query, 120), fieldScore(artist, query, 95) / 2);
+        score = Math.max(score, fieldScore(album, query, 80) / 3);
+        score = Math.max(score, fieldScore(genres, query, 65) / 4);
         String combined = String.join(" ", title, artist, album, genres).trim();
         String[] tokens = query.split("\\s+");
         int matched = 0;
@@ -180,9 +192,8 @@ public class CatalogDiscoveryService {
 
     private int fieldScore(String field, String query, int base) {
         if (field.isBlank()) return 0;
-        if (field.equals(query)) return base + 30;
-        if (field.startsWith(query)) return base + 20;
-        if (field.contains(query)) return base + 10;
+        int literal = SmartSearchResponse.relevance(field, query);
+        if (literal > 0) return literal + base;
         int distance = levenshtein(field, query);
         if (distance <= typoTolerance(query)) return base - distance * 8;
         return 0;

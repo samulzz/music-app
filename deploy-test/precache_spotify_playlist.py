@@ -63,7 +63,12 @@ def mismatched_version(target_title, candidate_text):
         "ao vivo", "live", "show", "concert", "festival", "performance",
         "karaoke", "instrumental", "playback", "type beat", "beat",
         "cover", "remix", "slowed", "sped up", "nightcore", "acoustic", "acustico",
+        "8d", "8 d", "reverb", "previa", "previas", "preview", "snippet",
     )
+    if contains_marker(candidate_text, "free") and not contains_marker(target_title, "free") and (
+        contains_marker(candidate_text, "prod") or contains_marker(candidate_text, "beat")
+    ):
+        return True
     return any(contains_marker(candidate_text, marker) and not contains_marker(target_title, marker) for marker in blocked_markers)
 
 

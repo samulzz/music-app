@@ -7,6 +7,7 @@ const loginError = document.querySelector('#login-error');
 const period = document.querySelector('#period');
 const notice = document.querySelector('#notice');
 let refreshTimer = null;
+let lastAudioCatalog = null;
 
 function token() { return sessionStorage.getItem(tokenKey) || ''; }
 function formatMs(value) { const ms = Number(value) || 0; return ms >= 1000 ? `${(ms / 1000).toFixed(ms >= 10000 ? 0 : 1)} s` : `${Math.round(ms)} ms`; }
@@ -32,6 +33,34 @@ loginForm.addEventListener('submit', async event => {
 document.querySelector('#logout').addEventListener('click',()=>{sessionStorage.removeItem(tokenKey);showLogin()});
 document.querySelector('#refresh').addEventListener('click',()=>loadDashboard(true));
 period.addEventListener('change',()=>loadDashboard(true));
+document.querySelector('#audio-view').addEventListener('change',()=>renderAudioQuality());
+document.querySelector('#audio-search').addEventListener('input',()=>renderAudioQuality());
+
+function renderAudioQuality() {
+  const data=lastAudioCatalog;if(!data)return;
+  document.querySelector('#audio-progress').textContent=`${data.audioReviewed||0}/${data.songs||0} músicas examinadas · ${data.audioComplete||0} com arquivo e origem analisados · ${data.audioWarnings||0} com alerta · ${data.audioPending||0} pendentes. Até 3 por rodada, uma por vez. Reanálise semanal; resultados persistem após reiniciar a VPS.`;
+  const labels={OK:'Sem alerta nas verificações realizadas',MISSING:'Arquivo ausente',TOO_SMALL:'Arquivo muito pequeno',CORRUPT:'Arquivo inválido',TOO_SHORT:'Áudio muito curto',LOW_BITRATE:'Bitrate baixo',DURATION_MISMATCH:'Duração diferente da referência',LOW_VOLUME:'Volume baixo',HIGH_TRUE_PEAK:'Picos elevados',EXCESSIVE_SILENCE:'Silêncio excessivo',ALTERED_VERSION:'Possível 8D / efeito',POSSIBLE_LIVE_VERSION:'Possível show / ao vivo',POSSIBLE_INSTRUMENTAL:'Possível instrumental / beat',ANALYSIS_FAILED:'Análise não concluída'};
+  const query=document.querySelector('#audio-search').value.trim().toLocaleLowerCase('pt-BR');
+  const recent=document.querySelector('#audio-view').value==='recent';
+  const rows=(recent?data.audioRecent:data.audioIssues)||[];
+  const body=document.querySelector('#audio-issues');body.replaceChildren();
+  for(const row of rows){
+    const result=String(row.issue||'OK').split(',').map(code=>labels[code]||code).join(' · ');
+    if(query&&![row.title,row.artist,row.sourceTitle,row.sourceChannel,result].join(' ').toLocaleLowerCase('pt-BR').includes(query))continue;
+    const tr=document.createElement('tr');
+    const evidence=row.state==='PENDING'?'Reanálise prioritária solicitada.':row.details||(row.state==='PARTIAL'?'Análise parcial; origem ou medição indisponível.':'Voz cantada não analisada por IA.');
+    tr.append(textCell(row.title,row.artist),textCell(result,evidence));
+    const metrics=[row.integratedLufs!=null?`${Number(row.integratedLufs).toFixed(1)} LUFS`:'Volume não medido',row.truePeakDb!=null?`${Number(row.truePeakDb).toFixed(1)} dBTP`:'',row.silenceRatio!=null?`${Math.round(row.silenceRatio*100)}% silêncio`:'',row.bitrate?`${Math.round(row.bitrate/1000)} kbps`:''].filter(Boolean);
+    tr.append(textCell(metrics.shift(),metrics.join(' · ')));
+    const source=textCell(row.sourceTitle||'Origem não verificada',row.sourceChannel||row.sourceStatus);
+    if(/^[A-Za-z0-9_-]{11}$/.test(row.sourceId||'')){const link=document.createElement('a');link.href=`https://www.youtube.com/watch?v=${encodeURIComponent(row.sourceId)}`;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Conferir fonte';source.append(link)}
+    tr.append(source,numberCell(row.confidence?`${Math.round(row.confidence*100)}%`:'—'),numberCell(row.checkedAt?formatDate(row.checkedAt):'Na fila'));
+    const action=document.createElement('td');const button=document.createElement('button');button.type='button';button.className='secondary';button.textContent=row.state==='PENDING'?'Na fila':'Reanalisar';button.disabled=row.state==='PENDING';
+    button.addEventListener('click',async()=>{button.disabled=true;try{await request(`/admin/monitoring/audio/${encodeURIComponent(row.songId)}/recheck`,{method:'POST'});button.textContent='Na fila';await loadDashboard(false)}catch(error){button.disabled=false;notice.textContent=error.message;notice.classList.remove('hidden')}});
+    action.append(button);tr.append(action);body.append(tr);
+  }
+  if(!body.children.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=7;td.className='muted';td.textContent=query?'Nenhum resultado neste grupo de análises.':recent?'Aguardando as primeiras análises.':'Nenhum alerta entre as faixas já examinadas. Veja a cobertura acima; isso não garante que o restante do catálogo está correto.';tr.append(td);body.append(tr)}
+}
 
 function renderSummary(summary) {
   const rate=Number(summary.affectedSessionRate)||0;
@@ -57,10 +86,8 @@ function renderCatalog(data) {
   document.querySelector('#catalog-summary').replaceChildren(...cards.map(([label,value,caption])=>{const el=document.createElement('article');el.className='card';const p=document.createElement('p');p.className='eyebrow';p.textContent=label;const strong=document.createElement('strong');strong.textContent=value;const small=document.createElement('small');small.textContent=caption;el.append(p,strong,small);return el}));
   const job=(selector,title,item={})=>{const root=document.querySelector(selector);const updated=item.updatedAt?formatDate(item.updatedAt):'Ainda não executado';root.innerHTML='';const header=document.createElement('header');const strong=document.createElement('strong');strong.textContent=title;const time=document.createElement('time');time.textContent=`${item.state||'IDLE'} · ${updated}`;header.append(strong,time);const p=document.createElement('p');p.textContent=item.message||'Sem informações';root.append(header,p)};
   job('#album-job','Montagem de álbuns',data.albumJob);job('#genre-job','Classificação de gêneros',data.genreJob);job('#audio-job','Auditoria dos arquivos',data.audioJob);
-  const issues=document.querySelector('#audio-issues');issues.replaceChildren();
-  const labels={MISSING:'Arquivo ausente',TOO_SMALL:'Arquivo incompleto',CORRUPT:'Arquivo corrompido',TOO_SHORT:'Áudio muito curto',LOW_BITRATE:'Bitrate baixo',SUSPICIOUS_VERSION:'Versão suspeita',DUPLICATE_METADATA:'Possível duplicata'};
-  (data.audioIssues||[]).slice(0,20).forEach(item=>{const tr=document.createElement('tr');tr.append(textCell(item.title,item.artist||item.sourceId),numberCell(labels[item.issue]||item.issue),numberCell(item.durationSeconds?`${Math.round(item.durationSeconds)} s`:'—'),numberCell(item.bitrate?`${Math.round(item.bitrate/1000)} kbps`:'—'));issues.append(tr)});
-  if(!issues.children.length){const tr=document.createElement('tr');const td=document.createElement('td');td.colSpan=4;td.className='muted';td.textContent='Nenhum alerta encontrado pela auditoria gradual.';tr.append(td);issues.append(tr)}
+  lastAudioCatalog = data;
+  renderAudioQuality();
   document.querySelector('#catalog-updated').textContent=`Atualizado em ${formatDate(data.generatedAt)}`;
 }
 

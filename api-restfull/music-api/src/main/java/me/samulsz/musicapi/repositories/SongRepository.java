@@ -12,6 +12,14 @@ import java.util.Optional;
 
 @Repository
 public interface SongRepository extends JpaRepository<Song, Long> {
+    @Query(value = """
+            SELECT s.* FROM songs s LEFT JOIN audio_quality_reviews r ON r.song_id = s.id
+            WHERE s.source_id IS NOT NULL AND TRIM(s.source_id) <> ''
+              AND (r.song_id IS NULL OR r.source_id <> s.source_id OR r.checked_at < :before)
+            ORDER BY CASE WHEN r.state = 'PENDING' THEN 0 ELSE 1 END,
+                     COALESCE(r.checked_at, 0), s.id DESC LIMIT 3
+            """, nativeQuery = true)
+    List<Song> findAudioQualityCandidates(@Param("before") long before);
     java.util.List<Song> findBySourceIdIn(java.util.Collection<String> sourceIds);
 
     Optional<Song> findByUri(String uri);

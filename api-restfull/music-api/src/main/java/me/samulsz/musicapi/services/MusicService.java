@@ -507,6 +507,8 @@ public class MusicService {
         return new AudioAudit(sourceId, true, true, bytes, probe.durationSeconds(), probe.bitrate(), "OK");
     }
 
+    File audioFileForAnalysis(String sourceId) { return cachedAudioFile(sourceId); }
+
     public boolean invalidateCachedAudio(String sourceId) {
         File file = cachedAudioFile(sourceId);
         invalidateAudioValidation(sourceId);

@@ -39,7 +39,16 @@
         <div class="panel-head"><div><p class="eyebrow">CURADORIA AUTOMÁTICA</p><h2>Álbuns, gêneros e prioridades do importador</h2></div><span id="catalog-updated" class="muted"></span></div>
         <section id="catalog-summary" class="catalog-cards"></section>
         <div class="job-grid"><article id="album-job" class="job-card"></article><article id="genre-job" class="job-card"></article><article id="audio-job" class="job-card"></article></div>
-        <div class="table-scroll"><table><thead><tr><th>Alerta de áudio</th><th>Problema</th><th>Duração</th><th>Qualidade</th></tr></thead><tbody id="audio-issues"></tbody></table></div>
+      </section>
+
+      <section class="panel wide">
+        <div class="panel-head"><div><p class="eyebrow">AUDITORIA GRADUAL</p><h2>Qualidade dos áudios</h2></div>
+          <select id="audio-view" aria-label="Resultados da auditoria"><option value="warnings">Alertas encontrados</option><option value="recent">Últimas análises, incluindo aprovadas</option></select>
+        </div>
+        <p id="audio-progress" class="muted"></p>
+        <p class="muted">Volume, picos e silêncio são medidos no arquivo inteiro. Show, instrumental e 8D são indícios da fonte original, não conclusões por IA. Presença de voz cantada ainda não é analisada. Nenhuma faixa é apagada ou substituída por suspeita.</p>
+        <label>Filtrar resultados<input id="audio-search" type="search" placeholder="Música, artista, canal ou problema" /></label>
+        <div class="table-scroll"><table><thead><tr><th>Música</th><th>Resultado / evidência</th><th>Volume / silêncio</th><th>Fonte original</th><th>Confiança</th><th>Verificado</th><th>Ação</th></tr></thead><tbody id="audio-issues"></tbody></table></div>
       </section>
 
       <section class="panel wide">

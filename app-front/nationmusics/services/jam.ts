@@ -1,4 +1,5 @@
 import TrackPlayer, { type MediaItem } from '@rntp/player';
+import { applyPlaybackVolume } from './device-volume';
 
 import type { MusicSong } from '../types/music';
 import { apiRequest } from './api';
@@ -248,7 +249,7 @@ export async function syncToJamSession(session: JamSession) {
     if (state.playing && !TrackPlayer.isPlaying()) TrackPlayer.play();
     if (!state.playing && TrackPlayer.isPlaying()) TrackPlayer.pause();
     if (session.permissions?.syncVolume) {
-      TrackPlayer.setVolume(Math.max(0, Math.min(1, Number(session.volumeLevel ?? state.volumeLevel ?? 1))));
+      applyPlaybackVolume(Number(session.volumeLevel ?? state.volumeLevel ?? 1));
     }
   } catch {}
 }

@@ -21,6 +21,7 @@ import { getLatestConnectState, markConnectRevisionProcessed, takeOverConnectPla
 import type { PlaybackContext } from './connect';
 import { sampleListening, flushPendingListening } from './listening-stats';
 import { getSession } from './auth';
+import { applyPlaybackVolume } from './device-volume';
 
 let initialized = false;
 const OFFLINE_INDEX_KEY = 'nationmusics.offline-library.v2';
@@ -155,7 +156,7 @@ async function restorePersistedPlaybackSession(expectedRevision: number) {
     playbackContext = session.context || null;
     playbackLastPlayedAt = Number(session.lastPlayedAt) || 0;
     emitShuffleEnabled(Boolean(session.shuffle));
-    TrackPlayer.setVolume(Math.max(0, Math.min(1, Number(session.volume) || 0)));
+    applyPlaybackVolume(session.volume);
     TrackPlayer.setMediaItems(items, index);
     if (Number(session.positionSeconds) > 0) TrackPlayer.seekTo(safePlaybackPosition(Number(session.positionSeconds), session.durationSeconds));
     // Uma restauração fria sempre volta pausada para o app nunca começar sozinho.
@@ -688,6 +689,7 @@ export async function playSongQueue(
     : queue;
   const startIndex = lastShuffleEnabled ? 0 : queueIndex;
   TrackPlayer.setMediaItems(ordered, startIndex);
+  if (Platform.OS === 'android') applyPlaybackVolume();
   if (autoplay) TrackPlayer.play(); else TrackPlayer.pause();
   prefetchNextInQueue(startIndex);
   schedulePersistPlaybackSession();
@@ -727,6 +729,7 @@ export async function restorePausedSongQueue(
   playbackContext = context;
   playbackLastPlayedAt = remotePlayedAt || playbackLastPlayedAt;
   TrackPlayer.setMediaItems(queue, queueIndex);
+  if (Platform.OS === 'android') applyPlaybackVolume();
   TrackPlayer.seekTo(safePlaybackPosition(positionSeconds, durationSeconds));
   TrackPlayer.pause();
   prefetchNextInQueue(queueIndex);

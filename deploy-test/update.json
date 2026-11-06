@@ -1,28 +1,28 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-05T22:24:00-03:00",
+  "generatedAt": "2026-11-05T22:52:00-03:00",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.45",
-    "versionCode": 47,
-    "minimumVersion": "1.1.45",
-    "minimumVersionCode": 47,
-    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.45.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.45.apk",
-    "sha256": "336afb789ce2ca58381acfbbc4586f366df973bc1cb06219d5290a53201a3db6",
+    "version": "1.1.46",
+    "versionCode": 48,
+    "minimumVersion": "1.1.46",
+    "minimumVersionCode": 48,
+    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.46.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.46.apk",
+    "sha256": "20a2ff65199265d57103431b6247b3bb684dec2c184203529b72a395fa27c06a",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Rádio contextual e variada, correção do falso offline, recuperação de downloads e restauração da última reprodução por conta."
+    "releaseNotes": "Android usa ganho interno de 100% e volume controlado pelos botões do celular, sem herdar o volume do computador."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.48",
-    "minimumVersion": "1.2.48",
-    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.48.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.48.exe",
-    "sha256": "631be58ef7173755f1e6474dd29e2adbe299abf3e5951040c2ce0064caeaf0df",
+    "version": "1.2.49",
+    "minimumVersion": "1.2.49",
+    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.49.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.49.exe",
+    "sha256": "c72dff675e2c0cc6b3b7e63feb4b69866645b715628fb3983106f54595d880c3",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Fila variada ligada à música escolhida, biblioteca sem cópias repetidas e retomada da reprodução mais recente entre dispositivos."
+    "releaseNotes": "O volume salvo do computador é preservado nas transferências; no Android, o volume fica a cargo dos botões do celular."
   }
 }

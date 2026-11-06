@@ -441,13 +441,21 @@ function volumeSliderToAudioVolume(sliderValue) {
   return clamp(normalized ** VOLUME_CURVE, 0, 1);
 }
 
+function isAndroidPlayback(connect = state.connectState) {
+  return Boolean(connect && !connect.currentDeviceActive && connect.devices?.some(device => device.active && device.platform === 'android'));
+}
+
 function updateVolumeUi() {
   const slider = $('#volume');
   const label = $('#volume-value');
   const button = $('#mute-button');
   if (!slider || !label || !button) return;
 
-  const sliderValue = Math.round(clamp(state.volumeSliderValue, 0, 100));
+  const android = isAndroidPlayback();
+  slider.disabled = android;
+  button.disabled = android;
+  slider.title = android ? 'No Android, use os botões de volume do celular' : 'Volume deste computador';
+  const sliderValue = android ? 100 : Math.round(clamp(state.volumeSliderValue, 0, 100));
   slider.value = String(sliderValue);
   slider.style.setProperty('--volume-fill', `${sliderValue}%`);
   label.textContent = `${sliderValue}%`;
@@ -458,7 +466,7 @@ function updateVolumeUi() {
       ? 'volume-low'
       : 'volume-high';
   button.innerHTML = icon(iconName);
-  button.title = sliderValue === 0 ? 'Restaurar volume' : 'Mutar';
+  button.title = android ? slider.title : sliderValue === 0 ? 'Restaurar volume' : 'Mutar';
   button.setAttribute('aria-label', button.title);
 }
 
@@ -1048,6 +1056,7 @@ function connectEffectivePosition(remoteState) {
 }
 
 function renderConnectState() {
+  updateVolumeUi();
   const connect = state.connectState;
   const panel = $('#connect-panel');
   const devices = $('#connect-devices');
@@ -3567,6 +3576,7 @@ $('#next-button').addEventListener('click', () => {
   nextTrack(1);
 });
 $('#volume').addEventListener('input', (event) => {
+  if (isAndroidPlayback()) { updateVolumeUi(); return; }
   if (state.connectState && !state.connectState.currentDeviceActive) {
     const normalized = clamp(Number(event.target.value) || 0, 0, 100) / 100;
     void controlConnectPlayback('VOLUME', normalized ** VOLUME_CURVE);
@@ -3575,6 +3585,7 @@ $('#volume').addEventListener('input', (event) => {
   setVolumeFromSlider(event.target.value);
 });
 $('#mute-button').addEventListener('click', () => {
+  if (isAndroidPlayback()) { updateVolumeUi(); return; }
   if (state.connectState && !state.connectState.currentDeviceActive) {
     void controlConnectPlayback('VOLUME', Number(state.connectState.volumeLevel) > 0 ? 0 : 0.7);
     return;

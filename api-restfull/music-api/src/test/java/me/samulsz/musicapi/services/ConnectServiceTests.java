@@ -139,6 +139,16 @@ class ConnectServiceTests {
         return new ConnectSongDto("1", "source-1", "Faixa", "Artista", "", "https://example.test/audio.mp3");
     }
 
+    @Test void transferToAndroidAndRemoteVolumeCommandsAlwaysUseFullPlayerGain() {
+        heartbeat("desktop",song(),true,0L);
+        storedPlayback.setVolumeLevel(.07);
+        heartbeat("mobile",null,false,0L);
+        var transfer=service.control("ouvinte",new ConnectControlRequest("mobile","SYNC",0D,null));
+        assertEquals(1D,transfer.volumeLevel());
+        var volume=service.control("ouvinte",new ConnectControlRequest("desktop","VOLUME",.1D,null));
+        assertEquals(1D,volume.volumeLevel());assertEquals(1D,volume.commandValue());
+    }
+
     @Test void pausedOldRestorationNeverOverwritesLastHeardSong() {
         heartbeat("desktop", song(), true, 0L);
         var old=new ConnectSongDto("old","old-source","Old song","Old artist","","");

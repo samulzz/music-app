@@ -14,6 +14,7 @@ import { getPlaybackContext, getPlaybackQueueRevision, playNext, playPrevious, p
 import { getActiveMediaItemSafely, getPlayerProgressSafely, isPlayerPlayingSafely } from '../services/player-state';
 import { getSession } from '../services/auth';
 import { getConnectQueue } from '../services/connect-queue';
+import { applyPlaybackVolume, getPlaybackVolume } from '../services/device-volume';
 
 function localSong(): ConnectSong | null {
   const item = getActiveMediaItemSafely();
@@ -41,14 +42,14 @@ async function applyCommand(state: ConnectState) {
       await playSongQueue(queue.songs, queue.index, 'playlist', queue.context, true, state.playing);
     }
     TrackPlayer.seekTo(Math.min(Math.max(0, state.positionSeconds), state.durationSeconds > 0 ? Math.max(0, state.durationSeconds - 0.5) : 0));
-    TrackPlayer.setVolume(Math.max(0, Math.min(1, state.volumeLevel)));
+    applyPlaybackVolume(state.volumeLevel);
     if (state.playing) TrackPlayer.play(); else TrackPlayer.pause();
   } else if (action === 'PLAY') TrackPlayer.play();
   else if (action === 'PAUSE') TrackPlayer.pause();
   else if (action === 'NEXT') playNext();
   else if (action === 'PREVIOUS') playPrevious();
   else if (action === 'SEEK') TrackPlayer.seekTo(Math.max(0, state.commandValue));
-  else if (action === 'VOLUME') TrackPlayer.setVolume(Math.max(0, Math.min(1, state.commandValue)));
+  else if (action === 'VOLUME') applyPlaybackVolume(state.commandValue);
   markConnectRevisionProcessed(state.commandRevision);
 }
 
@@ -63,7 +64,7 @@ export function ConnectSync() {
         if (!(await getSession())?.token) return;
         const progress = getPlayerProgressSafely();
         let volume = 1;
-        try { volume = Number(TrackPlayer.getVolume()) || 1; } catch {}
+        try { volume = getPlaybackVolume(); } catch {}
         const state = await sendConnectHeartbeat({
           song: localSong(),
           positionSeconds: progress.position,

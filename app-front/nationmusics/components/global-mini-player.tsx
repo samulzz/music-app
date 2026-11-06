@@ -265,6 +265,7 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
               <TouchableOpacity style={styles.toolButton} onPress={() => void sendConnectControl('SEEK', Math.max(0, displayPosition - 15)).catch(() => {})}>
                 <Ionicons name="play-back" size={19} color="#fff" /><Text style={styles.toolText}>15s</Text>
               </TouchableOpacity>
+              {connectState?.devices.some(device => device.active && device.platform === 'android') ? <Text style={[styles.volumeText, { flex: 1, textAlign: 'center' }]}>Use os botões de volume do celular</Text> : <>
               <TouchableOpacity style={styles.toolButton} onPress={() => void sendConnectControl('VOLUME', Math.max(0, Number(connectState?.volumeLevel || 0) - 0.1)).catch(() => {})}>
                 <Ionicons name="volume-low" size={19} color="#fff" />
               </TouchableOpacity>
@@ -272,6 +273,7 @@ function GlobalMiniPlayer({ bottomOffset = 64 }: Props) {
               <TouchableOpacity style={styles.toolButton} onPress={() => void sendConnectControl('VOLUME', Math.min(1, Number(connectState?.volumeLevel || 0) + 0.1)).catch(() => {})}>
                 <Ionicons name="volume-high" size={19} color="#fff" />
               </TouchableOpacity>
+              </>}
               <TouchableOpacity style={styles.toolButton} onPress={() => void sendConnectControl('SEEK', displayPosition + 15).catch(() => {})}>
                 <Ionicons name="play-forward" size={19} color="#fff" /><Text style={styles.toolText}>15s</Text>
               </TouchableOpacity>

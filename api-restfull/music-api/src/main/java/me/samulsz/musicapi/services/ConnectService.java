@@ -81,7 +81,7 @@ public class ConnectService {
                 playback.setDurationSeconds(Math.max(0, value(request.durationSeconds(), playback.getDurationSeconds())));
                 playback.setPositionSeconds(position(value(request.positionSeconds(), playback.getPositionSeconds()), playback.getDurationSeconds()));
                 playback.setPlaying(Boolean.TRUE.equals(request.playing()));
-                playback.setVolumeLevel(clamp(value(request.volumeLevel(), playback.getVolumeLevel()), 0, 1));
+                playback.setVolumeLevel("android".equalsIgnoreCase(device.getPlatform()) ? 1 : clamp(value(request.volumeLevel(), playback.getVolumeLevel()), 0, 1));
             } else {
                 // Sem fila local, encerra a sessão ativa sem apagar a última posição.
                 // Esse estado fica invisível no Connect, mas alimenta "Continuar ouvindo".
@@ -120,12 +120,16 @@ public class ConnectService {
             playback.setCommandTargetDeviceId(playback.getActiveDeviceId());
         }
         playback.setCommandAction(action);
+        boolean androidTarget = devices.findByUser_IdAndDeviceId(user.getId(), playback.getCommandTargetDeviceId())
+                .map(device -> "android".equalsIgnoreCase(device.getPlatform())).orElse(false);
+        if (androidTarget) playback.setVolumeLevel(1);
         playback.setCommandValue(value(request.value(), 0));
+        if (androidTarget && "VOLUME".equals(action)) playback.setCommandValue(1);
         playback.setCommandRevision(playback.getCommandRevision() + 1);
         if ("PLAY".equals(action)) playback.setPlaying(true);
         if ("PAUSE".equals(action)) playback.setPlaying(false);
         if ("SEEK".equals(action)) playback.setPositionSeconds(Math.max(0, value(request.value(), 0)));
-        if ("VOLUME".equals(action)) playback.setVolumeLevel(clamp(value(request.value(), playback.getVolumeLevel()), 0, 1));
+        if ("VOLUME".equals(action)) playback.setVolumeLevel(androidTarget ? 1 : clamp(value(request.value(), playback.getVolumeLevel()), 0, 1));
         playback.setStateUpdatedAt(now);
         playbacks.save(playback);
         return response(user, playback, sourceDeviceId, 0, now);

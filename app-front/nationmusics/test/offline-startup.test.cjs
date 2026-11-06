@@ -18,6 +18,7 @@ function harness(queueIndex) {
     PLAYBACK_SESSION_KEY: 'session', PLAYBACK_SESSION_MAX_AGE_MS: 100000,
     AsyncStorage: {getItem: async () => JSON.stringify(session)},
     getSession: async () => ({username:'alice'}), playbackLastPlayedAt:0,
+    applyPlaybackVolume:()=>{},
     deviceIsOffline: async () => true,
     mergeWithOfflineLibrary: async songs => songs,
     getMediaHeaders: async () => {calls.headers++; return {};},

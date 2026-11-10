@@ -12,6 +12,8 @@ import java.util.Optional;
 
 @Repository
 public interface SongRepository extends JpaRepository<Song, Long> {
+    @Query("select distinct s from Song s left join fetch s.genres where s.sourceId is not null and trim(s.sourceId) <> ''")
+    List<Song> findCatalogForDiscovery();
     @Query(value = """
             SELECT s.* FROM songs s LEFT JOIN audio_quality_reviews r ON r.song_id = s.id
             WHERE s.source_id IS NOT NULL AND TRIM(s.source_id) <> ''

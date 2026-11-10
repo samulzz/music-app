@@ -249,7 +249,7 @@ export default function PlaylistDetailsScreen() {
   const loadSongs = useCallback(async (showSpinner = true, force = false) => {
     if (!playlistId) return;
     if (isOfflineLibrary) {
-      const downloaded = await getOfflineLibrary({ validateFiles: true });
+      const downloaded = await getOfflineLibrary({ validateFiles: false });
       if (currentCacheKeyRef.current !== cacheKey) return;
       setSongs(isDaily ? downloaded : sortSongsAlphabetically(downloaded));
       setOfflineMode(true); setLoading(false); return;
@@ -282,6 +282,13 @@ export default function PlaylistDetailsScreen() {
     }
 
     try {
+      if (await deviceIsOffline()) {
+        const local = await getOfflineLibrary({ validateFiles: false });
+        const available = isLibrary ? local : (await mergeWithOfflineLibrary(cached.songs, local)).filter(song => song.localUri);
+        if (currentCacheKeyRef.current !== cacheKey) return;
+        setSongs(isDaily ? available : sortSongsAlphabetically(available)); setOfflineMode(true); setLoading(false);
+        return;
+      }
       const data = isDaily
         ? (await getDailyMix()).songs
         : isLibrary ? null

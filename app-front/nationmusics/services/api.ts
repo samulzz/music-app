@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 
-import { clearSession, getSession } from './auth';
+import { clearSession, getSession, getCachedSession } from './auth';
 import { API_BASE_URL, APP_HEADERS } from './config';
 
 export class OfflineError extends Error {
@@ -19,9 +19,17 @@ export async function accountCacheKey(base: string) {
   return `${base}.account.${encodeURIComponent(session?.username || 'guest')}`;
 }
 
+type Connectivity = { isConnected: boolean | null; isInternetReachable?: boolean | null };
+let connectivity: Connectivity | null = null;
+let networkRead: Promise<Connectivity | null> | null = null;
+try { NetInfo.addEventListener?.((state) => { connectivity = state; }); } catch {}
 export async function deviceIsOffline() {
-  // A VPS timeout is not evidence that the device lost internet connectivity.
-  try { return (await NetInfo.fetch()).isConnected === false; } catch { return false; }
+  // Network state is shared, but a VPS failure never changes it.
+  if (!connectivity || connectivity.isConnected === null) {
+    networkRead ??= NetInfo.fetch().then(state => { connectivity = state; return state; }).catch(() => null).finally(() => { networkRead = null; });
+    await Promise.race([networkRead, new Promise(resolve => setTimeout(resolve, 150))]);
+  }
+  return connectivity?.isConnected === false || connectivity?.isInternetReachable === false;
 }
 
 async function handleInvalidSession() {
@@ -81,7 +89,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     ...request
   } = options;
 
-  const requestOwner = await getSession();
+  const requestOwner = getCachedSession?.() || await getSession();
   const headers = authenticated
     ? await getAuthenticatedHeaders(json, requestOwner)
     : {
@@ -97,33 +105,41 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     if (!cacheKey) return null;
     try { const raw = await AsyncStorage.getItem(cacheKey); return raw ? JSON.parse(raw) as { data: T } : null; } catch { return null; }
   };
-  const networkDisconnected = cacheable && (await NetInfo.fetch().catch(() => null))?.isConnected === false;
+  const networkDisconnected = await deviceIsOffline();
   if (networkDisconnected) {
     const stored = await cached();
     if (stored) return stored.data;
     throw new OfflineError();
   }
-  const attempts = method === 'GET' || method === 'HEAD' ? 2 : 1;
+  const attempts = 1; // Cached reads should not wait through repeated network timeouts.
+  let rawBody = '';
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs || (cacheable ? 6000 : 20_000));
+    const abort = () => controller.abort();
+    request.signal?.addEventListener('abort', abort);
+    if (request.signal?.aborted) controller.abort();
+    const timeout = setTimeout(abort, timeoutMs || (cacheable ? 4000 : 6000));
     try {
       response = await fetch(`${API_BASE_URL}${path}`, {
         ...request,
-        signal: request.signal || controller.signal,
+        signal: controller.signal,
         headers: {
           ...headers,
           ...requestHeaders,
         },
       });
+      rawBody = response.status === 204 ? '' : await response.text();
       break;
     } catch {
+      response = undefined;
+      if (request.signal?.aborted) { const error = new Error('Busca cancelada.'); error.name = 'AbortError'; throw error; }
       if (attempt + 1 < attempts) {
         await new Promise((resolve) => setTimeout(resolve, 650));
       }
     } finally {
       clearTimeout(timeout);
+      request.signal?.removeEventListener('abort', abort);
     }
   }
 
@@ -133,7 +149,6 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     throw new OfflineError();
   }
 
-  const rawBody = response.status === 204 ? '' : await response.text();
   let parsedBody: unknown = rawBody;
   if (rawBody.trim()) {
     try {

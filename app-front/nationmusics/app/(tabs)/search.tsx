@@ -16,10 +16,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 
 import type { AlbumSummary, ApiPlaylist, ApiSearchSong, MusicSong, SmartSearchResponse } from '../../types/music';
 import { fromApiSearchSong } from '../../types/music';
-import { apiRequest } from '../../services/api';
+import { apiRequest, deviceIsOffline } from '../../services/api';
+import NetInfo from '@react-native-community/netinfo';
+import { searchOfflineSongs } from '../../services/local-search';
 import { getCachedSession, getSession } from '../../services/auth';
 import { CollectionLoading } from '../../components/collection-loading';
-import { downloadSong } from '../../services/offline-library';
+import { downloadSong, getOfflineLibrary } from '../../services/offline-library';
 import { addSongsToPlaybackQueue, playSongQueue } from '../../services/player';
 import { addSongToPlaylist } from '../../components/playlist-picker';
 import { useFocusEffect } from 'expo-router';
@@ -89,6 +91,10 @@ export default function SearchScreen() {
   const { genre } = useLocalSearchParams<{ genre?: string }>();
   const [query, setQuery] = useState('');
   const [selectedGenre, setSelectedGenre] = useState('');
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [localResults, setLocalResults] = useState(false);
+  const [localSongs, setLocalSongs] = useState<MusicSong[]>([]);
+  const searchAbort = useRef<AbortController | null>(null);
   const [results, setResults] = useState<MusicSong[]>([]);
   const [recentSongs, setRecentSongs] = useState<MusicSong[]>(() => getMemoryRecentSearch(getCachedSession()?.username || ''));
   const [recentLoading, setRecentLoading] = useState(false);
@@ -108,6 +114,7 @@ export default function SearchScreen() {
         if (revision === recentRevisionRef.current && (cached.length || changedAccount)) setRecentSongs(cached);
         setRecentLoading(!cached.length);
       }
+      if (await deviceIsOffline()) { if (active) setRecentLoading(false); return; }
       const refreshed = await refreshRecentSearch(session);
       if (active && recentAccountRef.current === session.username) {
         // A focus may join an existing refresh that emitted before subscribing.
@@ -135,6 +142,19 @@ export default function SearchScreen() {
   const [downloadedIds, setDownloadedIds] = useState<Set<string>>(new Set());
   const searchRequestId = useRef(0);
   const resultsReady = resultsForQuery === query.trim();
+  const visibleRecent = offlineMode ? searchOfflineSongs(localSongs, '').slice(0, 30) : recentSongs;
+
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    void getOfflineLibrary({ validateFiles: false }).then(songs => {
+      if (active) { setLocalSongs(songs); setDownloadedIds(new Set(songs.map(song => song.sourceId || song.id))); }
+    }).catch(() => {});
+    void deviceIsOffline().then(value => { if (active) setOfflineMode(value); }).catch(() => {});
+    const unsubscribe = NetInfo.addEventListener(state => {
+      if (active) setOfflineMode(state.isConnected === false || state.isInternetReachable === false);
+    });
+    return () => { active = false; unsubscribe(); searchAbort.current?.abort(); };
+  }, []));
 
   useEffect(() => {
     getSession().then((session) => setUsername(session?.username || '')).catch(() => {});
@@ -153,6 +173,8 @@ export default function SearchScreen() {
     const value = rawValue.trim();
     const requestId = searchRequestId.current + 1;
     searchRequestId.current = requestId;
+    searchAbort.current?.abort();
+    const controller = new AbortController(); searchAbort.current = controller;
 
     if (!value) {
       setResults([]);
@@ -170,12 +192,22 @@ export default function SearchScreen() {
     setSearchError('');
     try {
       const genreValue = selectedGenre && value === selectedGenre ? selectedGenre : '';
-      const smart = genreValue ? null : await apiRequest<SmartSearchResponse>(`/catalog/search?q=${encodeURIComponent(value)}`);
+      const offline = offlineMode || await deviceIsOffline();
+      if (offline) {
+        const songs = searchOfflineSongs(await getOfflineLibrary({ validateFiles: false }), value, genreValue);
+        if (requestId !== searchRequestId.current) return;
+        setResultsForQuery(value); setResults(songs); setResultOrder(songs.map((_, index) => ({ type: 'song', index })));
+        setPlaylistResults([]); setAlbumResults([]); setArtistResults([]); setGenreResults([]); setCorrectedQuery(''); setLocalResults(true);
+        setSearchError(songs.length ? '' : 'Nenhuma música baixada encontrada para esta busca.');
+        return;
+      }
+      const smart = genreValue ? null : await apiRequest<SmartSearchResponse>(`/catalog/search?q=${encodeURIComponent(value)}`, { signal: controller.signal });
       const data = genreValue
-        ? await apiRequest<ApiSearchSong[]>(`/songs/genre?genre=${encodeURIComponent(genreValue)}`)
+        ? await apiRequest<ApiSearchSong[]>(`/songs/genre?genre=${encodeURIComponent(genreValue)}`, { signal: controller.signal })
         : smart?.songs || [];
       if (requestId !== searchRequestId.current) return;
       setResultsForQuery(value);
+      setLocalResults(false);
       const songs = data.map(fromApiSearchSong);
       setResults(songs);
       setResultOrder(smart?.results?.length ? smart.results : [
@@ -193,17 +225,21 @@ export default function SearchScreen() {
       setSearchError(songs.length || smart?.playlists?.length || smart?.albums?.length || smart?.artists?.length || smart?.genres?.length ? '' : 'Nenhuma música, artista, álbum ou playlist encontrada.');
     } catch (error) {
       if (requestId !== searchRequestId.current) return;
-      setResults([]);
+      if (controller.signal.aborted) return;
+      const songs = searchOfflineSongs(await getOfflineLibrary({ validateFiles: false }), value);
+      if (requestId !== searchRequestId.current) return;
+      setResultsForQuery(value); setLocalResults(true); setResults(songs);
+      setResultOrder(songs.map((_, index) => ({ type: 'song', index })));
       setPlaylistResults([]);
       setAlbumResults([]);
       setArtistResults([]);
       setGenreResults([]);
       setCorrectedQuery('');
-      setSearchError(error instanceof Error ? error.message : 'Tente novamente.');
+      setSearchError('Catálogo indisponível agora. Mostrando somente músicas baixadas neste dispositivo.');
     } finally {
       if (requestId === searchRequestId.current) setSearching(false);
     }
-  }, [query, selectedGenre]);
+  }, [query, selectedGenre, offlineMode]);
 
   useEffect(() => {
     const value = query.trim();
@@ -217,6 +253,7 @@ export default function SearchScreen() {
 
   const changeQuery = useCallback((value: string) => {
     searchRequestId.current += 1;
+    searchAbort.current?.abort();
     setSearching(Boolean(value.trim()));
     setSearchError('');
     setSelectedGenre('');
@@ -310,7 +347,7 @@ export default function SearchScreen() {
             <Ionicons name="search-outline" size={19} color="#777" />
             <TextInput
               style={styles.searchInput}
-              placeholder="Música, artista, álbum ou playlist..."
+              placeholder={offlineMode ? 'Buscar nas músicas baixadas...' : 'Música, artista, álbum ou playlist...'}
               placeholderTextColor="#666"
               value={query}
               onChangeText={changeQuery}
@@ -328,6 +365,7 @@ export default function SearchScreen() {
           </TouchableOpacity>
         </View>
 
+        {(offlineMode || (query.trim() && localResults)) && <Text style={styles.cardArtist}>Busca local · somente músicas baixadas neste dispositivo</Text>}
         {Boolean(searchError) && (
           <View style={styles.catalogNotice}>
             <Ionicons name="information-circle-outline" size={17} color="#d5bd83" />
@@ -342,11 +380,11 @@ export default function SearchScreen() {
         )}
 
         <FlatList
-          data={!query.trim() ? recentSongs.map((_, index) => ({ type: 'recent', index })) : resultsReady ? resultOrder : []}
+          data={!query.trim() ? visibleRecent.map((_, index) => ({ type: 'recent', index })) : resultsReady ? resultOrder : []}
           keyExtractor={(item) => `${item.type}:${item.index}`}
           renderItem={({ item }) => {
             if (item.type === 'song' || item.type === 'recent') {
-              const song = item.type === 'recent' ? recentSongs[item.index] : results[item.index];
+              const song = item.type === 'recent' ? visibleRecent[item.index] : results[item.index];
               if (!song) return null;
               const identity = song.sourceId || song.id;
               return <SearchCard song={song} progress={downloadProgress[identity]}
@@ -392,7 +430,7 @@ export default function SearchScreen() {
           initialNumToRender={8}
           windowSize={7}
           removeClippedSubviews={false}
-          ListHeaderComponent={<Text style={styles.genreTitle}>{query.trim() ? 'Resultados' : 'Pesquisadas recentemente'}</Text>}
+          ListHeaderComponent={<Text style={styles.genreTitle}>{query.trim() ? 'Resultados' : offlineMode ? 'Suas músicas offline' : 'Pesquisadas recentemente'}</Text>}
           ListEmptyComponent={
             !query.trim() && recentLoading ? <ActivityIndicator color="#1db954" style={{ marginTop: 20 }} /> : searching ? <CollectionLoading label="Buscando no catálogo..." /> : resultsReady && (artistResults.length || playlistResults.length || albumResults.length) ? null : (
               <View style={[styles.empty, !query.trim() && styles.emptyCompact]}>

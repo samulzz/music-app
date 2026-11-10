@@ -2,6 +2,7 @@ package me.samulsz.musicapi.services;
 
 import me.samulsz.musicapi.dto.AlbumSummaryResponse;
 import me.samulsz.musicapi.dto.SmartSearchResponse;
+import me.samulsz.musicapi.dto.PlaylistSearchResult;
 import me.samulsz.musicapi.models.Playlist;
 import me.samulsz.musicapi.models.Song;
 import me.samulsz.musicapi.repositories.PlaylistRepository;
@@ -36,6 +37,30 @@ public class CatalogDiscoveryService {
     private final PlaylistRepository playlists;
     private final MusicService music;
     private final CatalogAlbumRepository curatedAlbums;
+    private volatile CatalogSnapshot cachedSnapshot;
+    private record IndexedSong(Song song, String title, String artist, String album, String genres, String combined) {}
+    private record CatalogSnapshot(long loadedAt, List<Song> songs, List<IndexedSong> index, List<PlaylistSearchResult> playlists, List<AlbumSummaryResponse> albums) {}
+
+    private CatalogSnapshot snapshot() {
+        var current = cachedSnapshot;
+        if (current != null && System.currentTimeMillis() - current.loadedAt() < 30_000) return current;
+        synchronized (this) {
+            current = cachedSnapshot;
+            if (current != null && System.currentTimeMillis() - current.loadedAt() < 30_000) return current;
+            var catalog = songs.findCatalogForDiscovery();
+            var summaries = playlists.findDiscoverySummaries().stream().map(p -> new PlaylistSearchResult(
+                    p.getId(), p.getName(), p.getDescription(), p.getIconUrl(), true, p.getCollectionType(),
+                    p.getSongCount().intValue(), p.getAlbumArtist(), p.getArtist())).toList();
+            var index = catalog.stream().map(song -> {
+                String title = normalize(song.getTitle()), artist = normalize(song.getArtist());
+                String album = normalize(song.getAlbum()), genres = normalize(String.join(" ", song.getGenres()));
+                return new IndexedSong(song, title, artist, album, genres, String.join(" ", title, artist, album, genres));
+            }).toList();
+            current = new CatalogSnapshot(System.currentTimeMillis(), catalog, index, summaries, buildAlbums(catalog, summaries));
+            cachedSnapshot = current;
+            return current;
+        }
+    }
 
     public CatalogDiscoveryService(SongRepository songs, PlaylistRepository playlists, MusicService music, CatalogAlbumRepository curatedAlbums) {
         this.songs = songs;
@@ -45,25 +70,21 @@ public class CatalogDiscoveryService {
     }
 
     public SmartSearchResponse search(String rawQuery) {
-        String query = normalize(rawQuery);
+        String normalizedQuery = normalize(rawQuery);
+        String query = normalizedQuery.length() > 120 ? normalizedQuery.substring(0, 120) : normalizedQuery;
         if (query.isBlank()) return new SmartSearchResponse("", List.of(), List.of(), List.of(), List.of(), List.of());
 
-        List<ScoredSong> rankedSongs = songs.findAllCatalogSongs().stream()
-                .map(song -> new ScoredSong(song, songScore(song, query)))
+        var catalog = snapshot();
+        final String searchText = query;
+        var tokens = searchText.split("\\s+");
+        var literalCandidates = catalog.index().stream().filter(item -> Stream.of(tokens).allMatch(item.combined()::contains)).toList();
+        boolean allowTypos = literalCandidates.isEmpty();
+        List<ScoredSong> rankedSongs = (allowTypos ? catalog.index() : literalCandidates).stream()
+                .map(item -> new ScoredSong(item.song(), songScore(item, searchText, allowTypos)))
                 .filter(item -> item.score() > 0)
                 .sorted(Comparator.comparingInt(ScoredSong::score).reversed()
                         .thenComparing(item -> normalize(item.song().getTitle())))
                 .toList();
-
-        // Typo recovery is a fallback, never extra noise below a real match.
-        List<ScoredSong> literalSongs = rankedSongs.stream().filter(item -> {
-            Song song = item.song();
-            String combined = normalize(String.join(" ", Objects.toString(song.getTitle(), ""),
-                    Objects.toString(song.getArtist(), ""), Objects.toString(song.getAlbum(), ""),
-                    String.join(" ", song.getGenres())));
-            return Stream.of(query.split("\\s+")).allMatch(combined::contains);
-        }).toList();
-        if (!literalSongs.isEmpty()) rankedSongs = literalSongs;
 
         List<Song> songResults = CatalogIdentity.unique(rankedSongs.stream()
                 .map(ScoredSong::song)
@@ -82,12 +103,11 @@ public class CatalogDiscoveryService {
                 .map(value -> new SmartSearchResponse.ArtistResult(value.name, value.coverUrl, value.count))
                 .toList();
 
-        List<Playlist> allPlaylists = playlists.findByGlobalPlaylistTrueOrderByIdDesc();
-        List<Playlist> playlistResults = allPlaylists.stream()
+        List<PlaylistSearchResult> playlistResults = catalog.playlists().stream()
                 .filter(playlist -> !"album".equalsIgnoreCase(playlist.getCollectionType()))
                 .map(playlist -> Map.entry(playlist, collectionScore(playlist, query)))
                 .filter(entry -> entry.getValue() > 0)
-                .sorted(Map.Entry.<Playlist, Integer>comparingByValue().reversed())
+                .sorted(Map.Entry.<PlaylistSearchResult, Integer>comparingByValue().reversed())
                 .limit(12)
                 .map(Map.Entry::getKey)
                 .toList();
@@ -109,8 +129,12 @@ public class CatalogDiscoveryService {
     }
 
     public List<AlbumSummaryResponse> listAlbums() {
+        return snapshot().albums();
+    }
+
+    private List<AlbumSummaryResponse> buildAlbums(List<Song> catalog, List<PlaylistSearchResult> summaries) {
         Map<String, AlbumAccumulator> grouped = new LinkedHashMap<>();
-        songs.findAllCatalogSongs().stream()
+        catalog.stream()
                 .filter(song -> song.getAlbum() != null && !song.getAlbum().isBlank())
                 .forEach(song -> {
                     String artist = firstNonBlank(song.getAlbumArtist(), primaryArtist(song.getArtist()));
@@ -120,17 +144,15 @@ public class CatalogDiscoveryService {
                     album.songCount++;
                     if ((album.coverUrl == null || album.coverUrl.isBlank()) && song.getCoverUrl() != null) album.coverUrl = song.getCoverUrl();
                 });
-        playlists.findByGlobalPlaylistTrueOrderByIdDesc().stream()
+        summaries.stream()
                 .filter(playlist -> "album".equalsIgnoreCase(playlist.getCollectionType()))
                 .forEach(playlist -> {
-                    String artist = playlist.getSongs().stream().map(Song::getAlbumArtist).filter(Objects::nonNull)
-                            .filter(value -> !value.isBlank()).findFirst().orElseGet(() -> playlist.getSongs().stream()
-                                    .map(Song::getArtist).filter(Objects::nonNull).map(this::primaryArtist).findFirst().orElse(""));
+                    String artist = firstNonBlank(playlist.albumArtist(), primaryArtist(playlist.artist()));
                     String key = normalize(playlist.getName()) + "|" + normalize(artist);
                     AlbumAccumulator album = grouped.computeIfAbsent(key,
                             ignored -> new AlbumAccumulator(playlist.getName(), artist, playlist.getIconUrl(), playlist.getId()));
                     album.playlistId = playlist.getId();
-                    album.songCount = Math.max(album.songCount, playlist.getSongs().size());
+                    album.songCount = Math.max(album.songCount, playlist.songCount());
                     if (album.coverUrl == null || album.coverUrl.isBlank()) album.coverUrl = playlist.getIconUrl();
                 });
         curatedAlbums.findByAvailableTrackCountGreaterThanEqualOrderByUpdatedAtDesc(2).forEach(curated -> {
@@ -163,25 +185,22 @@ public class CatalogDiscoveryService {
                 .toList());
     }
 
-    private int songScore(Song song, String query) {
-        String title = normalize(song.getTitle());
-        String artist = normalize(song.getArtist());
-        String album = normalize(song.getAlbum());
-        String genres = normalize(String.join(" ", song.getGenres()));
+    private int songScore(IndexedSong item, String query, boolean allowTypos) {
+        String title = item.title(), artist = item.artist(), album = item.album(), genres = item.genres();
         // A track title prefix must not be buried under songs whose artist/album
         // happens to contain the same text. Artists have their own unified hit.
-        int score = Math.max(fieldScore(title, query, 120), fieldScore(artist, query, 95) / 2);
-        score = Math.max(score, fieldScore(album, query, 80) / 3);
-        score = Math.max(score, fieldScore(genres, query, 65) / 4);
+        int score = Math.max(fieldScore(title, query, 120, allowTypos), fieldScore(artist, query, 95, allowTypos) / 2);
+        score = Math.max(score, fieldScore(album, query, 80, allowTypos) / 3);
+        score = Math.max(score, fieldScore(genres, query, 65, allowTypos) / 4);
         String combined = String.join(" ", title, artist, album, genres).trim();
         String[] tokens = query.split("\\s+");
         int matched = 0;
-        for (String token : tokens) if (combined.contains(token) || closestWordDistance(combined, token) <= typoTolerance(token)) matched++;
+        for (String token : tokens) if (combined.contains(token) || (allowTypos && closestWordDistance(combined, token) <= typoTolerance(token))) matched++;
         if (matched == tokens.length) score = Math.max(score, 55 + matched * 4);
         return score;
     }
 
-    private int collectionScore(Playlist playlist, String query) {
+    private int collectionScore(PlaylistSearchResult playlist, String query) {
         return Math.max(fieldScore(normalize(playlist.getName()), query, 90),
                 fieldScore(normalize(playlist.getDescription()), query, 55));
     }
@@ -191,20 +210,27 @@ public class CatalogDiscoveryService {
     }
 
     private int fieldScore(String field, String query, int base) {
+        return fieldScore(field, query, base, true);
+    }
+
+    private int fieldScore(String field, String query, int base, boolean allowTypos) {
         if (field.isBlank()) return 0;
-        int literal = SmartSearchResponse.relevance(field, query);
+        int literal = field.equals(query) ? 500 : field.startsWith(query) ? 400
+                : field.contains(" " + query) ? 350 : field.contains(query) ? 300 : 0;
         if (literal > 0) return literal + base;
+        if (!allowTypos) return 0;
+        if (typoTolerance(query) == 0 || Math.abs(field.length() - query.length()) > typoTolerance(query)) return 0;
         int distance = levenshtein(field, query);
         if (distance <= typoTolerance(query)) return base - distance * 8;
         return 0;
     }
 
     private boolean matches(String field, String query) {
-        return field.contains(query) || query.contains(field) || levenshtein(field, query) <= typoTolerance(query);
+        return field.contains(query) || query.contains(field) || (Math.abs(field.length() - query.length()) <= typoTolerance(query) && levenshtein(field, query) <= typoTolerance(query));
     }
 
     private String closestSuggestion(String query) {
-        return songs.findAllCatalogSongs().stream()
+        return snapshot().songs().stream()
                 .flatMap(song -> Stream.of(normalize(song.getTitle()), normalize(primaryArtist(song.getArtist()))))
                 .filter(value -> !value.isBlank())
                 .map(value -> Map.entry(value, levenshtein(value, query)))
@@ -216,7 +242,7 @@ public class CatalogDiscoveryService {
 
     private int closestWordDistance(String text, String token) {
         int best = Integer.MAX_VALUE;
-        for (String word : text.split("\\s+")) best = Math.min(best, levenshtein(word, token));
+        for (String word : text.split("\\s+")) if (Math.abs(word.length() - token.length()) <= typoTolerance(token)) best = Math.min(best, levenshtein(word, token));
         return best;
     }
 

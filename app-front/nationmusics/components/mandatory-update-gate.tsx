@@ -41,16 +41,8 @@ export function MandatoryUpdateGate({ children }: Props) {
     }
   }, [result]);
 
-  if (checking && !result) {
-    return (
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#1db954" />
-          <Text style={styles.muted}>Verificando atualizacao...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
+  // The manifest is checked in the background. Cached/offline screens must mount
+  // immediately; a confirmed mandatory update is still enforced below.
 
   if (!result?.required) {
     return <>{children}</>;

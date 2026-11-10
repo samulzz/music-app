@@ -17,13 +17,15 @@ class SearchRelevanceTests {
         target.setTitle("Superpowers"); target.setArtist("Daniel Caesar");
         var other = new Song(); other.setId(2L); other.setSourceId("other");
         other.setTitle("A different song"); other.setArtist("Super");
-        when(songs.findAllCatalogSongs()).thenReturn(List.of(other, target));
+        when(songs.findCatalogForDiscovery()).thenReturn(List.of(other, target));
         when(music.hasPrecachedAudio(any())).thenReturn(true);
         var service = new CatalogDiscoveryService(songs, mock(PlaylistRepository.class), music, mock(CatalogAlbumRepository.class));
         for (String query : List.of("sup", "super", "superp", "superpowers")) {
             assertEquals(1L, service.search(query).songs().getFirst().getId());
         }
         assertEquals(1, service.search("superp").songs().size());
+        verify(songs, times(1)).findCatalogForDiscovery();
+        verify(songs, never()).findAllCatalogSongs();
     }
     @Test void exactArtistAndAlbumAreInterleavedWithTracksInsteadOfGroupedByType() {
         var song = new Song(); song.setTitle("Other title"); song.setArtist("Superpowers");

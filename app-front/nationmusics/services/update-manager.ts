@@ -4,6 +4,7 @@ import * as Linking from 'expo-linking';
 import { Platform } from 'react-native';
 
 import { UPDATE_MANIFEST_URL } from './config';
+import { deviceIsOffline } from './api';
 
 type UpdateTarget = {
   enabled?: boolean;
@@ -70,6 +71,7 @@ function compareVersions(left = '0', right = '0') {
 }
 
 async function fetchUpdateManifest(): Promise<UpdateManifest> {
+  if (await deviceIsOffline()) throw new Error('Sem internet para verificar atualizações.');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPDATE_TIMEOUT_MS);
   try {

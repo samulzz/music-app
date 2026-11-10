@@ -1,28 +1,28 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-06T01:48:00-03:00",
+  "generatedAt": "2026-11-10T17:35:57.000Z",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.47",
-    "versionCode": 49,
-    "minimumVersion": "1.1.47",
-    "minimumVersionCode": 49,
-    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.47.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.47.apk",
-    "sha256": "3f9e96e7a4a82a82d329e16decead9fa460291d8172b13e3ac5c826543d89e69",
+    "version": "1.1.48",
+    "versionCode": 50,
+    "minimumVersion": "1.1.48",
+    "minimumVersionCode": 50,
+    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.48.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.48.apk",
+    "sha256": "4bde9f847be80eef74c2467a3aff9178441bee63431ddcdd554938da5ddb0d85",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Busca unificada por relevância, histórico recente estável e continuação contextual para músicas avulsas sem gênero classificado."
+    "releaseNotes": "Pesquisa offline nas músicas baixadas, consultas online mais leves e abertura sem bloquear a biblioteca por verificação de atualização."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.50",
-    "minimumVersion": "1.2.50",
-    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.50.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.50.exe",
-    "sha256": "cfb6560f2cddf587fb22fbed7c2edd0f95b4b73bfc58767be433ca1e2fcf12b9",
+    "version": "1.2.51",
+    "minimumVersion": "1.2.51",
+    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.51.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.51.exe",
+    "sha256": "92e9a53dffde4399243516fe226ca430188b8d1a2be4630579b99181e309ccb7",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Busca unificada por relevância, sem reordenação alfabética; tocar um resultado inicia a rádio da música escolhida."
+    "releaseNotes": "Busca offline somente nas músicas baixadas neste PC, cancelamento de consultas antigas e busca online sem esperar a biblioteca da conta."
   }
 }

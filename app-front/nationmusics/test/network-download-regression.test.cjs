@@ -1,10 +1,10 @@
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs');const path=require('node:path');const vm=require('node:vm');const ts=require('typescript');
 const read=name=>fs.readFileSync(path.join(__dirname,'../services',name),'utf8');
 test('server failure cannot mark a connected device offline',async()=>{
- const source=read('api.ts');const code=source.slice(source.indexOf('export async function deviceIsOffline('),source.indexOf('async function handleInvalidSession('));
- const exports={};const c=vm.createContext({exports,serverUnavailable:true,NetInfo:{fetch:async()=>({isConnected:true})}});
+ const source=read('api.ts');const code=source.slice(source.indexOf('type Connectivity ='),source.indexOf('async function handleInvalidSession('));
+ let update;const exports={};const c=vm.createContext({exports,serverUnavailable:true,setTimeout,Promise,NetInfo:{fetch:async()=>({isConnected:true}),addEventListener:fn=>{update=fn;fn({isConnected:true});}}});
  vm.runInContext(ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,c);
- assert.equal(await exports.deviceIsOffline(),false);c.NetInfo.fetch=async()=>({isConnected:false});assert.equal(await exports.deviceIsOffline(),true);
+ assert.equal(await exports.deviceIsOffline(),false);update({isConnected:false});assert.equal(await exports.deviceIsOffline(),true);
 });
 test('same recording is deduplicated with local file preferred, live version stays separate',()=>{
  const exports={};const c=vm.createContext({exports});vm.runInContext(ts.transpileModule(read('song-identity.ts'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,c);

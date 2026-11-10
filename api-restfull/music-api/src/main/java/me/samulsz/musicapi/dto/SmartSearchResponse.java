@@ -1,6 +1,5 @@
 package me.samulsz.musicapi.dto;
 
-import me.samulsz.musicapi.models.Playlist;
 import me.samulsz.musicapi.models.Song;
 
 import java.util.List;
@@ -10,12 +9,12 @@ public record SmartSearchResponse(
         List<Song> songs,
         List<ArtistResult> artists,
         List<AlbumSummaryResponse> albums,
-        List<Playlist> playlists,
+        List<PlaylistSearchResult> playlists,
         List<GenreResult> genres,
         List<SearchResult> results
 ) {
     public SmartSearchResponse(String correction, List<Song> songs, List<ArtistResult> artists,
-            List<AlbumSummaryResponse> albums, List<Playlist> playlists, List<GenreResult> genres) {
+            List<AlbumSummaryResponse> albums, List<PlaylistSearchResult> playlists, List<GenreResult> genres) {
         this(correction, songs, artists, albums, playlists, genres, List.of());
     }
     /** One relevance order shared by both clients; old arrays remain compatible. */

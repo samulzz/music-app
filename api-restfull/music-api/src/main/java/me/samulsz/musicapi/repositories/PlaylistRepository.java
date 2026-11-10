@@ -9,6 +9,18 @@ import java.util.Optional;
 
 @Repository
 public interface PlaylistRepository extends JpaRepository<Playlist, Long> {
+    interface DiscoverySummary {
+        Long getId(); String getName(); String getDescription(); String getIconUrl();
+        String getCollectionType(); Long getSongCount(); String getAlbumArtist(); String getArtist();
+    }
+    @org.springframework.data.jpa.repository.Query("""
+            select p.id as id, p.name as name, p.description as description, p.iconUrl as iconUrl,
+                   p.collectionType as collectionType, count(s) as songCount,
+                   min(s.albumArtist) as albumArtist, min(s.artist) as artist
+            from Playlist p left join p.songs s where p.globalPlaylist = true
+            group by p.id, p.name, p.description, p.iconUrl, p.collectionType
+            """)
+    List<DiscoverySummary> findDiscoverySummaries();
     org.springframework.data.domain.Page<Playlist> findByGlobalPlaylistTrueOrderByIdAsc(org.springframework.data.domain.Pageable pageable);
     List<Playlist> findByGlobalPlaylistTrueOrderByIdDesc();
 

@@ -2772,14 +2772,16 @@ async function renderSearch(query = '', exactGenre = false) {
   const requestId = state.searchRequestId + 1;
   state.searchRequestId = requestId;
   setPageHeader('ENCONTRE ALGO NOVO', query ? `Resultados para “${query}”` : 'O que vai ouvir hoje?');
+  const forceLocal = (typeof navigator !== 'undefined' && navigator.onLine === false) || Boolean(await window.nation.isOffline?.());
   if (!query.trim()) {
     const username = state.session?.username || '';
     const recent = username ? readRecentSearch(username).songs : [];
     const renderRecent = (songs) => {
       if (!currentView(viewRequest) || state.searchRequestId !== requestId || state.session?.username !== username) return;
-      contentView.innerHTML = `<h3>Pesquisadas recentemente</h3>${songRows(songs, 'As músicas que você abrir pela busca aparecem aqui e nos seus outros dispositivos.', { preserveOrder: true })}`;
+      contentView.innerHTML = `<h3>${forceLocal ? 'Suas músicas offline' : 'Pesquisadas recentemente'}</h3>${songRows(songs, forceLocal ? 'Nenhuma música baixada neste computador.' : 'As músicas que você abrir pela busca aparecem aqui e nos seus outros dispositivos.', { preserveOrder: true })}`;
       bindSongActions();
     };
+    if (forceLocal) { renderRecent((await window.nation.smartSearch('', true)).songs); return; }
     if (recent.length) renderRecent(recent); else setLoading('Carregando suas pesquisas recentes...');
     try {
       if (username) renderRecent(await refreshDesktopRecentSearch(username));
@@ -2788,17 +2790,11 @@ async function renderSearch(query = '', exactGenre = false) {
   }
   setLoading('Buscando músicas...');
   try {
-    const [discovery, library] = await Promise.all([
-      exactGenre
+    const discovery = await (exactGenre && !forceLocal
         ? window.nation.searchGenre(query.trim()).then((songs) => ({ songs, artists: [], albums: [], playlists: [], correctedQuery: '' }))
-        : window.nation.smartSearch(query.trim()),
-      window.nation.getLibrary(),
-    ]);
+        : window.nation.smartSearch(query.trim(), forceLocal));
     if (!currentView(viewRequest) || requestId !== state.searchRequestId) return;
-    const savedBySource = new Map(library.map((song) => [contentIdentity(song), song]));
-    const merged = (discovery.songs || []).map((song) => savedBySource.has(contentIdentity(song))
-      ? { ...song, ...savedBySource.get(contentIdentity(song)), id: song.id, saved: true }
-      : song);
+    const merged = discovery.songs || [];
     const matchingPlaylists = discovery.playlists || [];
     const artists = discovery.artists || [];
     const albums = discovery.albums || [];
@@ -2829,6 +2825,7 @@ async function renderSearch(query = '', exactGenre = false) {
         <div class="song-artist"></div><span class="song-actions">${icon('next')}</span></button>`;
     }).join('');
     contentView.innerHTML = `
+      ${discovery.offline ? '<p class="muted">Busca local · somente músicas baixadas neste computador. O catálogo online está indisponível.</p>' : ''}
       ${discovery.correctedQuery ? `<button class="search-correction" id="search-correction" type="button">${icon('search')} Você quis dizer “${escapeHtml(discovery.correctedQuery)}”?</button>` : ''}
       <div class="section-heading"><h2>Resultados</h2><span>${order.length} encontrados</span></div>
       <div class="song-list">${resultMarkup || `<div class="empty-state">Nenhum resultado para “${escapeHtml(query)}”.</div>`}</div>
@@ -2917,6 +2914,7 @@ async function renderAlbum(album) {
 }
 
 function scheduleLiveSearch(query) {
+  state.searchRequestId += 1;
   window.clearTimeout(liveSearchTimer);
   liveSearchTimer = window.setTimeout(() => {
     activateNavigation('search');

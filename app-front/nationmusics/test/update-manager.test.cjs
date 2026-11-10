@@ -6,9 +6,9 @@ const vm=require('node:vm');
 const ts=require('typescript');
 const source=fs.readFileSync(path.join(__dirname,'../services/update-manager.ts'),'utf8');
 const target={mandatory:true,version:'1.1.40',versionCode:42,minimumVersion:'1.1.40',minimumVersionCode:42,url:'https://example.invalid/app.apk'};
-function load(application,constants={expoConfig:{version:'1.1.39',android:{versionCode:40},extra:{androidVersionCode:39}}}) {
+function load(application,constants={expoConfig:{version:'1.1.39',android:{versionCode:40},extra:{androidVersionCode:39}}},offline=false) {
   const exports={}; let opened='';
-  const context={exports,require:name => ({'expo-application':application,'expo-constants':{__esModule:true,default:constants},'expo-linking':{openURL:async url => opened=url},'react-native':{Platform:{OS:'android'}},'./config':{UPDATE_MANIFEST_URL:'https://example.invalid/update.json'}}[name]),fetch:async()=>({ok:true,json:async()=>({android:target})}),AbortController,setTimeout,clearTimeout,Date,encodeURIComponent};
+  const context={exports,require:name => ({'expo-application':application,'expo-constants':{__esModule:true,default:constants},'expo-linking':{openURL:async url => opened=url},'react-native':{Platform:{OS:'android'}},'./config':{UPDATE_MANIFEST_URL:'https://example.invalid/update.json'},'./api':{deviceIsOffline:async()=>offline}}[name]),fetch:async()=>({ok:true,json:async()=>({android:target})}),AbortController,setTimeout,clearTimeout,Date,encodeURIComponent};
   vm.createContext(context);
   vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,esModuleInterop:true}}).outputText,context);
   return {api:exports,opened:()=>opened};
@@ -35,4 +35,11 @@ test('release metadata agrees between Android, Expo and npm',()=>{
   assert.equal(config.version,pkg.version); assert.equal(config.android.versionCode,config.extra.androidVersionCode);
   assert.equal(Number(gradle.match(/versionCode\s+(\d+)/)[1]),config.android.versionCode);
   assert.equal(gradle.match(/versionName\s+"([^"]+)"/)[1],config.version);
+});
+
+test('offline update checks do not wait on a manifest request or gate access to cached screens',async()=>{
+  const result=await load({nativeApplicationVersion:'1.1.40',nativeBuildVersion:'42'},undefined,true).api.checkForRequiredUpdate();
+  assert.equal(result.offline,true);assert.equal(result.required,false);
+  const gate=fs.readFileSync(path.join(__dirname,'../components/mandatory-update-gate.tsx'),'utf8');
+  assert.doesNotMatch(gate,/if \(checking && !result\)/);assert.match(gate,/if \(!result\?\.required\)/);
 });

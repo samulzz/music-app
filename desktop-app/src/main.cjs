@@ -1,10 +1,11 @@
-const { app, BrowserWindow, clipboard, ipcMain, protocol, shell, screen } = require('electron');
+const { app, BrowserWindow, clipboard, ipcMain, protocol, shell, screen, net } = require('electron');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID, createHash } = require('node:crypto');
 const { downloadAudio } = require('./resumable-download.cjs');
 const { contentIdentity } = require('./song-identity.cjs');
+const { searchOfflineSongs } = require('./local-search.cjs');
 const http = require('node:http');
 const { spawn } = require('node:child_process');
 const { Readable } = require('node:stream');
@@ -145,6 +146,7 @@ function desktopTargetRequiresUpdate(target, currentVersion) {
 }
 
 async function fetchUpdateManifest() {
+  if (!net.isOnline()) throw new Error('Sem internet para verificar atualizações.');
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPDATE_TIMEOUT_MS);
   try {
@@ -153,7 +155,7 @@ async function fetchUpdateManifest() {
       signal: controller.signal,
     });
     if (!response.ok) throw new Error(`Manifesto indisponivel (${response.status}).`);
-    return response.json();
+    return await response.json();
   } finally {
     clearTimeout(timeout);
   }
@@ -694,14 +696,27 @@ async function apiRequest(endpoint, options = {}) {
   };
 
   let response;
+  let text = '';
+  const offlineFallback = async () => {
+    if (cachePath) {
+      const cached = await readJson(cachePath, null);
+      if (cached) return cached.data;
+      if (endpoint === '/songs/my-library') return offlineSongs();
+      if (endpoint === '/playlists/personal') return [];
+    }
+    throw new Error('Sem conexão. Use as músicas baixadas neste computador.');
+  };
+  if (!net.isOnline()) return offlineFallback();
   try {
     response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: options.method || 'GET',
       headers,
       body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: AbortSignal.timeout(options.timeoutMs || (cacheable ? 6000 : 20_000)),
+      signal: AbortSignal.any([AbortSignal.timeout(options.timeoutMs || (cacheable ? 4000 : 6000)), ...(options.signal ? [options.signal] : [])]),
     });
+    text = response.status === 204 ? '' : await response.text();
   } catch {
+    if (options.signal?.aborted) throw new Error('Busca cancelada.');
     if (cachePath) {
       const cached = await readJson(cachePath, null);
       if (cached) return cached.data;
@@ -711,7 +726,6 @@ async function apiRequest(endpoint, options = {}) {
     throw new Error('Não foi possível conectar ao servidor.');
   }
 
-  const text = await response.text();
   let body = text;
   try {
     body = text ? JSON.parse(text) : null;
@@ -1140,9 +1154,27 @@ ipcMain.handle('music:artist', async (_event, artist) => {
   const songs = await apiRequest(`/songs/artist?name=${encodeURIComponent(String(artist || '').trim())}`);
   return songs.map((song) => normalizeSong(song, false));
 });
-ipcMain.handle('catalog:search', async (_event, query) => {
-  const result = await apiRequest(`/catalog/search?q=${encodeURIComponent(String(query || '').trim())}`);
-  return { ...result, songs: (result.songs || []).map((song) => normalizeSong(song, false)) };
+const catalogSearches = new Map();
+ipcMain.handle('network:offline', () => !net.isOnline());
+ipcMain.handle('catalog:search', async (event, query, forceLocal = false) => {
+  const sender = event.sender.id;
+  catalogSearches.get(sender)?.abort();
+  const controller = new AbortController(); catalogSearches.set(sender, controller);
+  const value = String(query || '').trim();
+  const local = async () => {
+    const songs = searchOfflineSongs((await offlineSongs()).map(song => normalizeSong({ ...song, downloaded: true }, true)), value).slice(0,100);
+    return { songs, artists: [], albums: [], playlists: [], genres: [], correctedQuery: '', offline: true,
+      results: songs.map((_, index) => ({ type: 'song', index })) };
+  };
+  try {
+    if (forceLocal || !net.isOnline()) return await local();
+    const result = await apiRequest(`/catalog/search?q=${encodeURIComponent(value)}`, { signal: controller.signal });
+    const downloads = new Map((await offlineSongs()).map(song => [contentIdentity(song),song]));
+    return { ...result, songs: (result.songs || []).map(song => normalizeSong({ ...song, downloaded: downloads.has(contentIdentity(song)) }, downloads.has(contentIdentity(song)))) };
+  } catch (error) {
+    if (controller.signal.aborted || /Sessão expirada/.test(error.message)) throw error;
+    return await local();
+  } finally { if (catalogSearches.get(sender) === controller) catalogSearches.delete(sender); }
 });
 ipcMain.handle('catalog:albums', async () => apiRequest('/catalog/albums'));
 ipcMain.handle('search:recent', async (_event, username) => {

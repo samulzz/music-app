@@ -20,6 +20,18 @@ class AccountCollectionsTests {
     @Autowired SongService library;
     @Autowired RecommendationService recommendations;
     @Autowired RecentSearchService recentSearch;
+    @Autowired me.samulsz.musicapi.repositories.PlaylistRepository playlists;
+
+    @Test void discoveryReadsMetadataWithoutSerializingPlaylistContentsOrPrivateCollections() {
+        var track=song();
+        var publicList=new me.samulsz.musicapi.models.Playlist();publicList.setName("Fast discovery fixture");publicList.setGlobalPlaylist(true);publicList.setSongs(java.util.Set.of(track));
+        playlists.saveAndFlush(publicList);
+        var privateList=new me.samulsz.musicapi.models.Playlist();privateList.setName("Private discovery fixture");privateList.setGlobalPlaylist(false);playlists.saveAndFlush(privateList);
+        var summaries=playlists.findDiscoverySummaries();
+        assertEquals(1L,summaries.stream().filter(p->p.getId().equals(publicList.getId())).findFirst().orElseThrow().getSongCount());
+        assertTrue(summaries.stream().noneMatch(p->p.getId().equals(privateList.getId())));
+        assertTrue(songs.findCatalogForDiscovery().stream().anyMatch(s->s.getId().equals(track.getId())));
+    }
 
     private User user(String name) {
         User value = new User(); value.setUsername(name); value.setPassword("test-only");

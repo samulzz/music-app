@@ -169,6 +169,12 @@ public class PlaylistAdminService {
         return playlistRepository.findByGlobalPlaylistTrueOrderByIdDesc();
     }
 
+    public List<me.samulsz.musicapi.dto.PlaylistSearchResult> listGlobalSummaries() {
+        return playlistRepository.findDiscoverySummaries().stream().map(p -> new me.samulsz.musicapi.dto.PlaylistSearchResult(
+                p.getId(), p.getName(), p.getDescription(), p.getIconUrl(), true, p.getCollectionType(),
+                p.getSongCount().intValue(), null, null)).toList();
+    }
+
     private void applyPlaylistPayload(Playlist playlist, PlaylistRequest request) {
         playlist.setName(request.getName().trim());
         playlist.setDescription(request.getDescription());

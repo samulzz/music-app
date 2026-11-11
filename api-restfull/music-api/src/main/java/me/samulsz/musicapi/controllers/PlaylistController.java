@@ -43,6 +43,16 @@ public class PlaylistController {
         }
     }
 
+    @GetMapping("/personal/summaries")
+    public ResponseEntity<?> listPersonalSummaries(Authentication authentication) {
+        return ResponseEntity.ok(personalPlaylistService.listSummaries(authentication.getName()));
+    }
+
+    @GetMapping("/global/summaries")
+    public ResponseEntity<?> listGlobalSummaries() {
+        return ResponseEntity.ok(playlistAdminService.listGlobalSummaries());
+    }
+
     @PostMapping("/personal")
     public ResponseEntity<?> createPersonal(Authentication authentication, @RequestBody PlaylistRequest request) {
         try {

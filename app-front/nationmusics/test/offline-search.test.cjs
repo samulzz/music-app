@@ -2,7 +2,7 @@ const {test}=require('node:test');const assert=require('node:assert/strict');con
 const compile=file=>ts.transpileModule(fs.readFileSync(path.join(__dirname,'../services',file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 function apiHarness(connected,fetch,storage=new Map()){
  const exports={};let event;
- const modules={'expo-router':{router:{replace(){}}},'@react-native-async-storage/async-storage':{__esModule:true,default:{getItem:async k=>storage.get(k)||null,setItem:async(k,v)=>storage.set(k,v)}},
+ const modules={'expo-router':{router:{replace(){}}},'./metadata-cache':{metadataCache:{getItem:async k=>storage.get(k)||null,setItem:async(k,v)=>storage.set(k,v)},maintainMetadataCache:async()=>{}},
  '@react-native-community/netinfo':{__esModule:true,default:{addEventListener:fn=>{event=fn;fn({isConnected:connected});return()=>{}},fetch:async()=>({isConnected:connected})}},
  './auth':{getSession:async()=>({username:'alice',token:'token'}),getCachedSession:()=>({username:'alice',token:'token'}),clearSession:async()=>{}},'./config':{API_BASE_URL:'https://test.invalid',APP_HEADERS:{}}};
  const c=vm.createContext({exports,require:n=>modules[n],setTimeout,clearTimeout,fetch,Headers,AbortController,Promise});vm.runInContext(compile('api.ts'),c);

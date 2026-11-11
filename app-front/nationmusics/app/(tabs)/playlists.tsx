@@ -13,13 +13,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { metadataCache as AsyncStorage } from '../../services/metadata-cache';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 
 import type { ApiPlaylist } from '../../types/music';
 import { apiRequest, accountCacheKey } from '../../services/api';
-import { getDailyMix } from '../../services/recommendations';
 
 const CACHE_KEY = 'nationmusics.personal-playlists.v1';
 const PLAYLISTS_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -55,7 +54,7 @@ const PlaylistCard = memo(function PlaylistCard({
       <View style={styles.meta}>
         <Text style={styles.title} numberOfLines={1}>{playlist.name}</Text>
         <Text style={styles.description} numberOfLines={2}>
-          {playlist.description?.trim() || `${playlist.songs?.length ?? 0} músicas`}
+          {playlist.description?.trim() || `${playlist.songCount ?? playlist.songs?.length ?? 0} músicas`}
         </Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color="#666" />
@@ -120,7 +119,7 @@ export default function PersonalPlaylistsScreen() {
 
     const operation = (async () => {
       try {
-      const data = await apiRequest<ApiPlaylist[]>('/playlists/personal');
+      const data = await apiRequest<ApiPlaylist[]>('/playlists/personal/summaries');
       const next = Array.isArray(data) ? data : [];
       setPlaylists(next);
       await writeCache(next);
@@ -158,7 +157,10 @@ export default function PersonalPlaylistsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      void getDailyMix().then((mix) => setDailyMixName(mix.name)).catch(() => {});
+      // The library only needs the mix name; do not fetch 100 songs on every focus.
+      void accountCacheKey('nationmusics.home-playlists.v3').then(key => AsyncStorage.getItem(key)).then(raw => {
+        if (raw) { const name = JSON.parse(raw)?.personalized?.dailyMix?.name; if (name) setDailyMixName(name); }
+      }).catch(() => {});
       if (!hydratedRef.current) {
         hydratedRef.current = true;
         void hydratePlaylists();

@@ -21,6 +21,14 @@ public interface PlaylistRepository extends JpaRepository<Playlist, Long> {
             group by p.id, p.name, p.description, p.iconUrl, p.collectionType
             """)
     List<DiscoverySummary> findDiscoverySummaries();
+    @org.springframework.data.jpa.repository.Query("""
+            select p.id as id, p.name as name, p.description as description, p.iconUrl as iconUrl,
+                   p.collectionType as collectionType, count(s) as songCount,
+                   min(s.albumArtist) as albumArtist, min(s.artist) as artist
+            from Playlist p left join p.songs s where p.owner.username = :username
+            group by p.id, p.name, p.description, p.iconUrl, p.collectionType order by p.id desc
+            """)
+    List<DiscoverySummary> findPersonalSummaries(@org.springframework.data.repository.query.Param("username") String username);
     org.springframework.data.domain.Page<Playlist> findByGlobalPlaylistTrueOrderByIdAsc(org.springframework.data.domain.Pageable pageable);
     List<Playlist> findByGlobalPlaylistTrueOrderByIdDesc();
 

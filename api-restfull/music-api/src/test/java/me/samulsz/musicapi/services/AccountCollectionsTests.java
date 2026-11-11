@@ -22,6 +22,19 @@ class AccountCollectionsTests {
     @Autowired RecentSearchService recentSearch;
     @Autowired me.samulsz.musicapi.repositories.PlaylistRepository playlists;
 
+    @Test void lightweightPersonalSummariesArePrivateAndNeverContainEmbeddedSongs() {
+        User owner=user("summary-owner"),other=user("summary-other");Song track=song();
+        var playlist=new me.samulsz.musicapi.models.Playlist();playlist.setName("Private summary");playlist.setOwner(owner);playlist.setGlobalPlaylist(false);playlist.setSongs(java.util.Set.of(track));
+        playlists.saveAndFlush(playlist);
+        var summaries=playlists.findPersonalSummaries(owner.getUsername());
+        assertEquals(1,summaries.size());assertEquals(1L,summaries.getFirst().getSongCount());
+        assertTrue(playlists.findPersonalSummaries(other.getUsername()).isEmpty());
+        var result=new PersonalPlaylistService(playlists,songs,users).listSummaries(owner.getUsername()).getFirst();
+        assertEquals(1,result.songCount());assertFalse(result.globalPlaylist());
+        var json=new tools.jackson.databind.ObjectMapper().valueToTree(result);
+        assertFalse(json.has("songs"));assertFalse(json.has("owner"));
+    }
+
     @Test void discoveryReadsMetadataWithoutSerializingPlaylistContentsOrPrivateCollections() {
         var track=song();
         var publicList=new me.samulsz.musicapi.models.Playlist();publicList.setName("Fast discovery fixture");publicList.setGlobalPlaylist(true);publicList.setSongs(java.util.Set.of(track));

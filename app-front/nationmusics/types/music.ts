@@ -42,6 +42,7 @@ export type ApiSearchSong = {
 };
 
 export type ApiPlaylist = {
+  songCount?: number;
   id: number;
   name: string;
   description?: string;

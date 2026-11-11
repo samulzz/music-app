@@ -10,6 +10,7 @@ import { PresenceHeartbeat } from '../components/presence-heartbeat';
 import { EngagementNotifications } from '../components/engagement-notifications';
 import { PlaylistPicker } from '../components/playlist-picker';
 import { refreshAndroidAutoLibrary, setupMusicPlayer } from '../services/player';
+import { maintainMetadataCache } from '../services/metadata-cache';
 
 export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
   return <View style={{flex:1, backgroundColor:'#121212', justifyContent:'center', padding:28}}>
@@ -22,6 +23,7 @@ export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
 export default function RootLayout() {
   setupMusicPlayer();
   useEffect(() => {
+    void maintainMetadataCache();
     refreshAndroidAutoLibrary().catch(() => {});
   }, []);
 

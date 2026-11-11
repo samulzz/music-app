@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { metadataCache as AsyncStorage } from '../../services/metadata-cache';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 
@@ -130,7 +130,7 @@ export default function HomePlaylistsScreen() {
     const operation = (async () => {
       try {
       const [globalData, home] = await Promise.all([
-        apiRequest<ApiPlaylist[]>('/playlists/global', { authenticated: false }),
+        apiRequest<ApiPlaylist[]>('/playlists/global/summaries', { authenticated: false }),
         getPersonalizedHome().catch(() => null),
       ]);
       const dailyMix = home?.dailyMix || null;

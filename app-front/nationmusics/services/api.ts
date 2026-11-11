@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { metadataCache as AsyncStorage, maintainMetadataCache } from './metadata-cache';
 import NetInfo from '@react-native-community/netinfo';
 
 import { clearSession, getSession, getCachedSession } from './auth';
@@ -99,7 +99,9 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
 
   let response: Response | undefined;
   const method = String(request.method || 'GET').toUpperCase();
-  const cacheable = method === 'GET' && /^\/(songs\/(my-library|search|genre|artist)|playlists|catalog|recommendations\/(daily|liked))(?:[/?]|$)/.test(path);
+  const cacheable = method === 'GET' && !/^\/(catalog\/search|songs\/search)(?:[/?]|$)/.test(path)
+    && /^\/(songs\/(my-library|genre|artist)|playlists|catalog|recommendations\/(daily|liked))(?:[/?]|$)/.test(path);
+  void maintainMetadataCache();
   const cacheKey = cacheable ? `nationmusics.api-cache.${path}.account.${encodeURIComponent(requestOwner?.username || 'guest')}` : '';
   const cached = async () => {
     if (!cacheKey) return null;
@@ -119,7 +121,7 @@ export async function apiRequest<T>(path: string, options: ApiRequestOptions = {
     const abort = () => controller.abort();
     request.signal?.addEventListener('abort', abort);
     if (request.signal?.aborted) controller.abort();
-    const timeout = setTimeout(abort, timeoutMs || (cacheable ? 4000 : 6000));
+    const timeout = setTimeout(abort, timeoutMs || (method === 'GET' ? 4000 : 6000));
     try {
       response = await fetch(`${API_BASE_URL}${path}`, {
         ...request,

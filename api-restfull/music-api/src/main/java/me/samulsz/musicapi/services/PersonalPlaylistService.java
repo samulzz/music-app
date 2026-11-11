@@ -34,6 +34,12 @@ public class PersonalPlaylistService {
         return playlistRepository.findByOwnerUsernameOrderByIdDesc(username);
     }
 
+    public List<me.samulsz.musicapi.dto.PlaylistSearchResult> listSummaries(String username) {
+        return playlistRepository.findPersonalSummaries(username).stream().map(p -> new me.samulsz.musicapi.dto.PlaylistSearchResult(
+                p.getId(), p.getName(), p.getDescription(), p.getIconUrl(), false, p.getCollectionType(),
+                p.getSongCount().intValue(), null, null)).toList();
+    }
+
     public Playlist createPlaylist(String username, PlaylistRequest request) {
         User owner = getUser(username);
         Playlist playlist = new Playlist();

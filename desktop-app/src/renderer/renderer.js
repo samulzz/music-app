@@ -21,6 +21,8 @@ const state = {
   shuffleRemainingIndexes: [],
   recommendationContinuationInFlight: false,
   recommendationSeedingInFlight: false,
+  radioAnchor: null,
+  radioRetryAt: 0,
   recoveredSourceIds: new Set(),
   shuffle: false,
   shuffleNextIndex: -1,
@@ -617,6 +619,7 @@ function persistPlaybackSession() {
       positionSeconds: Number.isFinite(audio.currentTime) ? audio.currentTime : 0,
       wasPlaying: Boolean(audio.src && !audio.paused && !audio.ended),
       playbackContext: state.playbackContext,
+      radioAnchor: persistedSong(state.radioAnchor),
       volumeSliderValue: state.volumeSliderValue,
     }));
   } catch {
@@ -646,6 +649,7 @@ async function restorePersistedPlaybackSession() {
   state.queueMode = restored.queueMode === 'recommendations' ? 'recommendations' : 'selection';
   state.shuffle = Boolean(restored.shuffle);
   state.playbackContext = restored.playbackContext || null;
+  state.radioAnchor = restored.radioAnchor || queue[state.queueIndex];
   state.lastPlaybackActivityAt = Number(restored.lastPlayedAt) || 0;
   state.queueRevision += 1;
   state.pendingResumePosition = Math.max(0, Number(restored.positionSeconds) || 0);
@@ -1991,6 +1995,11 @@ function spotifyQuery(track) {
 
 async function resolvePlayableSong(song) {
   if (!song) throw new Error('Música inválida.');
+  if (navigator.onLine !== false && window.nation.resolveRecording) {
+    const previousSource = song.sourceId;
+    Object.assign(song, await window.nation.resolveRecording(song));
+    if (state.radioAnchor && (state.radioAnchor.sourceId === previousSource || state.radioAnchor.id === song.id)) state.radioAnchor = { ...song };
+  }
   if (song.sourceId) return song;
 
   const query = spotifyQuery(song);
@@ -3148,6 +3157,8 @@ function playQueue(songs, index, context = null, options = {}) {
   recommendationListening.reset();
   const playable = songs.filter((song) => song.sourceId || song.spotifyId || song.title);
   const selected = songs[index];
+  state.radioAnchor = selected;
+  state.radioRetryAt = 0;
   const selectedIdentity = songIdentity(selected);
   const actualIndex = playable.findIndex((song) => songIdentity(song) === selectedIdentity);
   if (actualIndex < 0) {
@@ -3185,16 +3196,21 @@ function playQueue(songs, index, context = null, options = {}) {
   })();
 }
 
-async function continueWithDailyRecommendations() {
+async function continueWithDailyRecommendations(advance = true) {
+  if (state.recommendationSeedingInFlight && state.recommendationSeedingRevision === state.queueRevision) return;
+  if (state.playbackContext?.type === 'offline' || (state.connectState && !state.connectState.currentDeviceActive)) return;
+  if (!advance && Date.now() < state.radioRetryAt) return;
   if (!['selection', 'recommendations'].includes(state.queueMode) || state.recommendationContinuationInFlight) return;
   const revision = state.queueRevision;
   const originalQueue = [...state.queue];
   state.recommendationContinuationInFlight = true;
   try {
-    const anchor = originalQueue[state.queueIndex];
+    const anchor = state.radioAnchor || originalQueue[state.queueIndex];
+    state.radioAnchor = anchor;
+    state.radioRetryAt = Date.now() + 15_000;
     const mix = { songs: await window.nation.getRadio(anchor, originalQueue.map(song => song.sourceId).filter(Boolean)) };
     if (revision !== state.queueRevision || !['selection', 'recommendations'].includes(state.queueMode)) return;
-    const existing = new Set(originalQueue.map(songIdentity));
+    const existing = new Set(originalQueue.slice(state.queueIndex).map(songIdentity));
     const additions = (mix.songs || []).filter((song) => {
       const identity = songIdentity(song);
       if (!identity || existing.has(identity)) return false;
@@ -3202,24 +3218,32 @@ async function continueWithDailyRecommendations() {
       return true;
     });
     if (!additions.length) {
-      audio.pause();
+      if (advance) audio.pause();
       return;
     }
     let recommended = additions.map((song, queueSequence) => ({ ...song, queueOrigin: 'recommendation', queueSequence }));
+    const shouldAdvance = advance || audio.ended;
     if (state.shuffle) recommended = shuffleSongs(recommended);
-    state.queue = [...originalQueue, ...recommended];
+    // Append to the live queue; never overwrite manual additions or move the current song.
+    state.queue = [...state.queue, ...recommended];
     state.queueHistory = [...state.queue];
-    state.queueIndex = originalQueue.length;
+    if (shouldAdvance) state.queueIndex = originalQueue.length;
+    if (state.queueIndex > 120) {
+      const remove = state.queueIndex - 120;
+      state.queue = state.queue.slice(remove);
+      state.queueIndex -= remove;
+      state.queueHistory = [...state.queue];
+    }
     state.queueRevision += 1;
     state.queueMode = 'recommendations';
-    state.playbackContext = null;
     state.shuffleNextIndex = -1;
     state.shuffleRemainingIndexes = [];
     schedulePersistPlaybackSession();
-    await loadCurrentTrack();
+    if (shouldAdvance) await loadCurrentTrack();
+    if (!$('#queue-panel')?.classList.contains('hidden')) renderQueuePanel();
     window.setTimeout(prefetchNextTracks, 600);
   } catch {
-    if (revision === state.queueRevision) audio.pause();
+    if (advance && revision === state.queueRevision) audio.pause();
   } finally {
     state.recommendationContinuationInFlight = false;
   }
@@ -3687,6 +3711,7 @@ audio.addEventListener('playing', clearWaitingTelemetryTimer);
 audio.addEventListener('canplay', clearWaitingTelemetryTimer);
 audio.addEventListener('stalled', () => reportPlaybackTelemetry('STALLED'));
 audio.addEventListener('timeupdate', () => {
+  if (!audio.paused && state.queue.length - state.queueIndex - 1 <= 5) void continueWithDailyRecommendations(false);
   if (!audio.paused && !audio.ended) state.lastPlaybackActivityAt = Date.now();
   sampleListeningStats();
   $('#current-time').textContent = formatTime(audio.currentTime);

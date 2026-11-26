@@ -1194,6 +1194,23 @@ ipcMain.handle('catalog:album-songs', async (_event, album) => {
   const songs = await apiRequest(`/catalog/albums/songs?${query.toString()}`);
   return songs.map((song) => normalizeSong(song, false));
 });
+const canonicalRecordings = new Map();
+ipcMain.handle('music:resolve-recording', async (_event, song) => {
+  const id = Number(song?.serverId || song?.id);
+  if (!Number.isSafeInteger(id) || id <= 0) return song;
+  try {
+    const cached = canonicalRecordings.get(id);
+    const rows = cached && cached.until > Date.now() ? [cached.song]
+      : await apiRequest(`/songs/recordings?ids=${id}`, { timeoutMs: 1500 });
+    const fresh = rows.find(row => Number(row.id) === id);
+    if (!fresh) return song;
+    if (canonicalRecordings.size >= 256) canonicalRecordings.delete(canonicalRecordings.keys().next().value);
+    canonicalRecordings.set(id, { song: fresh, until: Date.now() + 120_000 });
+    const changed = fresh.sourceId && song.sourceId !== fresh.sourceId;
+    return { ...song, ...normalizeSong(fresh, song.saved),
+      localUri: changed ? undefined : song.localUri, downloaded: changed ? false : song.downloaded };
+  } catch { return song; }
+});
 ipcMain.handle('music:prepare-stream', async (_event, rawSong) => {
   const song = normalizeSong(rawSong);
   if (!song.sourceId) throw new Error('Esta música não possui uma origem válida.');
@@ -1384,7 +1401,9 @@ ipcMain.handle('recommendations:daily', async () => {
 });
 ipcMain.handle('recommendations:radio', async (_event, song, excluded = []) => {
   const exclude = Array.isArray(excluded) ? excluded.slice(-200).join(',') : '';
-  const songs = await apiRequest(`/recommendations/radio?sourceId=${encodeURIComponent(song?.sourceId || '')}&limit=30&exclude=${encodeURIComponent(exclude)}`);
+  const load = omit => apiRequest(`/recommendations/radio?sourceId=${encodeURIComponent(song?.sourceId || '')}&limit=30&exclude=${encodeURIComponent(omit)}`);
+  let songs = await load(exclude);
+  if (!songs.length && excluded.length > 1) songs = await load(excluded.slice(-1).join(','));
   return songs.map(song => normalizeSong(song, false));
 });
 ipcMain.handle('recommendations:feedback-state', (_event, song) => apiRequest(`/recommendations/feedback?sourceId=${encodeURIComponent(song?.sourceId || '')}&songId=${Number(song?.serverId || song?.id) || ''}`));

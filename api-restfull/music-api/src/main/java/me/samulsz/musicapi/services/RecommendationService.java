@@ -164,7 +164,9 @@ public class RecommendationService {
             artists.merge(RecommendationRanking.artist(song), 2.0, Double::sum);
             song.getGenres().forEach(g -> genres.merge(normalizeGenre(g), 1.0, Double::sum));
         });
-        var catalog = CatalogIdentity.unique(songRepository.findAll().stream()
+        var allSongs = songRepository.findCatalogForDiscovery();
+        var languageContext = new RadioContext(allSongs);
+        var catalog = CatalogIdentity.unique(allSongs.stream()
                 .filter(s -> s.getSourceId() != null && !s.getSourceId().isBlank())
                 .filter(s -> musicService.hasPrecachedAudio(s.getSourceId()))
                 .filter(s -> anchor == null || !Objects.equals(s.getId(), anchor.getId()))
@@ -175,20 +177,17 @@ public class RecommendationService {
         if (anchor != null) {
             // Sparse/unclassified seeds can still have a real context: their album
             // or a collection that actually includes them. Never fall back to favorites.
-            var collections = new ArrayList<>(playlistRepository.findByGlobalPlaylistTrueOrderByIdDesc());
-            collections.addAll(playlistRepository.findByOwnerUsernameOrderByIdDesc(username));
-            collections.stream().filter(p -> p.getSongs().size() <= 500)
-                    .filter(p -> p.getSongs().stream().anyMatch(s -> Objects.equals(s.getId(), anchor.getId())))
-                    .forEach(p -> p.getSongs().forEach(s -> contextualPeers.add(s.getId())));
+            contextualPeers.addAll(playlistRepository.findRadioPeerIds(anchor.getId(), username));
             if (anchor.getAlbum() != null && !anchor.getAlbum().isBlank()) catalog.stream()
                     .filter(s -> CatalogIdentity.normalize(anchor.getAlbum()).equals(CatalogIdentity.normalize(s.getAlbum())))
                     .filter(s -> RecommendationRanking.artist(s).equals(RecommendationRanking.artist(anchor)))
                     .forEach(s -> contextualPeers.add(s.getId()));
-            var relatedGenres = new HashSet<String>(anchor.getGenres().stream().map(RecommendationRanking::key).toList());
+            var relatedGenres = new HashSet<String>(languageContext.effectiveGenres(anchor));
             if (relatedGenres.isEmpty()) catalog.stream()
                     .filter(song -> RecommendationRanking.artist(song).equals(RecommendationRanking.artist(anchor)))
                     .forEach(song -> song.getGenres().forEach(g -> relatedGenres.add(RecommendationRanking.key(g))));
-            catalog.removeIf(song -> RecommendationRanking.context(anchor, song) <= 0
+            catalog.removeIf(song -> !languageContext.compatible(anchor, song, contextualPeers));
+            catalog.removeIf(song -> languageContext.context(anchor, song) <= 0
                     && song.getGenres().stream().map(RecommendationRanking::key).noneMatch(relatedGenres::contains)
                     && !(relatedGenres.isEmpty() && contextualPeers.contains(song.getId())));
         } else if (sourceId != null && !sourceId.isBlank()) {
@@ -197,14 +196,14 @@ public class RecommendationService {
         long seed = java.util.concurrent.ThreadLocalRandom.current().nextLong();
         var variation = new HashMap<Long, Double>();
         var random = new Random(seed);
-        catalog.forEach(song -> variation.put(song.getId(), random.nextDouble() * 24));
+        catalog.forEach(song -> variation.put(song.getId(), random.nextDouble() * 65));
         catalog.sort(Comparator.comparingDouble((Song song) -> {
             var p = byId.get(song.getId());
             double personal = Math.max(-10, Math.min(20, artists.getOrDefault(RecommendationRanking.artist(song), 0.0) * 0.5))
                     + Math.max(-4, Math.min(15, song.getGenres().stream().mapToDouble(g -> genres.getOrDefault(normalizeGenre(g), 0.0)).sum() * 0.2));
             double own = p == null ? 3 : RecommendationRanking.strength(p, now) * 0.3;
             double recent = p != null && p.getLastListenedAt() != null && p.getLastListenedAt().isAfter(now.minusHours(8)) ? 9 : 0;
-            return RecommendationRanking.context(anchor, song) + personal * 0.2 + own * 0.2 - recent
+            return languageContext.context(anchor, song) + personal * 0.2 + own * 0.2 - recent
                     + (contextualPeers.contains(song.getId()) ? 25 : 0)
                     + variation.get(song.getId());
         }).reversed().thenComparing(Song::getId));

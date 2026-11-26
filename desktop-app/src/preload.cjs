@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('nation', {
   getSession: () => ipcRenderer.invoke('session:get'),
+  resolveRecording: (song) => ipcRenderer.invoke('music:resolve-recording', song),
   login: (credentials) => ipcRenderer.invoke('auth:login', credentials),
   register: (credentials) => ipcRenderer.invoke('auth:register', credentials),
   logout: () => ipcRenderer.invoke('auth:logout'),

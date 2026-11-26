@@ -26,6 +26,12 @@ public class SongController {
         return ResponseEntity.ok(Map.of("totalSongs", songRepository.count()));
     }
 
+    @GetMapping("/recordings")
+    public ResponseEntity<?> recordings(@RequestParam java.util.List<Long> ids) {
+        if (ids.size() > 250) return ResponseEntity.badRequest().body("Limite de 250 músicas.");
+        return ResponseEntity.ok(songRepository.findAllById(ids));
+    }
+
     @PostMapping("/save")
     public ResponseEntity<?> saveSong(Authentication authentication, @RequestBody SongRequest request) {
         try {

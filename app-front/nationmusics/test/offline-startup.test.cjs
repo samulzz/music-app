@@ -14,7 +14,7 @@ function harness(queueIndex) {
     {song: {id: '2', title:'Local', sourceId:'local', localUri:'file:///valid.mp3'}},
   ]};
   const context = {
-    playbackSessionRestoring: false, playbackQueueRevision: 0, playbackContext: null,
+    playbackSessionRestoring: false, playbackQueueRevision: 0, playbackContext: null, radioAnchor: null,
     PLAYBACK_SESSION_KEY: 'session', PLAYBACK_SESSION_MAX_AGE_MS: 100000,
     AsyncStorage: {getItem: async () => JSON.stringify(session)},
     getSession: async () => ({username:'alice'}), playbackLastPlayedAt:0,

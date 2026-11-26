@@ -138,6 +138,10 @@ public class PlaylistAdminService {
             song = new Song();
         }
 
+        boolean preserveRecording = song.getId() != null && song.getSourceId() != null
+                && sourceId != null && !song.getSourceId().equals(sourceId)
+                && !Boolean.TRUE.equals(request.getReplaceRecording());
+
         if (title != null) song.setTitle(title);
         if (artist != null) song.setArtist(artist);
 
@@ -151,10 +155,10 @@ public class PlaylistAdminService {
         if (coverUrl != null) song.setCoverUrl(coverUrl);
 
         String uri = safeTrim(request.getUri());
-        if (uri != null) song.setUri(uri);
+        if (uri != null && !preserveRecording) song.setUri(uri);
 
-        if (sourceId != null) song.setSourceId(sourceId);
-        if (request.getExpectedDurationMs() != null) song.setExpectedDurationMs(request.getExpectedDurationMs());
+        if (sourceId != null && !preserveRecording) song.setSourceId(sourceId);
+        if (request.getExpectedDurationMs() != null && !preserveRecording) song.setExpectedDurationMs(request.getExpectedDurationMs());
 
         if (request.getGenres() != null) {
             Set<String> genres = new LinkedHashSet<>(song.getGenres());

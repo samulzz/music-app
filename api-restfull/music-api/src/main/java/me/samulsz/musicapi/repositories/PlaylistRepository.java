@@ -9,6 +9,13 @@ import java.util.Optional;
 
 @Repository
 public interface PlaylistRepository extends JpaRepository<Playlist, Long> {
+    @org.springframework.data.jpa.repository.Query("""
+            select distinct peer.id from Playlist p left join p.owner owner join p.songs seed join p.songs peer
+            where seed.id = :songId and (p.globalPlaylist = true or owner.username = :username)
+            and size(p.songs) <= 500
+            """)
+    List<Long> findRadioPeerIds(@org.springframework.data.repository.query.Param("songId") Long songId,
+                               @org.springframework.data.repository.query.Param("username") String username);
     interface DiscoverySummary {
         Long getId(); String getName(); String getDescription(); String getIconUrl();
         String getCollectionType(); Long getSongCount(); String getAlbumArtist(); String getArtist();

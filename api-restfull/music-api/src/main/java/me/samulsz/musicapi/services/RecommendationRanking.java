@@ -34,9 +34,15 @@ final class RecommendationRanking {
 
     static double context(Song anchor, Song candidate) {
         if (anchor == null) return 0;
-        double score = !artist(anchor).isBlank() && artist(anchor).equals(artist(candidate)) ? 55 : 0;
+        var anchorArtists = artists(anchor);
+        double score = artists(candidate).stream().anyMatch(anchorArtists::contains) ? 55 : 0;
         var genres = new HashSet<>(anchor.getGenres().stream().map(RecommendationRanking::key).toList());
         return score + candidate.getGenres().stream().map(RecommendationRanking::key).filter(genres::contains).count() * 45;
+    }
+
+    static Set<String> artists(Song song) {
+        return Arrays.stream(Objects.toString(song.getArtist(), "").split("(?i)\\s*(?:,|\\bfeat\\.?|\\bft\\.?|&)\\s*"))
+                .map(RecommendationRanking::key).filter(s -> !s.isBlank()).collect(java.util.stream.Collectors.toSet());
     }
 
     static List<Song> diversify(List<Song> ranked, int limit, int artistLimit) {

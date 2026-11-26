@@ -16,6 +16,7 @@ import { apiRequest, getMediaHeaders, deviceIsOffline } from './api';
 import { musicDownloadUrl, musicPreparePath } from './config';
 import { mergeWithOfflineLibrary, getOfflineLibrary } from './offline-library';
 import { getRadioSongs } from './recommendations';
+import { refreshRecordings } from './recordings';
 import { sortSongsAlphabetically } from './song-order';
 import { getLatestConnectState, markConnectRevisionProcessed, takeOverConnectPlayback, publishConnectState } from './connect';
 import type { PlaybackContext } from './connect';
@@ -35,6 +36,8 @@ let lastShuffleEnabled = false;
 let recommendationAppendInFlight: Promise<void> | null = null;
 let recommendationSeedInFlight: Promise<void> | null = null;
 let recommendationSeedRevision = -1;
+let radioAnchor: MusicSong | undefined;
+let radioRetryAt = 0;
 let playbackRecoveryInFlight: Promise<void> | null = null;
 const lastRecoveryAt = new Map<string, number>();
 let playbackQueueRevision = 0;
@@ -53,6 +56,7 @@ type PersistedPlaybackItem = {
 };
 
 type PersistedPlaybackSession = {
+  radioAnchor?: MusicSong;
   username: string;
   lastPlayedAt: number;
   savedAt: number;
@@ -108,6 +112,7 @@ async function persistPlaybackSessionNow() {
     volume: Math.max(0, Math.min(1, Number(TrackPlayer.getVolume()) || 0)),
     shuffle: lastShuffleEnabled,
     context: playbackContext,
+    radioAnchor,
   };
   await AsyncStorage.setItem(`${PLAYBACK_SESSION_KEY}.account.${encodeURIComponent(owner.username)}`, JSON.stringify(session));
 }
@@ -129,7 +134,8 @@ async function restorePersistedPlaybackSession(expectedRevision: number) {
     if (!session || session.username !== owner.username || Date.now() - Number(session.savedAt || 0) > PLAYBACK_SESSION_MAX_AGE_MS) return;
     if (expectedRevision !== playbackQueueRevision || TrackPlayer.getQueue().length || !Array.isArray(session.queue) || !session.queue.length) return;
     const offline = await deviceIsOffline();
-    const restoredSongs = await mergeWithOfflineLibrary(session.queue.map(({ song }) => song));
+    const savedSongs = session.queue.map(({ song }) => song);
+    const restoredSongs = await mergeWithOfflineLibrary(offline ? savedSongs : await refreshRecordings(savedSongs));
     session.queue = session.queue.map((entry, index) => ({ ...entry, song: restoredSongs[index] || entry.song }));
     if (offline) {
       const active = session.queue[Math.max(0, Math.min(session.queue.length - 1, Number(session.queueIndex) || 0))];
@@ -154,6 +160,7 @@ async function restorePersistedPlaybackSession(expectedRevision: number) {
     const index = Math.max(0, Math.min(items.length - 1, Number(session.queueIndex) || 0));
     playbackQueueRevision += 1;
     playbackContext = session.context || null;
+    radioAnchor = session.radioAnchor || session.queue[session.queueIndex]?.song;
     playbackLastPlayedAt = Number(session.lastPlayedAt) || 0;
     emitShuffleEnabled(Boolean(session.shuffle));
     applyPlaybackVolume(session.volume);
@@ -405,6 +412,8 @@ export function setupMusicPlayer() {
     const item = TrackPlayer.getActiveMediaItem();
     sampleListening(item ? mediaItemSourceId(item) : '', TrackPlayer.getProgress().position, TrackPlayer.isPlaying());
     if (item && TrackPlayer.isPlaying()) {
+      const index = TrackPlayer.getActiveMediaItemIndex();
+      if (index !== null && TrackPlayer.getQueue().length - index - 1 <= 5) void continueWithDailyRecommendations(playbackQueueRevision);
       playbackLastPlayedAt = Date.now();
       schedulePersistPlaybackSession(5000);
     }
@@ -582,19 +591,26 @@ function prefetchNextInQueue(currentIndex = TrackPlayer.getActiveMediaItemIndex(
 }
 
 async function continueWithDailyRecommendations(expectedRevision: number) {
+  if (recommendationSeedInFlight && recommendationSeedRevision === expectedRevision) return;
+  if (playbackContext?.type === 'offline' || (Date.now() < radioRetryAt && TrackPlayer.getPlaybackState() !== PlaybackState.Ended)) return;
+  const connect = getLatestConnectState();
+  if (connect && !connect.currentDeviceActive) return;
   if (recommendationAppendInFlight) return recommendationAppendInFlight;
   recommendationAppendInFlight = (async () => {
     try {
       const endedQueue = TrackPlayer.getQueue();
-      const anchorItem = endedQueue[endedQueue.length - 1];
-      const anchor = anchorItem ? telemetrySong(anchorItem) : undefined;
+      const anchorItem = endedQueue[TrackPlayer.getActiveMediaItemIndex() ?? endedQueue.length - 1];
+      const anchor = radioAnchor || (anchorItem ? telemetrySong(anchorItem) : undefined);
+      if (!anchor) return;
+      radioAnchor = anchor;
+      radioRetryAt = Date.now() + 15_000;
       const candidates = await mergeWithOfflineLibrary(await deviceIsOffline()
         ? shuffled((await getOfflineLibrary()).filter(song => anchor && recommendationAffinity(anchor, song) > 0))
         : await getRadioSongs(anchor, endedQueue.map(item => mediaItemSourceId(item))));
       const dailySongs = await deviceIsOffline() ? candidates.filter(song => song.localUri) : candidates;
-      if (expectedRevision !== playbackQueueRevision || TrackPlayer.getPlaybackState() !== PlaybackState.Ended) return;
+      if (expectedRevision !== playbackQueueRevision) return;
       const existing = new Set(
-        endedQueue.map((item) => mediaItemSourceId(item) || String(item.mediaId || ''))
+        endedQueue.slice(TrackPlayer.getActiveMediaItemIndex() ?? 0).map((item) => mediaItemSourceId(item) || String(item.mediaId || ''))
       );
       const needsNetwork = dailySongs.some((song) => !song.localUri && (song.sourceId || song.remoteUrl));
       const headers = needsNetwork ? await getMediaHeaders() : undefined;
@@ -607,15 +623,17 @@ async function continueWithDailyRecommendations(expectedRevision: number) {
         })
         .map((song) => toMediaItem(song, headers, 'recommendation'))
         .filter((item): item is MediaItem => item !== null);
-      if (expectedRevision !== playbackQueueRevision || TrackPlayer.getPlaybackState() !== PlaybackState.Ended) return;
+      if (expectedRevision !== playbackQueueRevision) return;
       if (additions.length) {
+        const ended = TrackPlayer.getPlaybackState() === PlaybackState.Ended;
         const arranged = lastShuffleEnabled ? shuffled(additions) : additions;
         const firstRecommendationIndex = endedQueue.length;
         playbackQueueRevision += 1;
         TrackPlayer.addMediaItems(arranged);
-        TrackPlayer.skipToIndex(firstRecommendationIndex);
-        TrackPlayer.play();
-        prefetchNextInQueue(firstRecommendationIndex);
+        if (ended) { TrackPlayer.skipToIndex(firstRecommendationIndex); TrackPlayer.play(); }
+        const active = TrackPlayer.getActiveMediaItemIndex() ?? 0;
+        if (active > 120) TrackPlayer.removeMediaItems(0, active - 120);
+        prefetchNextInQueue(TrackPlayer.getActiveMediaItemIndex());
         schedulePersistPlaybackSession();
       }
     } catch {
@@ -646,8 +664,12 @@ export async function playSongQueue(
 ) {
   setupMusicPlayer();
   const requestRevision = ++playbackQueueRevision;
+  songs = await refreshRecordings(songs);
+  if (requestRevision !== playbackQueueRevision) return TrackPlayer.getActiveMediaItemIndex() ?? 0;
   if (autoplay) playbackLastPlayedAt = Date.now();
   const requested = songs[requestedIndex];
+  radioAnchor = requested;
+  radioRetryAt = 0;
   const requestedIdentity = requested?.sourceId || requested?.id;
   if (await deviceIsOffline()) publishConnectState(null);
   if (!connectCommand && !getLatestConnectState()?.currentDeviceActive && !(await deviceIsOffline())) {

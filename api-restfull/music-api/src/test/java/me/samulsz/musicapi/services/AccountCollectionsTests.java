@@ -22,6 +22,17 @@ class AccountCollectionsTests {
     @Autowired RecentSearchService recentSearch;
     @Autowired me.samulsz.musicapi.repositories.PlaylistRepository playlists;
 
+    @Test void radioPeersIncludePublicOwnerlessCollectionsButNeverAnotherUsersPrivatePlaylist() {
+        User owner=user("radio-owner"),other=user("radio-other");Song seed=song();
+        Song publicPeer=new Song();publicPeer.setTitle("Public peer");publicPeer.setSourceId("public-peer");songs.saveAndFlush(publicPeer);
+        Song privatePeer=new Song();privatePeer.setTitle("Private peer");privatePeer.setSourceId("private-peer");songs.saveAndFlush(privatePeer);
+        var global=new me.samulsz.musicapi.models.Playlist();global.setName("Global radio");global.setGlobalPlaylist(true);global.setSongs(java.util.Set.of(seed,publicPeer));playlists.saveAndFlush(global);
+        var personal=new me.samulsz.musicapi.models.Playlist();personal.setName("Private radio");personal.setGlobalPlaylist(false);personal.setOwner(owner);personal.setSongs(java.util.Set.of(seed,privatePeer));playlists.saveAndFlush(personal);
+        assertTrue(playlists.findRadioPeerIds(seed.getId(),other.getUsername()).contains(publicPeer.getId()));
+        assertFalse(playlists.findRadioPeerIds(seed.getId(),other.getUsername()).contains(privatePeer.getId()));
+        assertTrue(playlists.findRadioPeerIds(seed.getId(),owner.getUsername()).contains(privatePeer.getId()));
+    }
+
     @Test void lightweightPersonalSummariesArePrivateAndNeverContainEmbeddedSongs() {
         User owner=user("summary-owner"),other=user("summary-other");Song track=song();
         var playlist=new me.samulsz.musicapi.models.Playlist();playlist.setName("Private summary");playlist.setOwner(owner);playlist.setGlobalPlaylist(false);playlist.setSongs(java.util.Set.of(track));

@@ -1,28 +1,28 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-11T18:44:54.000Z",
+  "generatedAt": "2026-11-26T22:16:54.000Z",
   "android": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.1.49",
-    "versionCode": 51,
-    "minimumVersion": "1.1.49",
-    "minimumVersionCode": 51,
-    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.49.apk",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.49.apk",
-    "sha256": "f7c488102a3e9d68b924afa40f6a00f4bcd62502e32e2b185b88d6078461b9e1",
+    "version": "1.1.50",
+    "versionCode": 52,
+    "minimumVersion": "1.1.50",
+    "minimumVersionCode": 52,
+    "url": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.50.apk",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/nationmusics-1.1.50.apk",
+    "sha256": "1e83cbc551823273eaf9569d096e8e6ff72dae466177d2a87aa56ac874ba2519",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Correção do SQLite cheio: cache temporário limitado fora do banco, migração preservando downloads e biblioteca mais leve."
+    "releaseNotes": "Fila contínua em lotes relacionados, mais variedade entre sessões e correção de referências a gravações antigas."
   },
   "desktop": {
     "enabled": true,
     "mandatory": true,
-    "version": "1.2.51",
-    "minimumVersion": "1.2.51",
-    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.51.exe",
-    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.51.exe",
-    "sha256": "92e9a53dffde4399243516fe226ca430188b8d1a2be4630579b99181e309ccb7",
+    "version": "1.2.52",
+    "minimumVersion": "1.2.52",
+    "url": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.52.exe",
+    "versionedUrl": "https://marlonbarbershop.com/nationmusics/download/NationMusics-Setup-1.2.52.exe",
+    "sha256": "1874f9ef650866eb09d15b43f8c42b2bbb508345940cadf9bdfdc04e07d3572e",
     "message": "Baixe a versao mais recente para continuar usando o NationMusics.",
-    "releaseNotes": "Busca offline somente nas músicas baixadas neste PC, cancelamento de consultas antigas e busca online sem esperar a biblioteca da conta."
+    "releaseNotes": "Fila contínua em lotes sem interromper a música, contexto da faixa escolhida e atualização de gravações corrigidas."
   }
 }

@@ -38,8 +38,8 @@ class RecommendationServiceTests {
         var unrelated=new Song(); unrelated.setId(3L); unrelated.setSourceId("unrelated"); unrelated.setTitle("Favorite"); unrelated.setArtist("Favorite artist");
         var collection=new me.samulsz.musicapi.models.Playlist(); collection.setSongs(new HashSet<>(List.of(seed,peer)));
         when(users.findByUsername("listener")).thenReturn(Optional.of(user));
-        when(songs.findBySourceId("seed")).thenReturn(Optional.of(seed)); when(songs.findAll()).thenReturn(List.of(seed,peer,unrelated));
-        when(playlists.findByOwnerUsernameOrderByIdDesc("listener")).thenReturn(List.of(collection));
+        when(songs.findBySourceId("seed")).thenReturn(Optional.of(seed)); when(songs.findCatalogForDiscovery()).thenReturn(List.of(seed,peer,unrelated));
+        when(playlists.findRadioPeerIds(1L,"listener")).thenReturn(List.of(1L,2L));
         var music=mock(MusicService.class); when(music.hasPrecachedAudio(any())).thenReturn(true);
         var service=new RecommendationService(users,songs,playlists,prefs,mock(DailyMixRepository.class),mock(AccountPlaybackRepository.class),music);
         assertEquals(List.of(2L),service.radio("listener","seed",30).stream().map(Song::getId).toList());
@@ -55,7 +55,7 @@ class RecommendationServiceTests {
         }
         var favorite=new PlaybackPreference();favorite.setSong(catalog.get(69));favorite.setLiked(true);favorite.setPlayCount(1000);
         when(users.findByUsername("listener")).thenReturn(Optional.of(user));when(songs.findBySourceId("src1")).thenReturn(Optional.of(catalog.getFirst()));
-        when(songs.findAll()).thenReturn(catalog);when(prefs.findByUserIdOrderByLastListenedAtDesc(7L)).thenReturn(List.of(favorite));
+        when(songs.findCatalogForDiscovery()).thenReturn(catalog);when(prefs.findByUserIdOrderByLastListenedAtDesc(7L)).thenReturn(List.of(favorite));
         var music=mock(MusicService.class);when(music.hasPrecachedAudio(any())).thenReturn(true);
         var service=new RecommendationService(users,songs,mock(PlaylistRepository.class),prefs,mock(DailyMixRepository.class),mock(AccountPlaybackRepository.class),music);
         var sessions=new java.util.HashSet<List<Long>>();
@@ -81,7 +81,7 @@ class RecommendationServiceTests {
         var blocked = new PlaybackPreference(); blocked.setSong(catalog.get(2)); blocked.setDoNotRecommend(true);
         when(users.findByUsername("ouvinte")).thenReturn(Optional.of(user));
         when(songs.findBySourceId("source-1")).thenReturn(Optional.of(catalog.getFirst()));
-        when(songs.findAll()).thenReturn(catalog);
+        when(songs.findCatalogForDiscovery()).thenReturn(catalog);
         when(preferences.findByUserIdOrderByLastListenedAtDesc(7L)).thenReturn(List.of(blocked));
         when(music.hasPrecachedAudio(any())).thenAnswer(i -> !"source-5".equals(i.getArgument(0)));
         var service = new RecommendationService(users, songs, playlists, preferences, mixes, playback, music);

@@ -606,7 +606,7 @@ export async function mergeWithOfflineLibrary(songs: MusicSong[], offlineSongs?:
     const song = songs[index];
     const offline = offlineLookupKeys(song)
       .map((key) => offlineByKey.get(key))
-      .find(Boolean);
+      .find(candidate => candidate && (!song.sourceId || !candidate.sourceId || song.sourceId === candidate.sourceId));
 
     if (!offline) {
       // Old concurrent index writes could lose an entry, not its actual MP3.
@@ -628,6 +628,7 @@ export async function mergeWithOfflineLibrary(songs: MusicSong[], offlineSongs?:
       title: song.title || offline.title,
       artist: song.artist || offline.artist,
       artworkUrl: song.artworkUrl || offline.artworkUrl,
+      genres: song.genres?.length ? song.genres : offline.genres,
     });
   }
   return merged;

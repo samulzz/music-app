@@ -10,6 +10,9 @@ public class SongRequest {
     private String uri;
     private String coverUrl;
     private String sourceId;
+    private Boolean replaceRecording;
+    public Boolean getReplaceRecording() { return replaceRecording; }
+    public void setReplaceRecording(Boolean value) { replaceRecording = value; }
     private Set<String> genres;
     private Integer expectedDurationMs;
     public Integer getExpectedDurationMs() { return expectedDurationMs; }

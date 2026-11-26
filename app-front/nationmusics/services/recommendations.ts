@@ -49,7 +49,10 @@ export async function getDailyMixSongs(): Promise<MusicSong[]> {
 }
 
 export async function getRadioSongs(anchor?: Pick<MusicSong, 'sourceId'>, excluded: string[] = []): Promise<MusicSong[]> {
-  const songs = await apiRequest<ApiLibrarySong[]>(`/recommendations/radio?sourceId=${encodeURIComponent(anchor?.sourceId || '')}&limit=30&exclude=${encodeURIComponent(excluded.slice(-200).join(','))}`);
+  const load = (omit: string[]) => apiRequest<ApiLibrarySong[]>(`/recommendations/radio?sourceId=${encodeURIComponent(anchor?.sourceId || '')}&limit=30&exclude=${encodeURIComponent(omit.slice(-200).join(','))}`);
+  let songs = await load(excluded);
+  // Once the related catalogue is exhausted, allow older tracks back, not other genres.
+  if (!songs.length && excluded.length > 1) songs = await load(excluded.slice(-1));
   return songs.map(fromApiLibrarySong);
 }
 

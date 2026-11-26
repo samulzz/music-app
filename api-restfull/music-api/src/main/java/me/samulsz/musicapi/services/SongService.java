@@ -34,9 +34,14 @@ public class SongService {
         }
 
         if (song == null) {
+            song = songRepository.findFirstByTitleIgnoreCaseAndArtistIgnoreCase(request.getTitle(), request.getArtist()).orElse(null);
+        }
+        if (song == null) {
             song = new Song();
         }
 
+        // Saving to a personal library cannot overwrite a curated global recording.
+        if (song.getId() == null) {
         song.setTitle(request.getTitle());
         song.setArtist(request.getArtist());
         if (request.getAlbum() != null && !request.getAlbum().isBlank()) song.setAlbum(request.getAlbum().trim());
@@ -48,6 +53,7 @@ public class SongService {
             song.setSourceId(request.getSourceId());
         }
         mergeGenres(song, request.getGenres());
+        }
 
         song = songRepository.save(song);
 
